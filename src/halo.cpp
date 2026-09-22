@@ -3822,19 +3822,51 @@ bool BenqHalo::scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len
       s[i] = shift ? (uint8_t)(hi | lo) : buf[i];
     }
 
-    for (uint8_t p = 0; p + 18 <= len; p++) {
+    // La longueur du payload n'est pas connue. Le rapport FCC donne une trame
+    // d'environ onze octets pour le Halo 1, contre dix-neuf pour le Halo 2 :
+    // il ne reste donc que deux a quatre octets de payload. On essaie ces
+    // longueurs-la en plus de celle du Halo 2.
+    const uint8_t lengths[5] = {2, 3, 4, 6, 10};
+
+    for (uint8_t p = 0; p < len; p++) {
       if (s[p] != 0xAA && s[p] != 0x55) continue;
 
-      const uint8_t *air = &s[p + 1];   // les quatre octets d'adresse, sur l'air
-      const uint8_t pcf = s[p + 5];
-      const uint8_t *payload = &s[p + 6];
-      const uint16_t got = (uint16_t)((s[p + 16] << 8) | s[p + 17]);
+      for (uint8_t li = 0; li < 5; li++) {
+        const uint8_t plen = lengths[li];
+        // preambule(1) + adresse(4) + PCF(1) + payload + CRC(2)
+        if ((uint16_t)p + 8 + plen > len) continue;
 
-      const uint16_t wantA = frameCrcFor(air, pcf, payload);
-      const uint16_t wantB = crcOverFrame(0x5042, pcf, payload);
-      if (got != wantA && got != wantB) continue;
+        const uint8_t *air = &s[p + 1];  // les quatre octets d'adresse, sur l'air
+        const uint8_t pcf = s[p + 5];
+        const uint8_t *payload = &s[p + 6];
+        const uint16_t got = (uint16_t)((s[p + 6 + plen] << 8) | s[p + 7 + plen]);
 
-      found = true;
+        uint16_t wantA = frameCrcFor(air, pcf, payload);
+        uint16_t wantB = crcOverFrame(0x5042, pcf, payload);
+        if (plen != 10) {
+          // Recalculer sur la longueur reelle plutot que sur dix octets.
+          auto feed = [](uint16_t crc, uint8_t b) {
+            crc ^= (uint16_t)b << 8;
+            for (uint8_t i = 0; i < 8; i++)
+              crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+            return crc;
+          };
+          uint16_t a = 0xEFDF;
+          for (uint8_t i = 0; i < 4; i++) a = feed(a, air[i]);
+          a = feed(a, pcf);
+          uint16_t b = feed(0x5042, pcf);
+          for (uint8_t i = 0; i < plen; i++) {
+            a = feed(a, payload[i]);
+            b = feed(b, payload[i]);
+          }
+          wantA = a;
+          wantB = b;
+        }
+        if (got != wantA && got != wantB) continue;
+
+        snprintf(line, sizeof(line), "      payload de %u octet(s)", (unsigned)plen);
+        out.println(line);
+        found = true;
       snprintf(line, sizeof(line), "  *** ADRESSE CONFIRMEE PAR CRC  (%s)", context);
       out.println(line);
       snprintf(line, sizeof(line), "      sur l'air        : %02X %02X %02X %02X", air[0], air[1],
@@ -3843,15 +3875,16 @@ bool BenqHalo::scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len
       snprintf(line, sizeof(line), "      a saisir         : addr %02X%02X%02X%02X", air[3], air[2],
                air[1], air[0]);
       out.println(line);
-      int n = snprintf(line, sizeof(line), "      PCF %02X, payload", pcf);
-      for (uint8_t i = 0; i < 10; i++)
-        n += snprintf(line + n, sizeof(line) - n, " %02X", payload[i]);
-      out.println(line);
-      snprintf(line, sizeof(line), "      CRC %04X, modele %s", got,
-               (got == wantA) ? "A (adresse couverte)" : "B (adresse non couverte)");
-      out.println(line);
-      Serial.flush();
-      return true;
+        int n = snprintf(line, sizeof(line), "      PCF %02X, payload", pcf);
+        for (uint8_t i = 0; i < plen; i++)
+          n += snprintf(line + n, sizeof(line) - n, " %02X", payload[i]);
+        out.println(line);
+        snprintf(line, sizeof(line), "      CRC %04X, modele %s", got,
+                 (got == wantA) ? "A (adresse couverte)" : "B (adresse non couverte)");
+        out.println(line);
+        Serial.flush();
+        return true;
+      }
     }
   }
   return found;
@@ -4174,6 +4207,10 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
   uint32_t best = 0, bestStrong = 0, bestStrongChecks = 1, totalStrong = 0, totalChecks = 1;
   uint8_t bestChannel = 0, bestStrongChannel = 0;
   uint8_t hits = 0;
+  static uint32_t edgesPerChannel[84];
+  static uint32_t strongPerChannel[84];
+  memset(edgesPerChannel, 0, sizeof(edgesPerChannel));
+  memset(strongPerChannel, 0, sizeof(strongPerChannel));
 
   for (uint16_t ch = from; ch <= to; ch++) {
     channel_ = (uint8_t)ch;
@@ -4199,15 +4236,14 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
       checks++;
     }
 
-    if (edges > 50) {
-      hits++;
-      snprintf(line, sizeof(line),
-               "  canal %-2u = %u MHz : %lu transitions, signal fort %lu/%lu   <<<",
-               (unsigned)ch, (unsigned)(2400 + ch), (unsigned long)edges, (unsigned long)strong,
-               (unsigned long)checks);
-      out.println(line);
-      Serial.flush();
+    // Memoriser tous les canaux : un seuil d'affichage masquerait une source a
+    // faible rapport cyclique. La telecommande n'emet qu'environ 1 % du temps,
+    // soit une trentaine de fronts par canal la ou la balise en donne 434.
+    if (ch - from < 84) {
+      edgesPerChannel[ch - from] = edges;
+      strongPerChannel[ch - from] = strong;
     }
+    if (edges > 50) hits++;
     if (edges > best) {
       best = edges;
       bestChannel = (uint8_t)ch;
@@ -4228,6 +4264,25 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
   radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
   channel_ = savedChannel;
 
+  // Les cinq meilleurs canaux par nombre de fronts, sans aucun seuil.
+  out.println("  Cinq meilleurs canaux par transitions, sans seuil :");
+  for (uint8_t rank = 0; rank < 5; rank++) {
+    uint8_t bestIdx = 0xFF;
+    uint32_t bestEdges = 0;
+    for (uint16_t i = 0; i <= (uint16_t)(to - from) && i < 84; i++)
+      if (edgesPerChannel[i] > bestEdges) {
+        bestEdges = edgesPerChannel[i];
+        bestIdx = (uint8_t)i;
+      }
+    if (bestIdx == 0xFF) break;
+    snprintf(line, sizeof(line), "    canal %-2u = %u MHz : %lu transitions, signal fort %lu",
+             (unsigned)(from + bestIdx), (unsigned)(2400 + from + bestIdx),
+             (unsigned long)bestEdges, (unsigned long)strongPerChannel[bestIdx]);
+    out.println(line);
+    edgesPerChannel[bestIdx] = 0;
+  }
+  Serial.flush();
+
   out.println();
   snprintf(line, sizeof(line),
            "  Canal le plus bruyant : %u (%u MHz), signal fort %lu/%lu.",
@@ -4238,7 +4293,7 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
            (unsigned long)(totalStrong * 1000UL / totalChecks));
   out.println(line);
   out.println();
-  if (best > 50) {
+  if (best > 20) {
     snprintf(line, sizeof(line), "  Meilleur canal : %u (%u MHz), %lu transitions.",
              (unsigned)bestChannel, (unsigned)(2400 + bestChannel), (unsigned long)best);
     out.println(line);
@@ -4250,6 +4305,239 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
     out.println("  etait present, la puce ne reconnait le preambule de cette");
     out.println("  source nulle part sur la bande, a ce debit. Essaie les deux");
     out.println("  autres debits avant de conclure.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  La sequence du pilote qui recoit vraiment
+// ---------------------------------------------------------------------------
+
+void BenqHalo::sweepChannelsPico(Print &out, uint8_t from, uint8_t to, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+  if (to > 83) to = 83;
+  if (from > to) from = 0;
+
+  out.println();
+  out.println("=== Balayage avec la sequence du pilote tiers ===");
+  out.println("  Notre banc prouve que notre emetteur et notre recepteur");
+  out.println("  s'accordent -- il ne prouve pas qu'ils sont regles comme une");
+  out.println("  vraie BenQ. Une erreur commune aux deux passerait inapercue.");
+  out.println();
+  out.println("  On reprend donc ici la sequence exacte du pilote qui recoit");
+  out.println("  reellement d'une Halo : AUCUN reset logiciel, et aucune des");
+  out.println("  valeurs recommandees de banque 1 et 2. La puce garde l'etat");
+  out.println("  qu'elle a en sortant de sa mise sous tension.");
+  snprintf(line, sizeof(line), "  Canaux %u a %u, %lu ms chacun, 125 kbps.", (unsigned)from,
+           (unsigned)to, (unsigned long)dwellMs);
+  out.println(line);
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER.");
+  out.println();
+  Serial.flush();
+
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+  uint32_t best = 0;
+  uint8_t bestChannel = 0;
+
+  for (uint16_t ch = from; ch <= to; ch++) {
+    // Sequence de Termina1, a l'identique, sans reset logiciel.
+    radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, 0x48);
+    radio.command(CMD_LIGHT_SLEEP);
+    delayMicroseconds(1000);
+    radio.setBank(0);
+
+    uint8_t mk = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+    radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mk | 0x01));
+    const uint8_t rc1 = radio.readRegister(REG_RC1 | CMD_READ_REGISTER);
+    if (rc1 & 0x80) radio.writeRegister(REG_RC1 | CMD_WRITE_REGISTER, (uint8_t)(rc1 & 0x7F));
+
+    radio.command(CMD_LIGHT_SLEEP);
+    radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, 0x48);
+    radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, (uint8_t)ch);
+    radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, 0x82);  // 125 kbps, adresse 4 octets
+    radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, kCalRegAddr, 4);
+    radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x01);
+    radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x04);
+    radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x20);
+    radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x3F);
+
+    // Puis son chemin de reception : PRM_RX a 1 et entree en RX.
+    mk = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+    radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mk | 0x01));
+    radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER,
+                        (uint8_t)((radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0) | 14));
+    radio.clearInterrupts();
+    radio.command(CMD_FLUSH_RX_FIFO);
+    radio.command(CMD_RX_MODE);
+
+    pinMode(PIN_GIO3_TAP, INPUT);
+    uint32_t edges = 0, strong = 0, checks = 0;
+    uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+    const uint32_t until = millis() + dwellMs;
+
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint16_t burst = 0; burst < 512; burst++) {
+        const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+        if (now != last) {
+          edges++;
+          last = now;
+        }
+      }
+      if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
+      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+      checks++;
+    }
+
+    if (edges > 10) {
+      snprintf(line, sizeof(line), "  canal %-2u = %u MHz : %lu transitions, signal fort %lu/%lu",
+               (unsigned)ch, (unsigned)(2400 + ch), (unsigned long)edges, (unsigned long)strong,
+               (unsigned long)checks);
+      out.println(line);
+      Serial.flush();
+    }
+    if (edges > best) {
+      best = edges;
+      bestChannel = (uint8_t)ch;
+    }
+    delay(1);
+  }
+
+  out.println();
+  if (best > 10) {
+    snprintf(line, sizeof(line), "  Meilleur canal : %u (%u MHz), %lu transitions.",
+             (unsigned)bestChannel, (unsigned)(2400 + bestChannel), (unsigned long)best);
+    out.println(line);
+    out.println("  Cette sequence accroche la ou la notre echouait : c'est donc");
+    out.println("  notre initialisation qui etait en cause, pas la lampe.");
+  } else {
+    out.println("  Rien non plus avec cette sequence. La difference entre nos");
+    out.println("  deux initialisations n'explique donc pas le silence.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Largeur d'adresse : 3, 4 ou 5 octets
+// ---------------------------------------------------------------------------
+
+void BenqHalo::sweepAddressWidths(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== Largeur d'adresse croisee avec le canal ===");
+  out.println("  DM1 bits 7~6 : 01 = 3 octets, 10 = 4, 11 = 5. Une largeur fausse");
+  out.println("  fait decouper la trame au mauvais endroit, et le correlateur ne");
+  out.println("  peut alors rien accrocher -- quels que soient le canal et le");
+  out.println("  debit. C'est une des trois variables qui restent.");
+  snprintf(line, sizeof(line), "  3 largeurs x 84 canaux x %lu ms, debit %s.",
+           (unsigned long)dwellMs, dataRateName(dataRate_));
+  out.println(line);
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t widths[3] = {3, 4, 5};
+  const uint8_t awBits[3] = {0x40, 0x80, 0xC0};
+  const uint8_t addr5[5] = {0x44, 0x33, 0x22, 0xE1, 0x11};
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+  const uint8_t savedChannel = channel_;
+
+  uint32_t best = 0;
+  uint8_t bestChannel = 0, bestWidth = 0;
+
+  for (uint8_t w = 0; w < 3; w++) {
+    uint32_t widthBest = 0;
+    uint8_t widthBestCh = 0;
+
+    for (uint16_t ch = 0; ch <= 83; ch++) {
+      radio.softwareReset();
+      delay(2);
+      radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+      radio.setBank(0);
+      radio.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
+      radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, (uint8_t)ch);
+      radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(awBits[w] | dataRate_));
+      radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr5, widths[w]);
+
+      uint8_t mk = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+      radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mk | MASK_PRM_RX));
+      radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+      radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
+      radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
+      radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
+      radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
+      radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER,
+                          (uint8_t)((radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0) | 14));
+      radio.clearInterrupts();
+      radio.command(CMD_FLUSH_RX_FIFO);
+      radio.enterRxMode();
+
+      pinMode(PIN_GIO3_TAP, INPUT);
+      uint32_t edges = 0, strong = 0, checks = 0;
+      uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+      const uint32_t until = millis() + dwellMs;
+
+      while ((int32_t)(millis() - until) < 0) {
+        for (uint16_t burst = 0; burst < 512; burst++) {
+          const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+          if (now != last) {
+            edges++;
+            last = now;
+          }
+        }
+        if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+        if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+        checks++;
+      }
+
+      if (edges > 10) {
+        snprintf(line, sizeof(line),
+                 "  %u octets, canal %-2u = %u MHz : %lu transitions, fort %lu/%lu",
+                 (unsigned)widths[w], (unsigned)ch, (unsigned)(2400 + ch), (unsigned long)edges,
+                 (unsigned long)strong, (unsigned long)checks);
+        out.println(line);
+        Serial.flush();
+      }
+      if (edges > widthBest) {
+        widthBest = edges;
+        widthBestCh = (uint8_t)ch;
+      }
+      if (edges > best) {
+        best = edges;
+        bestChannel = (uint8_t)ch;
+        bestWidth = widths[w];
+      }
+      delay(1);
+    }
+
+    snprintf(line, sizeof(line), "  -- adresse de %u octets : maximum %lu transitions (canal %u)",
+             (unsigned)widths[w], (unsigned long)widthBest, (unsigned)widthBestCh);
+    out.println(line);
+    Serial.flush();
+  }
+
+  channel_ = savedChannel;
+
+  out.println();
+  if (best > 10) {
+    snprintf(line, sizeof(line), "  Meilleur : adresse de %u octets, canal %u (%u MHz), %lu fronts.",
+             (unsigned)bestWidth, (unsigned)bestChannel, (unsigned)(2400 + bestChannel),
+             (unsigned long)best);
+    out.println(line);
+  } else {
+    out.println("  Aucune largeur ne change quoi que ce soit. Cette variable est");
+    out.println("  eliminee : il reste l'excursion de frequence et les reglages de");
+    out.println("  modem non documentes.");
   }
   out.println();
 }

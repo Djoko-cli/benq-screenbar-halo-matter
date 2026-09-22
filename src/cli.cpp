@@ -95,6 +95,8 @@ static void cmdHelp() {
   Serial.println("  gio3 [ms]             balaie les 16 valeurs du selecteur GIO3 en reception");
   Serial.println("  debitgio [ms]         trouve le debit de la source, sans connaitre l'adresse");
   Serial.println("  canalgio [ms]         trouve le canal demodulable, sans connaitre l'adresse");
+  Serial.println("  canalpico [ms]        meme balayage, avec la sequence du pilote tiers");
+  Serial.println("  largeur [ms]          balaie les adresses de 3, 4 et 5 octets x 84 canaux");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -332,13 +334,27 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 10000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.checkGio3Correlator(Serial, dwell);
+  } else if (!strcmp(line, "largeur")) {
+    uint32_t dwell = 600;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 200 && v <= 5000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.sweepAddressWidths(Serial, dwell);
+  } else if (!strcmp(line, "canalpico")) {
+    uint32_t dwell = 1500;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 300 && v <= 10000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.sweepChannelsPico(Serial, 0, 83, dwell);
   } else if (!strcmp(line, "canalgio")) {
     // canalgio [ms] [premier] [dernier] : restreindre la plage permet un temps
     // de pose bien plus long, donc d'attraper un emetteur qui parle par a-coups.
     char *end = nullptr;
     uint32_t dwell = 700;
     const long v = strtol(arg, &end, 10);
-    if (v >= 200 && v <= 20000) dwell = (uint32_t)v;
+    // Camper sur un seul canal demande des dizaines de secondes : une source a
+    // faible rapport cyclique se rate en une seconde.
+    if (v >= 200 && v <= 120000) dwell = (uint32_t)v;
     long from = 0, to = 83;
     if (end && *end) {
       from = strtol(end, &end, 10);

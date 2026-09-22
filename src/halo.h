@@ -226,6 +226,19 @@ class BenqHalo {
   void probeChannelByGio3(Print &out, uint8_t from = 0, uint8_t to = 83,
                           uint32_t dwellMs = 700);
 
+  // Meme balayage, mais avec la sequence d'initialisation EXACTE du pilote
+  // tiers, qui recoit reellement d'une Halo : aucun reset logiciel, et
+  // aucune des 'valeurs recommandees' de banque 1 et 2. Notre banc prouve
+  // que notre emetteur et notre recepteur s'accordent -- pas qu'ils sont
+  // regles comme le monde reel.
+  void sweepChannelsPico(Print &out, uint8_t from = 0, uint8_t to = 83,
+                         uint32_t dwellMs = 1500);
+
+  // Balaie les trois LARGEURS D'ADRESSE croisees avec les canaux. Une
+  // largeur fausse fait decouper la trame au mauvais endroit : le
+  // correlateur ne peut alors rien accrocher, quel que soit le reste.
+  void sweepAddressWidths(Print &out, uint32_t dwellMs = 600);
+
   // LA question decisive : les sorties trouvees sur GIO3 sont-elles AVANT
   // ou APRES le correlateur ? On refait la mesure avec une adresse fausse.
   // Si l'activite persiste alors qu'aucune trame n'est acceptee, la sortie
