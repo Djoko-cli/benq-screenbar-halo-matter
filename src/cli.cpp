@@ -108,6 +108,7 @@ static void cmdHelp() {
   Serial.println("  fil                   le fil GIO3 fait-il contact ? (test electrique)");
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
+  Serial.println("  benq [ms]             reception Halo 1 : 6 octets, CRC materiel");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -555,6 +556,12 @@ static void handleLine(char *line) {
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
     ccListen(Serial, dwell);
+  } else if (!strcmp(line, "benq")) {
+    uint32_t d = 30000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 1000 && v <= 300000) d = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.listenHalo1(Serial, d);
   } else if (!strcmp(line, "amont")) {
     // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
     // amont, sans reset logiciel. Sans adresse, celle du Halo 2.

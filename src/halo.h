@@ -216,6 +216,9 @@ class BenqHalo {
   // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
+  // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
+  void listenHalo1(Print &out, uint32_t dwellMs);
+
   // La sequence de reception du projet amont, sans reset logiciel.
   void listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
                           uint8_t payloadLen = 13);
