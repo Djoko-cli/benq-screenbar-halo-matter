@@ -110,6 +110,7 @@ static void cmdHelp() {
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
   Serial.println("  benq [ms] [octets]    reception Halo 1, lecture de 8 a 32 octets");
   Serial.println("  xo [0..31]            trim du quartz du BM5602 : reglage fin de la porteuse");
+  Serial.println("  tx6 <hex12> [n] [ms]  emettre une trame Halo 1 (adresse + 6 octets + CRC)");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -568,6 +569,29 @@ static void handleLine(char *line) {
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
     ccListen(Serial, dwell);
+  } else if (!strcmp(line, "tx6")) {
+    // tx6 <12 chiffres hex> [nombre] [intervalle ms]
+    char *p = arg;
+    uint8_t pay[6];
+    bool ok = strlen(p) >= 12;
+    for (uint8_t i = 0; ok && i < 6; i++) {
+      char pair[3] = {p[i * 2], p[i * 2 + 1], 0};
+      char *e = nullptr;
+      pay[i] = (uint8_t)strtol(pair, &e, 16);
+      if (e != pair + 2) ok = false;
+    }
+    if (!ok) {
+      Serial.println("Usage : tx6 <12 chiffres hex> [nombre] [intervalle ms]");
+    } else {
+      char *end = p + 12;
+      long n = 5, gap = 3;
+      if (*end) n = strtol(end, &end, 10);
+      if (*end) gap = strtol(end, nullptr, 10);
+      if (n < 1 || n > 5000) n = 5;
+      if (gap < 0 || gap > 1000) gap = 3;
+      halo.setMode(HaloMode::Normal);
+      halo.txHalo1(Serial, pay, (uint16_t)n, (uint16_t)gap);
+    }
   } else if (!strcmp(line, "xo")) {
     // xo [0..31] : trim du quartz du BM5602, donc reglage fin de sa porteuse.
     // Mesure a l'appui : les erreurs binaires sur les trames de la telecommande
