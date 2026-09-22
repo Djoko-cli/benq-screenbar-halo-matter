@@ -2397,7 +2397,16 @@ void BenqHalo::measureBursts(Print &out, uint32_t seconds, uint8_t threshold) {
 static const uint8_t kCalAirAddr[4] = {0xE1, 0x22, 0x33, 0x44};
 static const uint8_t kCalRegAddr[4] = {0x44, 0x33, 0x22, 0xE1};
 static const uint8_t kCalWrongReg[4] = {0x44, 0x33, 0x22, 0xE2};  // un seul octet change
-static const uint8_t kCalPattern[10] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+// Le payload de la balise porte deliberement un 0x55 en position 2. Le
+// detecteur de preambule s'arme sur une suite alternee : un octet 0x55 ou 0xAA
+// place juste avant une fenetre de trois octets permet au correlateur de s'y
+// caler en PLEIN PAYLOAD. C'est exactement le mecanisme qu'exploite le script
+// de kuzmin, dont le commentaire dit "used as preambule and part of the sync
+// word" a propos du 0x55 issu d'une temperature de 3925 K.
+// L'ancien motif DE AD BE EF ... n'avait aucune suite alternee de plus de sept
+// bits : le test de validation ne pouvait pas accrocher, et son echec ne
+// prouvait rien.
+static const uint8_t kCalPattern[10] = {0xDE, 0xAD, 0x55, 0x0F, 0xA0, 0x3C, 0x01, 0x02, 0x03, 0x04};
 
 // Configure une puce pour la boucle locale. Volontairement identique a ce que
 // font les commandes de chasse -- CRC materiel desactive en reception, payload
@@ -3261,8 +3270,10 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
   for (uint8_t i = 0; i < 10; i++)
     n += snprintf(line + n, sizeof(line) - n, "%02X ", kCalPattern[i]);
   out.println(line);
-  out.println("  Huit fenetres de trois octets sont essayees. Si aucune n'accroche");
-  out.println("  alors qu'on connait la reponse, le procede est condamne.");
+  out.println("  Une seule de ces fenetres est ANCREE : celle precedee du 0x55.");
+  out.println("  Le detecteur de preambule s'arme sur une suite alternee, donc");
+  out.println("  seule une fenetre precedee de 0x55 ou 0xAA peut accrocher. Les");
+  out.println("  sept autres servent de temoins negatifs.");
   out.println("  >>> La balise doit tourner sur l'autre carte : 'etalon tx 180 2'.");
   Serial.flush();
 
@@ -3314,9 +3325,13 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
       if ((got & 0x1F) == 0) delay(1);
     }
 
-    snprintf(line, sizeof(line), "  octets %u-%u  (%02X %02X %02X) : %lu trame(s)%s",
+    // Une fenetre n'a de chance d'accrocher que si l'octet qui la precede
+    // ressemble a un preambule.
+    const bool anchored = (off > 0) && (kCalPattern[off - 1] == 0x55 || kCalPattern[off - 1] == 0xAA);
+    snprintf(line, sizeof(line), "  octets %u-%u  (%02X %02X %02X)%s : %lu trame(s)%s",
              (unsigned)off, (unsigned)(off + 2), kCalPattern[off], kCalPattern[off + 1],
-             kCalPattern[off + 2], (unsigned long)got, got ? "   <<< ACCROCHE" : "");
+             kCalPattern[off + 2], anchored ? " ANCREE" : "       ", (unsigned long)got,
+             got ? "   <<< ACCROCHE" : "");
     out.println(line);
     Serial.flush();
     if (got) hits++;
@@ -3324,15 +3339,423 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 
   out.println();
   if (hits) {
-    out.println("  Le correlateur SAIT se caler au milieu d'une trame.");
-    out.println("  Le procede de 'find' est donc valide, et le relancer contre la");
-    out.println("  lampe au bon debit a un sens.");
+    out.println("  Le correlateur SAIT se caler en plein payload, pourvu qu'un");
+    out.println("  octet d'ancrage le precede. Le procede de 'find' est donc");
+    out.println("  valide : il n'a jamais echoue que faute d'ancre ou de debit.");
   } else {
-    out.println("  Aucune fenetre n'accroche, alors qu'on connaissait la reponse,");
-    out.println("  que l'emetteur est confirme et le recepteur valide.");
-    out.println("  Le correlateur ne se cale donc QU'APRES un preambule valide :");
-    out.println("  'find' etait condamnee des le depart, comme l'accrochage sur");
-    out.println("  le preambule. Ne plus y revenir.");
+    out.println("  Meme la fenetre ancree n'accroche pas. Verifie d'abord que la");
+    out.println("  balise tourne et que les deux cartes sont au meme debit, car");
+    out.println("  sans trafic ce resultat ne prouverait rien.");
   }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Les fonctions cachees de GIO3
+// ---------------------------------------------------------------------------
+
+void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== Fonctions cachees du selecteur GIO3 ===");
+  out.println("  Le datasheet documente cinq valeurs sur seize. Mais GIO3S=8 est");
+  out.println("  TBCLK_OUTPUT, absent de sa table : il omet donc des fonctions");
+  out.println("  reelles. Les valeurs 9 a 15 n'ont jamais ete testees, par");
+  out.println("  personne. On cherche une sortie de donnees demodulees ou une");
+  out.println("  horloge utilisable EN RECEPTION.");
+  out.println();
+  snprintf(line, sizeof(line), "  Cablage : pastille 8 du module (GIO3) -> IO%u.",
+           (unsigned)PIN_GIO3_TAP);
+  out.println(line);
+  out.println("  Contrairement a GIO2, GIO3 ne sert pas au SPI : la liaison avec");
+  out.println("  la puce reste vivante, et on compte les trames pendant la mesure");
+  out.println("  pour prouver qu'il y a bien du trafic.");
+  out.println("  >>> La balise doit tourner sur l'autre carte : 'etalon tx 180 2'.");
+  Serial.flush();
+
+  // Conserve PADDS et GIO4S, ne touche qu'aux quatre bits de GIO3S.
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+
+  uint32_t quietest = 0xFFFFFFFF;
+  uint32_t trans[16];
+  uint32_t frames[16];
+
+  for (uint8_t sel = 0; sel < 16; sel++) {
+    configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, true, dataRate_);
+    radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | sel));
+    radio.enterRxMode();
+
+    pinMode(PIN_GIO3_TAP, INPUT);
+    uint32_t edges = 0, samples = 0, got = 0;
+    int last = digitalRead(PIN_GIO3_TAP);
+    const uint32_t until = millis() + dwellMs;
+
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint16_t burst = 0; burst < 256; burst++) {
+        const int now = digitalRead(PIN_GIO3_TAP);
+        if (now != last) {
+          edges++;
+          last = now;
+        }
+      }
+      samples += 256;
+
+      // La liaison SPI reste utilisable : on verifie que des trames arrivent
+      // reellement, sinon une absence d'activite ne prouverait rien.
+      if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+      if (!(radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR)) {
+        uint8_t buf[13];
+        radio.readFifo(buf, 13, false);
+        radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+        radio.command(CMD_FLUSH_RX_FIFO);
+        got++;
+      }
+    }
+
+    trans[sel] = edges;
+    frames[sel] = got;
+    if (edges < quietest) quietest = edges;
+
+    const char *known = (sel == 0)    ? "rien"
+                        : (sel == 1)  ? "SDO"
+                        : (sel == 5)  ? "IRQ"
+                        : (sel == 8)  ? "TBCLK"
+                        : (sel == 12) ? "EPA_EN"
+                        : (sel == 13) ? "ELAN_EN"
+                                      : "non documente";
+    snprintf(line, sizeof(line), "  GIO3S=%-2u %-14s : %lu transitions sur %lu ech., %lu trame(s)",
+             (unsigned)sel, known, (unsigned long)edges, (unsigned long)samples,
+             (unsigned long)got);
+    out.println(line);
+    Serial.flush();
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+
+  uint32_t totalFrames = 0;
+  for (uint8_t sel = 0; sel < 16; sel++) totalFrames += frames[sel];
+
+  out.println();
+  if (totalFrames == 0) {
+    out.println("  AUCUNE trame recue de la balise : la mesure ne vaut rien.");
+    out.println("  Verifie que 'etalon tx' tourne sur l'autre carte et que les");
+    out.println("  deux cartes sont au meme debit ('debit' pour l'afficher).");
+    out.println();
+    return;
+  }
+
+  bool found = false;
+  for (uint8_t sel = 0; sel < 16; sel++) {
+    if (trans[sel] > quietest * 4 + 200) {
+      found = true;
+      snprintf(line, sizeof(line), "  piste : GIO3S=%u s'anime (%lu transitions contre %lu au repos)",
+               (unsigned)sel, (unsigned long)trans[sel], (unsigned long)quietest);
+      out.println(line);
+    }
+  }
+  if (!found) {
+    out.println("  Aucun selecteur ne fait sortir quoi que ce soit sur GIO3,");
+    out.println("  alors que des trames arrivaient bien pendant la mesure.");
+    out.println("  Les seize valeurs sont donc epuisees.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  GIO3 : avant ou apres le correlateur ?
+// ---------------------------------------------------------------------------
+
+// Echantillonnage rapide d'une seule broche, a meme le registre GPIO. La boucle
+// en digitalRead du balayage precedent tournait a 835 kHz, soit trois points par
+// bit a 250 kbps : suffisant pour detecter une activite, trop lent pour la
+// compter fidelement.
+static uint32_t fastEdgeCount(uint8_t pin, uint32_t dwellMs, uint32_t *samples) {
+  const uint32_t mask = 1UL << pin;
+  pinMode(pin, INPUT);
+  uint32_t edges = 0, n = 0;
+  uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+  const uint32_t until = millis() + dwellMs;
+  while ((int32_t)(millis() - until) < 0) {
+    for (uint16_t burst = 0; burst < 512; burst++) {
+      const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+      if (now != last) {
+        edges++;
+        last = now;
+      }
+    }
+    n += 512;
+  }
+  if (samples) *samples = n;
+  return edges;
+}
+
+void BenqHalo::checkGio3Correlator(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== GIO3 : avant ou apres le correlateur ? ===");
+  out.println("  Quatre selecteurs s'animent quand des trames sont acceptees.");
+  out.println("  Reste a savoir s'ils refletent le signal demodule BRUT, ou");
+  out.println("  seulement les trames ayant passe le filtrage d'adresse.");
+  out.println("  On refait donc la mesure avec une adresse FAUSSE d'un octet :");
+  out.println("  aucune trame ne doit plus etre acceptee. Si la broche continue");
+  out.println("  de s'agiter, elle est EN AMONT du correlateur -- et l'adresse");
+  out.println("  devient lisible sans la connaitre.");
+  out.println("  >>> La balise doit tourner sur l'autre carte.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t selectors[4] = {2, 4, 9, 14};
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  bool anyPreCorrelator = false;
+
+  for (uint8_t i = 0; i < 4; i++) {
+    const uint8_t sel = selectors[i];
+    uint32_t edges[2] = {0, 0};
+    uint32_t got[2] = {0, 0};
+
+    for (uint8_t pass = 0; pass < 2; pass++) {
+      const bool matching = (pass == 0);
+      configForLoopback(radio, RF_CHANNEL_1, matching ? kCalRegAddr : kCalWrongReg, true,
+                        dataRate_);
+      radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | sel));
+      radio.enterRxMode();
+
+      // Compter les trames d'abord, sur une fenetre courte, puis mesurer les
+      // transitions sans rien faire d'autre : les lectures SPI perturberaient
+      // le comptage des fronts.
+      const uint32_t until = millis() + dwellMs / 2;
+      while ((int32_t)(millis() - until) < 0) {
+        if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+        if (!(radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR)) {
+          uint8_t buf[13];
+          radio.readFifo(buf, 13, false);
+          radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+          radio.command(CMD_FLUSH_RX_FIFO);
+          got[pass]++;
+        }
+        delayMicroseconds(200);
+      }
+
+      uint32_t samples = 0;
+      edges[pass] = fastEdgeCount(PIN_GIO3_TAP, dwellMs / 2, &samples);
+    }
+
+    // Une activite qui SURVIT a une adresse fausse ne peut pas venir du
+    // moteur de paquets : elle vient du demodulateur.
+    // Ne PAS exiger zero trame acceptee : quelques evenements parasites passent
+    // toujours, et cette exigence trop stricte avait fait conclure l'inverse de
+    // ce que la mesure montrait. Ce qui compte est l'effondrement des trames
+    // acceptees face a des fronts qui, eux, ne bougent pas.
+    const bool framesCollapsed = (got[1] * 4 < got[0]) || (got[0] == 0);
+    const bool edgesSurvive = (edges[1] * 2 >= edges[0]) && edges[1] > 50;
+    const bool survives = framesCollapsed && edgesSurvive;
+    if (survives) anyPreCorrelator = true;
+
+    snprintf(line, sizeof(line), "  GIO3S=%-2u  adresse juste : %lu fronts, %lu trame(s)",
+             (unsigned)sel, (unsigned long)edges[0], (unsigned long)got[0]);
+    out.println(line);
+    snprintf(line, sizeof(line), "            adresse fausse : %lu fronts, %lu trame(s)%s",
+             (unsigned long)edges[1], (unsigned long)got[1],
+             survives ? "   <<< EN AMONT DU CORRELATEUR" : "");
+    out.println(line);
+    Serial.flush();
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+
+  out.println();
+  if (anyPreCorrelator) {
+    out.println("  Au moins une sortie reste active sans qu'aucune trame ne soit");
+    out.println("  acceptee : elle reflete le signal demodule BRUT, avant tout");
+    out.println("  filtrage d'adresse.");
+    out.println("  C'est exactement ce qu'il nous fallait : en echantillonnant");
+    out.println("  cette broche on lit le preambule, puis l'adresse, puis la");
+    out.println("  trame -- sans avoir besoin de connaitre l'adresse d'avance.");
+  } else {
+    out.println("  Toutes les sorties s'eteignent avec une adresse fausse : elles");
+    out.println("  sont en aval du correlateur et ne servent qu'a signaler une");
+    out.println("  trame deja acceptee. Sans l'adresse, elles ne donnent rien.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Lire l'adresse dans le flux de bits demodule
+// ---------------------------------------------------------------------------
+
+void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+  constexpr uint16_t kSamples = 6000;  // ~2 ms a 0,34 us par point
+  static uint8_t raw[kSamples];
+
+  out.println();
+  out.println("=== Lecture de l'adresse dans le flux demodule ===");
+  snprintf(line, sizeof(line), "  Selecteur GIO3S=%u, broche IO%u.", (unsigned)selector,
+           (unsigned)PIN_GIO3_TAP);
+  out.println(line);
+  out.println("  Le recepteur est volontairement cale sur une adresse FAUSSE :");
+  out.println("  si on lit quand meme la trame, c'est bien que cette sortie est");
+  out.println("  en amont du filtrage.");
+  snprintf(line, sizeof(line), "  Adresse reelle de la balise, attendue : %02X %02X %02X %02X",
+           kCalAirAddr[0], kCalAirAddr[1], kCalAirAddr[2], kCalAirAddr[3]);
+  out.println(line);
+  out.println("  >>> La balise doit tourner sur l'autre carte.");
+  Serial.flush();
+
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  configForLoopback(radio, RF_CHANNEL_1, kCalWrongReg, true, dataRate_);
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | selector));
+  radio.enterRxMode();
+
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+  pinMode(PIN_GIO3_TAP, INPUT);
+
+  uint32_t triggers = 0, shortRuns = 0, noPreamble = 0;
+
+  for (uint32_t attempt = 0; attempt < attempts; attempt++) {
+    // CE est efface par le materiel a chaque fin de reception : sans rearmement
+    // a chaque tour, la puce sort du mode RX apres le premier evenement et la
+    // broche se tait pour de bon.
+    if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+    radio.command(CMD_FLUSH_RX_FIFO);
+    radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x01);
+
+    // Attendre un front, puis capturer d'un trait : la rafale dure moins d'une
+    // milliseconde, il ne faut surtout rien faire d'autre pendant ce temps.
+    uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+    const uint32_t guard = millis() + 300;
+    bool triggered = false;
+    while ((int32_t)(millis() - guard) < 0) {
+      const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+      if (now != last) {
+        triggered = true;
+        break;
+      }
+    }
+    if (!triggered) continue;
+    triggers++;
+
+    for (uint16_t i = 0; i < kSamples; i++)
+      raw[i] = (REG_READ(GPIO_IN_REG) & mask) ? 1 : 0;
+
+    // Mesurer la duree du plus court palier : c'est la duree d'un bit, donc le
+    // facteur de sur-echantillonnage. Le deduire des donnees evite de dependre
+    // d'un debit suppose.
+    uint16_t shortest = 0xFFFF, runs = 0;
+    uint16_t run = 1;
+    for (uint16_t i = 1; i < kSamples; i++) {
+      if (raw[i] == raw[i - 1]) {
+        run++;
+      } else {
+        if (run < shortest) shortest = run;
+        runs++;
+        run = 1;
+      }
+    }
+    if (runs < 40 || shortest < 2 || shortest > 200) {
+      shortRuns++;
+      // Montrer les premiers echecs : ne rien afficher empeche de comprendre si
+      // la broche porte des donnees trop lentes, trop rapides, ou rien du tout.
+      if (shortRuns <= 3) {
+        snprintf(line, sizeof(line), "  essai %lu : %u paliers, plus court %u points -- rejete",
+                 (unsigned long)attempt + 1, (unsigned)runs, (unsigned)shortest);
+        out.println(line);
+        Serial.flush();
+      }
+      continue;
+    }
+
+    // Rechantillonner au milieu de chaque bit.
+    uint8_t bits[260];
+    uint16_t nbits = 0;
+    for (uint32_t pos = shortest / 2; pos < kSamples && nbits < sizeof(bits); pos += shortest)
+      bits[nbits++] = raw[pos];
+
+    // Chercher le preambule : au moins douze alternances consecutives.
+    int16_t start = -1;
+    for (uint16_t i = 0; i + 12 < nbits; i++) {
+      bool alternating = true;
+      for (uint8_t k = 1; k < 12; k++)
+        if (bits[i + k] == bits[i + k - 1]) {
+          alternating = false;
+          break;
+        }
+      if (alternating) {
+        // Avancer jusqu'a la fin des alternances : l'adresse commence la.
+        uint16_t j = i + 1;
+        while (j + 1 < nbits && bits[j + 1] != bits[j]) j++;
+        start = (int16_t)(j + 1);
+        break;
+      }
+    }
+    if (start < 0 || start + 48 > nbits) {
+      noPreamble++;
+      if (noPreamble <= 3) {
+        int n = snprintf(line, sizeof(line),
+                         "  essai %lu : %u bits, pas d'alternance nette. Debut :",
+                         (unsigned long)attempt + 1, (unsigned)nbits);
+        for (uint8_t k = 0; k < 40 && k < nbits; k++)
+          n += snprintf(line + n, sizeof(line) - n, "%u", (unsigned)bits[k]);
+        out.println(line);
+        Serial.flush();
+      }
+      continue;
+    }
+
+    snprintf(line, sizeof(line),
+             "  essai %lu : %u paliers, 1 bit = %u points, preambule a %d",
+             (unsigned long)attempt + 1, (unsigned)runs, (unsigned)shortest, (int)start);
+    out.println(line);
+
+    // Les six octets qui suivent le preambule : adresse puis PCF.
+    for (uint8_t polarity = 0; polarity < 2; polarity++) {
+      uint8_t bytes[6] = {0};
+      for (uint8_t b = 0; b < 6; b++)
+        for (uint8_t k = 0; k < 8; k++) {
+          const uint8_t bit = bits[start + b * 8 + k] ^ polarity;
+          bytes[b] = (uint8_t)((bytes[b] << 1) | bit);  // MSB en tete
+        }
+      int n = snprintf(line, sizeof(line), "    %s :", polarity ? "inverse" : "direct ");
+      for (uint8_t b = 0; b < 6; b++)
+        n += snprintf(line + n, sizeof(line) - n, " %02X", bytes[b]);
+      if (memcmp(bytes, kCalAirAddr, 4) == 0)
+        snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE DE LA BALISE, RETROUVEE");
+      out.println(line);
+    }
+    Serial.flush();
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+  out.println();
+  snprintf(line, sizeof(line),
+           "  Bilan : %lu declenchement(s) sur %lu, %lu rejet(s) de forme, %lu sans preambule.",
+           (unsigned long)triggers, (unsigned long)attempts, (unsigned long)shortRuns,
+           (unsigned long)noPreamble);
+  out.println(line);
+  if (triggers == 0) {
+    out.println("  Aucun front sur GIO3 : la puce n'etait pas en reception, ou ce");
+    out.println("  selecteur ne sort rien. Relance 'gio3' pour verifier.");
+  }
+  out.println();
+  out.println("  Si l'adresse de la balise ressort, la methode est validee et on");
+  out.println("  la pointe sur la telecommande.");
   out.println();
 }

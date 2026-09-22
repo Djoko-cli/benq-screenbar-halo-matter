@@ -23,6 +23,13 @@
 // Dialogue SWD avec un microcontroleur tiers. SWCLK est connu (trou 3 de J5,
 // seul a se tenir pres de 0 V par son tirage interne) ; SWDIO est cherche
 // parmi plusieurs broches, pour ne pas avoir a recabler entre chaque essai.
+// GIO3 du module (pastille 8), non cablee d'origine. Contrairement a GIO2,
+// elle ne sert pas au SPI : on peut donc balayer son selecteur sans perdre
+// la liaison avec la puce, et compter les trames recues pendant la mesure.
+#ifndef PIN_GIO3_TAP
+#define PIN_GIO3_TAP 3
+#endif
+
 #ifndef PIN_SWD_CLK
 #define PIN_SWD_CLK 18
 #endif

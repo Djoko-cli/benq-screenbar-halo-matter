@@ -194,6 +194,23 @@ class BenqHalo {
   // le payload est connu, donc avec la reponse d'avance.
   void validatePayloadSync(Print &out, uint32_t dwellMs = 3000);
 
+  // Balaie les seize valeurs du selecteur GIO3 pendant que la balise emet,
+  // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
+  // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
+  // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
+  void sweepGio3(Print &out, uint32_t dwellMs = 1500);
+
+  // LA question decisive : les sorties trouvees sur GIO3 sont-elles AVANT
+  // ou APRES le correlateur ? On refait la mesure avec une adresse fausse.
+  // Si l'activite persiste alors qu'aucune trame n'est acceptee, la sortie
+  // est en amont du filtrage -- donc exploitable sans connaitre l'adresse.
+  void checkGio3Correlator(Print &out, uint32_t dwellMs = 2000);
+
+  // Capture le flux de bits demodule sur GIO3 et y cherche le preambule,
+  // puis lit les octets qui suivent -- c'est-a-dire l'ADRESSE. Valide
+  // d'abord contre la balise, dont l'adresse est connue d'avance.
+  void captureGio3Bits(Print &out, uint8_t selector = 14, uint32_t attempts = 40);
+
   // Auto-test d'une seule carte, sans partenaire radio : chaque maillon est
   // verifie par une RELECTURE, du bus SPI jusqu'au remplissage de la FIFO
   // d'emission. Repond a la question 'est-ce mon cablage ou mon code ?'.
