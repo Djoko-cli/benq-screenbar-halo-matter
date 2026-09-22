@@ -3436,7 +3436,7 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 //  Le CRC est verifie PAR LE MATERIEL : toute trame rendue ici est exacte, ce
 //  qui evite d'avoir a filtrer les erreurs binaires en logiciel.
 // ---------------------------------------------------------------------------
-void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
+void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
     return;
@@ -3444,8 +3444,9 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
   char line[176];
   out.println();
   out.println("=== Reception Halo 1 avec vote majoritaire ===");
-  snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X.", (unsigned)channel_,
-           dataRateName(dataRate_), addr_[0], addr_[1], addr_[2], addr_[3]);
+  snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X, lecture de %u octets.",
+           (unsigned)channel_, dataRateName(dataRate_), addr_[0], addr_[1], addr_[2], addr_[3],
+           (unsigned)rxLen);
   out.println(line);
   out.println("  La telecommande RETRANSMET chaque trame plusieurs fois d'affilee.");
   out.println("  On lit donc 32 octets d'un coup -- le maximum de la FIFO -- pour");
@@ -3481,7 +3482,13 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
   // microsecondes. En lisant large, on capture la premiere trame ET les
   // suivantes dans la meme lecture, sans aucun rearmement entre elles. On les
   // retrouve ensuite en cherchant l'adresse dans le flux de bits.
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
+  // Longueur de lecture pilotable, pour un test A/B : une trame a valide son
+  // CRC en lecture courte, aucune en lecture de 32 octets. Hypothese a
+  // verifier, pas un fait : les deux trames comparees n'etaient peut-etre pas
+  // la meme commande.
+  if (rxLen < 8) rxLen = 8;
+  if (rxLen > 32) rxLen = 32;
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, rxLen);
   radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
   radio.clearInterrupts();
@@ -3510,7 +3517,8 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
     const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     if (irq & IRQ_RX_DR) {
       uint8_t buf[32];
-      radio.readFifo(buf, 32, false);
+      memset(buf, 0, sizeof(buf));
+      radio.readFifo(buf, rxLen, false);
       radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
       radio.command(CMD_FLUSH_RX_FIFO);
       radio.command(CMD_RX_MODE);
@@ -3522,7 +3530,7 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
       {
         char raw[100];
         size_t w = (size_t)snprintf(raw, sizeof(raw), "BRUT ");
-        for (uint8_t k = 0; k < 32; k++)
+        for (uint8_t k = 0; k < rxLen; k++)
           w += (size_t)snprintf(raw + w, sizeof(raw) - w, "%02X", buf[k]);
         out.println(raw);
         Serial.flush();
@@ -3538,7 +3546,7 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
       // precedees de leur propre adresse. On la cherche bit a bit : rien ne
       // garantit qu'une retransmission tombe sur une frontiere d'octet.
       const uint8_t air[4] = {addr_[3], addr_[2], addr_[1], addr_[0]};
-      for (uint16_t bit = 64; bit + 32 + 64 <= 32 * 8 && nGroup < 12;) {
+      for (uint16_t bit = 64; bit + 32 + 64 <= (uint16_t)rxLen * 8 && nGroup < 12;) {
         bool match = true;
         for (uint8_t k = 0; k < 32 && match; k++) {
           const uint16_t b = bit + k;
