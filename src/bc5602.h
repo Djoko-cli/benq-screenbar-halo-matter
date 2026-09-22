@@ -77,7 +77,10 @@ constexpr uint8_t B0_OM = 0x20;
 constexpr uint8_t B0_CFO1 = 0x21;
 constexpr uint8_t B0_STA1 = 0x26;
 constexpr uint8_t B0_RSSI1 = 0x27;   // seuil de detection de porteuse
-constexpr uint8_t B0_RSSI2 = 0x28;   // RSSI_NEGDB : mesure temps reel, unite -dB
+constexpr uint8_t B0_RSSI2 = 0x28;
+// XO1 : trim de la capacite de charge du quartz (bits 4-0), donc reglage
+// FIN de la frequence porteuse. Valeur de mise sous tension 0x10.
+constexpr uint8_t B0_XO1 = 0x38;   // RSSI_NEGDB : mesure temps reel, unite -dB
 constexpr uint8_t B0_RSSI3 = 0x29;   // RSSI au moment ou le mot de synchro accroche
 constexpr uint8_t B0_DPL1 = 0x2A;    // longueur de payload dynamique
 constexpr uint8_t B0_DPL2 = 0x2B;
