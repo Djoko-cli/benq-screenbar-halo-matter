@@ -2271,7 +2271,10 @@ void BenqHalo::measureBursts(Print &out, uint32_t seconds, uint8_t threshold) {
   out.println("  125 kbps, 608 us a 250 kbps, 304 us a 500 kbps. La duree");
   out.println("  mesuree tranche le debit sans avoir a le deviner.");
   out.println();
-  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER PENDANT TOUTE LA MESURE.");
+  out.println("  >>> Il faut une source qui emette pendant toute la mesure :");
+  out.println("      soit la balise d'etalonnage sur l'autre carte, soit la");
+  out.println("      molette de la telecommande. PAS LES DEUX -- leurs rafales");
+  out.println("      se melangeraient et la mesure ne voudrait plus rien dire.");
   Serial.flush();
 
   prepareToSniff();
@@ -2738,8 +2741,10 @@ void BenqHalo::selfTest(Print &out) {
   char line[176];
   uint8_t failures = 0;
 
+  // Lignes courtes : au-dela d'environ 80 caracteres le moniteur les fragmente
+  // et le resultat devient illisible.
   auto verdict = [&](const char *what, bool ok, const char *detail) {
-    snprintf(line, sizeof(line), "  [%s] %-38s %s", ok ? "OK " : "NON", what, detail);
+    snprintf(line, sizeof(line), "  [%s] %-34.34s %.28s", ok ? "OK " : "NON", what, detail);
     out.println(line);
     if (!ok) failures++;
     Serial.flush();
@@ -2753,13 +2758,18 @@ void BenqHalo::selfTest(Print &out) {
   out.println();
 
   // --- 1. le module repond-il ? ---
+  // Deux lectures : un fil desserre rend une valeur differente a chaque fois,
+  // et une version non nulle mais instable passerait pour un module present.
   const uint32_t ver = radio.chipVersion();
-  snprintf(line, sizeof(line), "version de puce 0x%06lX", (unsigned long)ver);
-  verdict("module present", ver != 0x000000UL && ver != 0xFFFFFFUL, line);
-  if (ver == 0x000000UL || ver == 0xFFFFFFUL) {
+  const uint32_t ver2 = radio.chipVersion();
+  const bool plausible = ver != 0x000000UL && ver != 0xFFFFFFUL && ver == ver2;
+  snprintf(line, sizeof(line), "0x%06lX puis 0x%06lX", (unsigned long)ver, (unsigned long)ver2);
+  verdict("module present et stable", plausible, line);
+  if (!plausible) {
     out.println();
-    out.println("  Le module ne repond pas du tout. La c'est le cablage :");
-    out.println("  verifie 3V3, GND, et surtout CSN, SCK et SDIO.");
+    out.println("  Le module ne repond pas de facon fiable : c'est physique.");
+    out.println("  Debranche l'USB, reenfonce les six fils des DEUX cotes, et");
+    out.println("  surtout GIO2 (la sortie de donnees du module) et CSN.");
     return;
   }
 
@@ -2801,11 +2811,10 @@ void BenqHalo::selfTest(Print &out) {
   };
   // Pas de test du Standby : la commande 0x0D ne figure pas dans la table des
   // commandes du datasheet, son echec ne signalerait aucun defaut.
-  const ModeTest modes[2] = {
+  const ModeTest modes[1] = {
       {"passage en Light Sleep", CMD_LIGHT_SLEEP, OMST_LIGHT_SLEEP},
-      {"passage en RX", CMD_RX_MODE, OMST_RX},
   };
-  for (uint8_t i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < 1; i++) {
     radio.command(modes[i].cmd);
     uint8_t got = 0;
     for (uint8_t w = 0; w < 40; w++) {
@@ -2817,23 +2826,35 @@ void BenqHalo::selfTest(Print &out) {
     verdict(modes[i].name, got == modes[i].expect, line);
   }
 
+  // L'entree en RX passe par la sequence eprouvee, pas par une commande brute :
+  // sans PRM_RX pose, la puce ne peut pas devenir recepteur, et apres une
+  // coupure d'alimentation ce bit revient a zero. Un test qui l'ignore mesure
+  // un etat herite de la commande precedente.
+  configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+  const bool inRx = radio.enterRxMode();
+  snprintf(line, sizeof(line), "OMST %u, attendu 5", (unsigned)radio.operationMode());
+  verdict("passage en RX", inRx, line);
+
   // --- 7. LE POINT CRITIQUE : la FIFO d'emission se remplit-elle ? ---
   out.println();
   out.println("  --- remplissage de la FIFO d'emission ---");
   out.println("  STATUS bit 4 = TX_EMPTY. S'il reste a 1 apres l'ecriture, la");
   out.println("  commande d'ecriture n'a pas ete acceptee par la puce.");
 
-  radio.command(CMD_LIGHT_SLEEP);
-  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask & (uint8_t)~MASK_PRM_RX));
+  // Meme logique : on repart de la configuration d'emission qui a reellement
+  // transmis 9473 trames sur 9473, au lieu d'un assemblage de registres isoles.
+  configForLoopback(radio, channel_, kCalRegAddr, false, dataRate_);
 
   struct FifoTest {
     const char *name;
     uint8_t dpl2;
     uint8_t writeCmd;
   };
+  // La premiere ligne est un TEMOIN : elle doit echouer. C'est elle qui
+  // documente que la commande d'ecriture sans auto-ACK exige EN_DYN_ACK
+  // (ds.txt:869). La compter comme un defaut ferait croire a une panne.
   const FifoTest fifos[4] = {
-      {"EN_DYN_ACK=0, ecriture sans auto-ACK", 0x00, CMD_WRITE_TX_FIFO_NO_ACK},
+      {"temoin EN_DYN_ACK=0 (doit echouer)", 0x00, CMD_WRITE_TX_FIFO_NO_ACK},
       {"EN_DYN_ACK=1, ecriture sans auto-ACK", 0x01, CMD_WRITE_TX_FIFO_NO_ACK},
       {"EN_DYN_ACK=0, ecriture avec auto-ACK", 0x00, CMD_WRITE_TX_FIFO_WITH_ACK},
       {"EN_DYN_ACK=1, ecriture avec auto-ACK", 0x01, CMD_WRITE_TX_FIFO_WITH_ACK},
@@ -2852,7 +2873,15 @@ void BenqHalo::selfTest(Print &out) {
     const bool filled = (after & STATUS_TX_FIFO_EMPTY) == 0;
 
     snprintf(line, sizeof(line), "STATUS %02X -> %02X", (unsigned)before, (unsigned)after);
-    verdict(fifos[i].name, filled, line);
+    if (i == 0) {
+      // Temoin : l'echec est le resultat attendu, il ne compte pas.
+      snprintf(line, sizeof(line), "  [%s] %-34.34s STATUS %02X -> %02X",
+               filled ? "?? " : "att", fifos[i].name, (unsigned)before, (unsigned)after);
+      out.println(line);
+      Serial.flush();
+    } else {
+      verdict(fifos[i].name, filled, line);
+    }
 
     if (filled && working < 0) {
       working = (int8_t)i;
@@ -2870,8 +2899,8 @@ void BenqHalo::selfTest(Print &out) {
         }
         delayMicroseconds(10);
       }
-      snprintf(line, sizeof(line), "mode TX %s, IRQ1 0x%02X", sawTx ? "atteint" : "jamais vu",
-               (unsigned)irq);
+      snprintf(line, sizeof(line), "TX %s, IRQ1 %02X, OMST %u", sawTx ? "vu" : "jamais",
+               (unsigned)irq, (unsigned)omst);
       verdict("emission reellement effectuee (TX_DS)", sawDone, line);
     }
     radio.command(CMD_FLUSH_TX_FIFO);
