@@ -908,3 +908,55 @@ Ce qui reste etabli et n'est plus a refaire :
 structure reelle des trames, c'est-a-dire tout ce qui manque. Brochage J5 : trou
 1 = masse, trou 3 = 0,001 V (candidat SWCLK), les autres a 2,49 V. Resistances
 serie de 220 a 470 ohms sur SWDIO/SWCLK, la cible tournant a 2,5 V.
+
+
+## CORRECTION IMPORTANTE : GIO3S=14 n'est PAS en amont du correlateur
+
+L'entree ci-dessus « GIO3S=14 est en amont du correlateur » est **fausse**, et
+avec elle la conclusion « la voie RF est close ». Le controle etait confondu :
+l'adresse dite « fausse » (`44 33 22 E2`) ne differe de la vraie (`44 33 22 E1`)
+que de **deux bits**, et le correlateur du BC5602 tolere quelques bits d'erreur.
+Il acceptait donc encore les trames, ce qui donnait l'illusion d'une sortie
+independante de l'adresse.
+
+Refait avec la sequence de reception du projet amont, balise allumee :
+
+| adresse du recepteur | ecart | transitions GIO3 | trames |
+|---|---|---|---|
+| `44 33 22 E1` | aucun | 28 506 | 789 |
+| `44 33 22 E2` | 2 bits, premier octet sur l'air | 1 806 | 50 |
+| `11 22 33 E2` | totalement differente | **0** | **0** |
+| `11 22 33 44` | totalement differente, polarite opposee | **0** | **0** |
+
+**Consequence.** Tous les resultats nuls de la journee -- 84 canaux, 3 debits,
+2 polarites, 2 longueurs de preambule -- signifient « on n'a pas la bonne
+adresse », et non « le signal est indetectable ». La voie RF n'est pas close.
+
+**Lecon de methode.** Un controle negatif doit etre VRAIMENT negatif. Choisir
+une adresse fausse a deux bits de la vraie, c'etait tester la tolerance du
+correlateur en croyant tester son existence.
+
+## Le chemin de reception du projet amont (qui fonctionne)
+
+Tire de `prepare_halo_receive()` dans Termina1/benq-screenbar-halo2-esphome.
+Deux differences de fond avec le notre, commande `amont` :
+
+1. **Aucun reset logiciel.** Son commentaire : « Literal Pico lifecycle: no
+   software reset during normal initialization. Hidden packet/PID/RF state is
+   allowed to continue from hardware POR. » Nos deux chemins commencaient par un
+   reset, qui efface 15 des 19 valeurs recommandees. Sans reset, celles ecrites
+   par `begin()` survivent : le temoin affiche **18 sur 19**.
+2. **Reception passive** : CRC desactive (`PKT1=0x00`), auto-ACK desactive
+   (`ENAA=0x00`), payload dynamique desactive, longueur statique de 13 octets.
+
+Mesure : **789 trames en 15 s** sur la balise, charge utile exacte
+`DE AD 55 0F A0 3C 01 02 03 04` suivie du CRC `C2 BA`. Et **28 506 transitions
+GIO3, soit 36 par trame**, contre 3 par trame avec notre ancien chemin.
+
+Parametres du projet amont, identiques a ce qu'on avait deduit par la mesure :
+adresse `9C EA BB 86` (4 octets, **codee en dur**, c'est une Halo 2), canal 5,
+`DM1 = 0x82` (125 kbps, adresse de 4 octets).
+
+Il ecrit aussi `XO1` (banque 0, registre `0x38`) a `0x15` avant la calibration du
+VCO, dans son chemin d'emission en mode direct -- le **trim du quartz**, que nous
+n'avons jamais touche. Valeur par defaut apres reset : `0x10`.

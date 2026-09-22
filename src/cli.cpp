@@ -103,6 +103,7 @@ static void cmdHelp() {
   Serial.println("  fil                   le fil GIO3 fait-il contact ? (test electrique)");
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
+  Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -398,6 +399,23 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 120000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.probeRateByGio3(Serial, dwell);
+  } else if (!strcmp(line, "amont")) {
+    // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
+    // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
+    char *end = nullptr;
+    uint32_t dwell = 20000;
+    const long v = strtol(arg, &end, 10);
+    if (v >= 1000 && v <= 120000) dwell = (uint32_t)v;
+    uint8_t a[4] = {0x9C, 0xEA, 0xBB, 0x86};
+    while (end && *end == ' ') end++;
+    if (end && strlen(end) >= 8) {
+      for (uint8_t i = 0; i < 4; i++) {
+        char pair[3] = {end[i * 2], end[i * 2 + 1], 0};
+        a[i] = (uint8_t)strtol(pair, nullptr, 16);
+      }
+    }
+    halo.setMode(HaloMode::Normal);
+    halo.listenLikeUpstream(Serial, dwell, a);
   } else if (!strcmp(line, "forme")) {
     uint32_t dwell = 20000;
     const long v = strtol(arg, nullptr, 10);
