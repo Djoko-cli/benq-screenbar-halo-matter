@@ -198,6 +198,12 @@ class BenqHalo {
   // reconstitue les octets exactement, la ou un echantillonnage par boucle
   // raterait des bits. MISO reste non assigne : on n'emet rien sur le bus.
   void sniffSpiBus(Print &out, uint32_t seconds = 60);
+
+  // Dit, ligne par ligne, si le contact tient. Une ligne reellement pilotee
+  // par l'appareil observe ignore les resistances internes de l'ESP32 ; une
+  // ligne qui flotte les suit docilement. Sans ce controle, une capture de
+  // bruit ressemble a une capture ratee pour une toute autre raison.
+  void tapTest(Print &out);
   // Trace la machine d'etats de la puce pendant une tentative d'entree en RX,
   // puis en TX pour comparaison. Dit ou exactement la transition echoue.
   void diagnoseRx(Print &out);
