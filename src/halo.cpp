@@ -2526,7 +2526,7 @@ void BenqHalo::loopbackTest(Print &out, uint16_t frames) {
 //  Etalonnage a deux cartes
 // ---------------------------------------------------------------------------
 
-void BenqHalo::calibrationBeacon(Print &out, uint32_t seconds) {
+void BenqHalo::calibrationBeacon(Print &out, uint32_t seconds, uint8_t preambleBytes) {
   char line[176];
   if (!radio.present()) {
     out.println("BM5602 absent.");
@@ -2550,6 +2550,26 @@ void BenqHalo::calibrationBeacon(Print &out, uint32_t seconds) {
   Serial.flush();
 
   configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, false);
+
+  // Longueur du preambule EMIS (CFO1 bit 6). Elle conditionne la chasse par le
+  // preambule, qui cherche 'AA AA X' : avec un preambule d'un seul octet ce
+  // motif n'existe pas sur l'air. La rendre explicite permet de tester la
+  // technique sur un emetteur dont on connait deja l'adresse.
+  {
+    uint8_t cfo1 = radio.readRegister(B0_CFO1 | CMD_READ_REGISTER);
+    cfo1 = (preambleBytes >= 2) ? (uint8_t)(cfo1 | 0x40) : (uint8_t)(cfo1 & (uint8_t)~0x40);
+    radio.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER, cfo1);
+    const uint8_t back = radio.readRegister(B0_CFO1 | CMD_READ_REGISTER);
+    snprintf(line, sizeof(line), "  Preambule : %u octet(s) demande, %u effectif (CFO1 0x%02X).",
+             (unsigned)preambleBytes, (back & 0x40) ? 2u : 1u, (unsigned)back);
+    out.println(line);
+    // Le premier bit de l'adresse fixe la polarite du preambule (ds.txt:1409).
+    snprintf(line, sizeof(line), "  Motif attendu sur l'air : %s %s %02X",
+             (kCalAirAddr[0] & 0x80) ? "AA" : "55", (kCalAirAddr[0] & 0x80) ? "AA" : "55",
+             kCalAirAddr[0]);
+    out.println(line);
+    Serial.flush();
+  }
 
   const uint32_t deadline = millis() + seconds * 1000UL;
   uint32_t sent = 0, nextTick = millis() + 5000;
