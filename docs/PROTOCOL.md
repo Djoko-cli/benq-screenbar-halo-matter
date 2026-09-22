@@ -744,3 +744,33 @@ séparer ces deux lectures.
 Variables encore non testées si ce campement ne donne rien : l'**excursion de
 fréquence** et les réglages de **modem** non documentés. Seul le firmware de la
 télécommande, lisible par `SWD` sur `J5`, peut les livrer.
+
+### La contradiction, verrouillée par deux mesures contrôlées
+
+Mesure `presence` du 2026-09-22 à 19h24, bande « très fort » (RSSI ≤ 49 dB),
+trois cycles alternés repos / molette en main :
+
+| Canal | Repos | Molette en main | |
+|---|---:|---:|---|
+| **5 — 2405 MHz** | **5** | **847** | **×169** |
+| 46 — 2446 MHz | 0 | 0 | — |
+| 75 — 2475 MHz | 9 | 14 | — |
+| 80 — témoin BLE | 159 | 146 | plat |
+
+Le témoin ne bouge pas, les deux autres canaux FCC non plus. **La télécommande
+émet sur le canal 5, et le récepteur l'entend très fort.**
+
+Deux minutes plus tôt, une minute entière campée sur ce même canal 5 à
+125 kbps : **1,29 % de signal fort, zéro détection de préambule.** Environ onze
+cents rafales sont passées devant le démodulateur sans qu'une seule soit
+reconnue.
+
+Les deux mesures ont leur propre contrôle et ont été faites dans la même séance.
+**La contradiction est donc établie, pas supposée** : le signal est là, fort, sur
+le bon canal, et un `BC5602` ne reconnaît pas le préambule d'un autre `BC5602`.
+
+Tout ce qui pouvait être balayé l'a été : 84 canaux, 3 débits, 2 longueurs de
+préambule, 3 largeurs d'adresse, 2 séquences d'initialisation. Les variables
+restantes — **excursion de fréquence** et réglages de **modem** non documentés —
+ne sont pas accessibles par balayage. Elles sont dans le firmware de la
+télécommande, lisible par `SWD` sur `J5`.
