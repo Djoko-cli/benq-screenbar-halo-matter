@@ -157,7 +157,7 @@ class BenqHalo {
   // Balaye les 3 canaux FCC et les deux ordres d'octets, a 125 kbps, et
   // vide 32 octets par trame pour voir passer une eventuelle adresse de
   // communication negociee pendant l'appairage.
-  void capturePairing(Print &out, uint32_t seconds = 180);
+  void capturePairing(Print &out, uint32_t seconds = 180, uint8_t onlyChannel = 0);
 
   // Cale le correlateur sur le PREAMBULE plutot que sur l'adresse. Avec une
   // adresse de 3 octets valant 'AA AA X', il accroche les deux octets de

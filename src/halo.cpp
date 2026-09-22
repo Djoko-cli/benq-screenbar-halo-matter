@@ -1871,11 +1871,13 @@ static uint16_t crcOverFrame(uint16_t init, uint8_t pcf, const uint8_t *payload)
 //  Capture pendant l'appairage
 // ---------------------------------------------------------------------------
 
-void BenqHalo::capturePairing(Print &out, uint32_t seconds) {
+void BenqHalo::capturePairing(Print &out, uint32_t seconds, uint8_t onlyChannel) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
     return;
   }
+
+  char line[128];
 
   // Ordre d'ecriture dans le registre ; sur l'air c'est l'inverse.
   const uint8_t addrA[4] = {0xB0, 0x00, 0x08, 0xE2};  // sur l'air : E2 08 00 B0
@@ -1887,10 +1889,19 @@ void BenqHalo::capturePairing(Print &out, uint32_t seconds) {
     const char *addrName;
     uint8_t channel;
   };
+  // En campant sur un seul canal on multiplie par trois le temps passe sur la
+  // combinaison la plus probable -- et le canal 5 n'est pas une supposition,
+  // il a ete mesure (commande 'presence').
   Combo combos[6];
+  uint8_t comboCount = 0;
   for (uint8_t i = 0; i < 3; i++) {
-    combos[i * 2 + 0] = {addrA, "E2 08 00 B0", channels[i]};
-    combos[i * 2 + 1] = {addrB, "B0 00 08 E2", channels[i]};
+    if (onlyChannel && channels[i] != onlyChannel) continue;
+    combos[comboCount++] = {addrA, "E2 08 00 B0", channels[i]};
+    combos[comboCount++] = {addrB, "B0 00 08 E2", channels[i]};
+  }
+  if (comboCount == 0) {  // canal demande hors du dossier FCC : on le prend tel quel
+    combos[comboCount++] = {addrA, "E2 08 00 B0", onlyChannel};
+    combos[comboCount++] = {addrB, "B0 00 08 E2", onlyChannel};
   }
 
   out.println();
@@ -1900,10 +1911,14 @@ void BenqHalo::capturePairing(Print &out, uint32_t seconds) {
   out.println("  c'est forcement la qu'elle transite : c'est le seul moment ou");
   out.println("  elles se parlent sans deja se connaitre.");
   out.println();
-  out.println("  Debit 125 kbps et adresse de 4 octets, valeurs confirmees par le");
-  out.println("  portage qui fonctionne. Balayage des 3 canaux FCC et des deux");
-  out.println("  ordres d'octets : six combinaisons de 3 s, en boucle.");
-  out.println("  32 octets sont vides par trame, sans filtrage de CRC materiel.");
+  snprintf(line, sizeof(line), "  Debit %s, adresse de 4 octets.", dataRateName(dataRate_));
+  out.println(line);
+  int n = snprintf(line, sizeof(line), "  %u combinaison(s) de 3 s en boucle, canal/canaux :",
+                   (unsigned)comboCount);
+  for (uint8_t i = 0; i < comboCount; i += 2)
+    n += snprintf(line + n, sizeof(line) - n, " %u", (unsigned)combos[i].channel);
+  out.println(line);
+  out.println("  32 octets vides par trame, sans filtrage de CRC materiel.");
   out.println();
   out.println("  MANIP A FAIRE, en boucle pendant toute la capture :");
   out.println("   1. debranche l'USB de la lampe");
@@ -1963,7 +1978,6 @@ void BenqHalo::capturePairing(Print &out, uint32_t seconds) {
       // filtre 'time' du moniteur horodate chaque morceau recu, et une ligne
       // ecrite en plusieurs print() ressort eclatee. Sur un vidage hexadecimal
       // ce serait illisible, donc dangereux.
-      char line[128];
       snprintf(line, sizeof(line), "  trame %lu [%u MHz, air %s]", (unsigned long)frames,
                (unsigned)(2400 + cb.channel), cb.addrName);
       out.println(line);
@@ -1989,7 +2003,7 @@ void BenqHalo::capturePairing(Print &out, uint32_t seconds) {
       Serial.flush();
     }
 
-    comboIdx = (uint8_t)((comboIdx + 1) % 6);
+    comboIdx = (uint8_t)((comboIdx + 1) % comboCount);
     delay(1);  // rendre la main : le chien de garde veille
   }
 

@@ -79,7 +79,7 @@ static void cmdHelp() {
   Serial.println("  rxdirect [ms]         reception en mode direct : entree RX + selecteurs GIO2");
   Serial.println("  bande                 ou emet la telecommande : 84 canaux, repos puis molette");
   Serial.println("  cause                 pourquoi la carte a redemarre la derniere fois");
-  Serial.println("  appaire [s]           capture pendant l'appairage : 3 canaux x 2 ordres");
+  Serial.println("  appaire [s] [canal]   capture pendant l'appairage ; canal 0 = les 3 du FCC");
   Serial.println("  preambule [ms]        cale le correlateur sur le preambule, balaie X sur 256");
   Serial.println("  presence              entend-on la telecommande, et sur quel canal");
   Serial.println("  rafale [s] [seuil]    duree des rafales -> en deduit le debit");
@@ -355,10 +355,13 @@ static void handleLine(char *line) {
     halo.huntByPreamble(Serial, dwell);
   } else if (!strcmp(line, "appaire")) {
     uint32_t secs = 180;
-    const long v = strtol(arg, nullptr, 10);
+    char *end = nullptr;
+    const long v = strtol(arg, &end, 10);
     if (v >= 20 && v <= 900) secs = (uint32_t)v;
+    // Argument facultatif : se limiter a un seul canal.
+    const long ch = (end && *end) ? strtol(end, nullptr, 10) : 0;
     halo.setMode(HaloMode::Normal);
-    halo.capturePairing(Serial, secs);
+    halo.capturePairing(Serial, secs, (ch > 0 && ch < 84) ? (uint8_t)ch : 0);
   } else if (!strcmp(line, "cause")) {
     Serial.print("  cause du dernier demarrage : ");
     Serial.println(resetReasonText());

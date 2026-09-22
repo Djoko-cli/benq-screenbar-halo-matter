@@ -436,3 +436,28 @@ jusqu'ici écoutaient à 125 kbps, ce qui suffit à expliquer leurs zéros.
 
 Le débit est désormais réglable et **persisté** (`debit 125|250|500`), au lieu
 d'être codé en dur dans `sharedRadioConfig()`.
+
+## La piste de l'appairage est close
+
+Capture sur l'adresse d'appairage `E2 08 00 B0`, avec pour la première fois un
+récepteur **validé** (421 trames sur 421 au même moment), au **débit mesuré**
+(250 kbps) et sur le **canal mesuré** (5) : **zéro trame**, y compris en campant
+sur le seul canal 5 avec trois fois plus de temps par combinaison.
+
+L'explication n'est pas instrumentale. Observé le 2026-09-22 : la manip
+d'appairage, qui se concluait la veille par un retour de la télécommande en deux
+secondes, **expire désormais systématiquement au bout de dix**, et ce **les deux
+ESP32 débranchés**. La télécommande continue par ailleurs de piloter la lampe.
+
+Autrement dit : la paire est déjà liée, la manip n'a rien à renégocier, et **il
+n'y a aucun échange d'appairage à capturer**. Ne pas relancer cette piste.
+
+## Ce qui reste
+
+L'adresse doit être lue là où elle est écrite en clair : sur le **bus SPI**
+interne de la télécommande ou de la lampe, au démarrage, quand le
+microcontrôleur la charge dans son BC5602 (commande « write PTX address »).
+
+La lampe est sans doute la cible la plus simple : plus volumineuse, alimentée en
+USB donc facile à redémarrer à volonté, et elle porte la même adresse que la
+télécommande. Un ESP32 suffit à capturer ce bus.
