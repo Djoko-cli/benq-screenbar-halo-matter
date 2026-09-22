@@ -3421,6 +3421,93 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 //
 //  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  Reception Halo 1, structure de trame etablie.
+//
+//  Trame : adresse 4 octets + charge utile 6 octets + CRC-16/CCITT (0x1021,
+//  init 0xFFFF) couvrant l'adresse ET la charge utile. Etabli le 2026-09-22 sur
+//  une trame recue a la fois par le CC2500 en flux brut et par le moteur de
+//  paquets du BM5602 : 06 B9 21 BB 98 FF suivi de 7A FF.
+//
+//  Le Halo 2 utilise dix octets de charge utile ; le Halo 1 en utilise six.
+//  C'est pourquoi les lectures a treize octets debordaient sur la retransmission
+//  suivante -- on y lisait son preambule et son adresse, decales d'un bit.
+//
+//  Le CRC est verifie PAR LE MATERIEL : toute trame rendue ici est exacte, ce
+//  qui evite d'avoir a filtrer les erreurs binaires en logiciel.
+// ---------------------------------------------------------------------------
+void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  out.println();
+  out.println("=== Reception Halo 1 : 6 octets de charge utile, CRC materiel ===");
+  snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X.", (unsigned)channel_,
+           dataRateName(dataRate_), addr_[0], addr_[1], addr_[2], addr_[3]);
+  out.println(line);
+  out.println("  Le CRC est verifie par la puce : toute trame affichee est exacte.");
+  out.println("  >>> TOURNE LA MOLETTE, ou agis sur la telecommande.");
+  out.println();
+  Serial.flush();
+
+  // Chemin sans reset logiciel, celui du projet amont : le reset efface 15 des
+  // 19 valeurs analogiques recommandees.
+  radio.command(CMD_LIGHT_SLEEP);
+  radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+  radio.setBank(0);
+  radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);
+  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | dataRate_));
+  radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr_, 4);
+  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
+  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 6);
+  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, PKT1_CRC_ENABLE);
+  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
+  radio.clearInterrupts();
+  radio.command(CMD_FLUSH_RX_FIFO);
+  radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
+  radio.command(CMD_RX_MODE);
+
+  uint8_t total = 0;
+  const uint8_t ok = radio.registerVerify(&total);
+  radio.setBank(0);
+  snprintf(line, sizeof(line), "  Reglages analogiques en place : %u sur %u. OMST %u.", ok, total,
+           (unsigned)radio.operationMode());
+  out.println(line);
+  Serial.flush();
+
+  uint32_t frames = 0, strong = 0, checks = 0;
+  const uint32_t until = millis() + dwellMs;
+  while ((int32_t)(millis() - until) < 0) {
+    const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
+    if (irq & IRQ_RX_DR) {
+      uint8_t buf[6];
+      radio.readFifo(buf, 6, false);
+      frames++;
+      snprintf(line, sizeof(line), "  TRAME %3lu : %02X %02X %02X %02X %02X %02X",
+               (unsigned long)frames, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+      out.println(line);
+      Serial.flush();
+      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
+      radio.command(CMD_FLUSH_RX_FIFO);
+    }
+    if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
+    if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+    checks++;
+    delay(1);
+  }
+
+  out.println();
+  snprintf(line, sizeof(line), "  %lu trame(s) exacte(s), signal fort %lu/%lu.",
+           (unsigned long)frames, (unsigned long)strong, (unsigned long)checks);
+  out.println(line);
+}
+
+
 void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
                                   uint8_t payloadLen) {
   if (!radio.present()) {
