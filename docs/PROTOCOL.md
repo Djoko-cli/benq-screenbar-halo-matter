@@ -1087,3 +1087,42 @@ donc sans valeur), et toute capture DECLENCHEE sur le RSSI -- lire le RSSI coute
 190 us quand preambule et adresse n'en durent que 384 : l'adresse est passee
 avant qu'on echantillonne. Seules la chasse par CRC et la recherche de
 sequences repetees ont survecu a leur controle.
+
+## Structure de trame Halo 1, confirmee sans le CRC (2026-09-22, nuit)
+
+L'analyse des captures brutes de 32 octets du BM5602 donne une confirmation
+INDEPENDANTE du CRC : l'adresse de la retransmission suivante se trouve
+systematiquement au bit **72 ou 73** apres celle de la trame en cours, deux fois
+avec **zero bit faux**. Or 72 = 48 + 16 + 8 :
+
+```
+| adresse 32 b | charge utile 48 b | CRC 16 b | preambule 8 b | adresse suivante...
+```
+
+Soit six octets de charge utile, deux de CRC, un octet de preambule. Cela
+recoupe exactement la seule trame dont le CRC a valide
+(`06 B9 21 BB 98 FF` + `7A FF`) et confirme que le Halo 1 utilise six octets la
+ou le Halo 2 en utilise dix.
+
+**Hypotheses ecartees par la mesure :**
+
+- *Ecart de debit.* Balayage fin du CC2500, DRATE_M de 46 a 72, soit 119,8 a
+  130,1 kbit/s par pas de 0,32 % : les detections d'adresse sont reparties
+  uniformement sur toute la plage, **sans pic**, et aucun CRC ne valide nulle
+  part. Un ecart de debit aurait donne un maximum franc.
+- *Distance.* Les deux modules sont a 25 cm l'un de l'autre : la telecommande
+  etait deja proche du BM5602.
+- *Vote majoritaire.* Sans objet en l'etat : les rafales ne livrent qu'une ou
+  deux copies, jamais les trois qu'un vote demande.
+
+**Anomalie a reprendre en priorite.** La meme commande donne
+`06 B9 21 BB 98 FF` + `7A FF` (CRC VALIDE) dans une lecture de 13 octets, et
+`06 B9 21 BB FF 3F` + `7F 9B` dans une lecture de 32. Les quatre premiers
+octets concordent, les suivants non. **Changer RXPW0 change le contenu recu**,
+ce qui ne devrait pas arriver et explique probablement le faible rendement.
+Reprendre avec `RXPW0 = 8`, la valeur qui a produit la seule trame valide.
+
+**Le chien de garde des interruptions** se declenchait sur les captures : 32768
+bits a 125 kbit/s font 260 ms d'interruptions masquees pour un seuil de 300.
+Toutes les captures passent desormais par `ccSampleBits`, qui masque par
+tranches de 8192 bits.

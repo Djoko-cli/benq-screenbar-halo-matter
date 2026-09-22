@@ -3515,6 +3515,19 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
       radio.command(CMD_FLUSH_RX_FIFO);
       radio.command(CMD_RX_MODE);
 
+      // Vidage brut des 32 octets vers l'ordinateur. L'analyse embarquee
+      // suppose une charge utile de 6 octets ; rien ne garantit qu'elle soit
+      // constante, et sur le Mac on peut essayer toutes les longueurs sans
+      // refaire la manipulation.
+      {
+        char raw[100];
+        size_t w = (size_t)snprintf(raw, sizeof(raw), "BRUT ");
+        for (uint8_t k = 0; k < 32; k++)
+          w += (size_t)snprintf(raw + w, sizeof(raw) - w, "%02X", buf[k]);
+        out.println(raw);
+        Serial.flush();
+      }
+
       // La premiere copie commence juste apres l'adresse, deja consommee par
       // le correlateur.
       nGroup = 0;
