@@ -97,6 +97,10 @@ static void cmdHelp() {
   Serial.println("  canalgio [ms]         trouve le canal demodulable, sans connaitre l'adresse");
   Serial.println("  canalpico [ms]        meme balayage, avec la sequence du pilote tiers");
   Serial.println("  largeur [ms]          balaie les adresses de 3, 4 et 5 octets x 84 canaux");
+  Serial.println("  modem [banque reg]    balaie CFO1, ou un registre donne, en guettant GIO3");
+  Serial.println("  survie                les valeurs recommandees survivent-elles au reset ?");
+  Serial.println("  holtek [0|1]          reappliquer les reglages analogiques apres chaque reset");
+  Serial.println("  fil                   le fil GIO3 fait-il contact ? (test electrique)");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -334,6 +338,28 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 10000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.checkGio3Correlator(Serial, dwell);
+  } else if (!strcmp(line, "holtek")) {
+    if (*arg) halo.setHoltekTuning(strtol(arg, nullptr, 10) != 0);
+    Serial.print("Reglages analogiques Holtek reappliques apres reset : ");
+    Serial.println(halo.holtekTuning() ? "oui" : "non");
+  } else if (!strcmp(line, "survie")) {
+    halo.setMode(HaloMode::Normal);
+    halo.compareAfterReset(Serial);
+  } else if (!strcmp(line, "modem")) {
+    char *end = nullptr;
+    long bank = -1, reg = 0;
+    if (*arg) {
+      bank = strtol(arg, &end, 10);
+      if (end && *end) reg = strtol(end, &end, 16);
+      if (bank < 0 || bank > 2) bank = -1;
+    }
+    uint32_t dwell = 800;
+    if (end && *end) {
+      const long v = strtol(end, nullptr, 10);
+      if (v >= 100 && v <= 10000) dwell = (uint32_t)v;
+    }
+    halo.setMode(HaloMode::Normal);
+    halo.sweepModemRegister(Serial, (int)bank, (uint8_t)reg, dwell);
   } else if (!strcmp(line, "largeur")) {
     uint32_t dwell = 600;
     const long v = strtol(arg, nullptr, 10);
@@ -370,6 +396,9 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 15000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.probeRateByGio3(Serial, dwell);
+  } else if (!strcmp(line, "fil")) {
+    halo.setMode(HaloMode::Normal);
+    halo.checkGio3Wire(Serial);
   } else if (!strcmp(line, "gio3")) {
     uint32_t dwell = 1500;
     const long v = strtol(arg, nullptr, 10);

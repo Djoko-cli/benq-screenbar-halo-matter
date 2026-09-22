@@ -93,6 +93,11 @@ class BenqHalo {
   // apres un flash rendrait toute chasse sourde sans le dire.
   uint8_t dataRate() const { return dataRate_; }
   void setDataRate(uint8_t rate);
+
+  // Reappliquer ou non les reglages analogiques Holtek apres chaque reset.
+  // Ils etaient effaces par le reset et donc jamais actifs en ecoute.
+  void setHoltekTuning(bool on);
+  bool holtekTuning() const { return applyHoltekTuning_; }
   static const char *dataRateName(uint8_t rate);
   uint8_t channel() const { return channel_; }
 
@@ -211,6 +216,8 @@ class BenqHalo {
   // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
+  // Test electrique du fil GIO3, sans la radio.
+  void checkGio3Wire(Print &out);
   void sweepGio3(Print &out, uint32_t dwellMs = 1500);
 
   // Determine le DEBIT de la source sans connaitre son adresse. GIO3 ne
@@ -238,6 +245,19 @@ class BenqHalo {
   // largeur fausse fait decouper la trame au mauvais endroit : le
   // correlateur ne peut alors rien accrocher, quel que soit le reste.
   void sweepAddressWidths(Print &out, uint32_t dwellMs = 600);
+
+  // Balaie un registre de modem en surveillant GIO3. Sans argument, cible
+  // les six bits de poids faible de CFO1 -- registre litteralement nomme
+  // 'Carrier Frequency Offset', dont ces bits sont marques reserves. Un
+  // decalage de porteuse expliquerait qu'un emetteur audible reste
+  // indemodulable.
+  void sweepModemRegister(Print &out, int bank = -1, uint8_t reg = 0,
+                          uint32_t dwellMs = 800);
+
+  // Les 'valeurs recommandees' survivent-elles au reset logiciel ? Si non,
+  // elles ne sont jamais actives pendant les chasses -- qui commencent
+  // toutes par un reset -- et les balayer serait explorer du vide.
+  void compareAfterReset(Print &out);
 
   // LA question decisive : les sorties trouvees sur GIO3 sont-elles AVANT
   // ou APRES le correlateur ? On refait la mesure avec une adresse fausse.
@@ -361,6 +381,7 @@ class BenqHalo {
   // tension, ce qui effacait silencieusement le reglage.
   bool preambleTwoBytes_ = false;
   uint8_t dataRate_ = bc5602::DATARATE_125K;
+  bool applyHoltekTuning_ = true;
   uint32_t sweepAt_ = 0;
 
   // mode Finder

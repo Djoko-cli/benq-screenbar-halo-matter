@@ -83,6 +83,21 @@ const RegInit kRecommended[] = {
 };
 }  // namespace
 
+// Relecture seule : combien des valeurs recommandees sont REELLEMENT en place
+// a cet instant ? Sert de temoin a une mesure -- un resultat nul obtenu avec un
+// modem revenu a ses valeurs d'usine ne dit rien du signal cherche.
+uint8_t BC5602::registerVerify(uint8_t *total) {
+  const uint8_t saved = bank();
+  uint8_t ok = 0;
+  for (const RegInit &r : kRecommended) {
+    setBank(r.bank);
+    if (readRegister(r.reg | CMD_READ_REGISTER) == r.val) ok++;
+  }
+  setBank(saved);
+  if (total) *total = (uint8_t)(sizeof(kRecommended) / sizeof(kRecommended[0]));
+  return ok;
+}
+
 uint8_t BC5602::registerConfigure(Print *out) {
   uint8_t bank = 0xFF;
   for (const RegInit &r : kRecommended) {
