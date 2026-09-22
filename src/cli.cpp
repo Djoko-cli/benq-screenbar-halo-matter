@@ -91,7 +91,10 @@ static void cmdHelp() {
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
   Serial.println("  swd                   cherche SWDIO et interroge le microcontroleur");
   Serial.println("  syncpayload [ms]      le correlateur sait-il se caler au milieu d'une trame ?");
+  Serial.println("  ancre [s] [1|2] [K] [lum]  chasse ancree ; K et lum arriere imposables");
   Serial.println("  gio3 [ms]             balaie les 16 valeurs du selecteur GIO3 en reception");
+  Serial.println("  debitgio [ms]         trouve le debit de la source, sans connaitre l'adresse");
+  Serial.println("  canalgio [ms]         trouve le canal demodulable, sans connaitre l'adresse");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -329,12 +332,48 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 10000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.checkGio3Correlator(Serial, dwell);
+  } else if (!strcmp(line, "canalgio")) {
+    // canalgio [ms] [premier] [dernier] : restreindre la plage permet un temps
+    // de pose bien plus long, donc d'attraper un emetteur qui parle par a-coups.
+    char *end = nullptr;
+    uint32_t dwell = 700;
+    const long v = strtol(arg, &end, 10);
+    if (v >= 200 && v <= 20000) dwell = (uint32_t)v;
+    long from = 0, to = 83;
+    if (end && *end) {
+      from = strtol(end, &end, 10);
+      if (end && *end) to = strtol(end, nullptr, 10);
+    }
+    if (from < 0 || from > 83) from = 0;
+    if (to < from || to > 83) to = 83;
+    halo.setMode(HaloMode::Normal);
+    halo.probeChannelByGio3(Serial, (uint8_t)from, (uint8_t)to, dwell);
+  } else if (!strcmp(line, "debitgio")) {
+    uint32_t dwell = 3000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 500 && v <= 15000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.probeRateByGio3(Serial, dwell);
   } else if (!strcmp(line, "gio3")) {
     uint32_t dwell = 1500;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 300 && v <= 10000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.sweepGio3(Serial, dwell);
+  } else if (!strcmp(line, "ancre")) {
+    char *end = nullptr;
+    long secs = strtol(arg, &end, 10);
+    if (secs < 20 || secs > 1800) secs = 180;
+    long grp = 1, kelvin = 0;
+    if (end && *end) grp = strtol(end, &end, 10);
+    if (end && *end) kelvin = strtol(end, &end, 10);
+    if (kelvin < 2000 || kelvin > 7000) kelvin = 0;
+    long back = -1;
+    if (end && *end) back = strtol(end, nullptr, 10);
+    if (back < 0 || back > 100) back = -1;
+    halo.setMode(HaloMode::Normal);
+    halo.huntAnchored(Serial, (uint32_t)secs, (grp == 2) ? 1 : 0, 60, (uint16_t)kelvin,
+                      (int16_t)back);
   } else if (!strcmp(line, "syncpayload")) {
     uint32_t dwell = 3000;
     const long v = strtol(arg, nullptr, 10);

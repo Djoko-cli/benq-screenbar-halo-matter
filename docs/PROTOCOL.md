@@ -631,3 +631,51 @@ Valeurs d'ancrage utilisables : une température dont l'octet bas vaut `0x55`
 À noter : l'accrochage sur le **préambule lui-même** reste impossible, et pour une
 raison qui découle du même mécanisme — rien ne précède le préambule, il ne peut
 donc pas être ancré.
+
+## La chasse ancrée appliquée au Halo 1 — sans résultat
+
+Le mécanisme d'ancrage est **validé sur le banc** (voir ci-dessus : un positif,
+sept négatifs). Appliqué à la télécommande du Halo 1, il ne donne rien.
+
+Mesures du 2026-09-22, télécommande remontée et molette tournée sans arrêt,
+témoin de trafic positif à chaque fois (12 à 13 pour mille de signal fort,
+pics à 19-20 dB) :
+
+| Configuration | Candidats | Accroches |
+|---|---:|---:|
+| 32 températures d'ancrage × 101 luminosités | 4995 | 1 |
+| lampe arrière éteinte, 32 températures | 3000 (94 passes) | 1 |
+| température imposée à 3925 K, 101 luminosités | 5000 (50 passes) | 2 |
+
+Un motif de 24 bits se retrouve par hasard environ une fois sur 16 millions de
+positions, et il en défile des dizaines de millions par minute : **une à deux
+accroches par run est le bruit attendu**, pas un indice. Leurs contenus sont
+d'ailleurs illisibles et leurs luminosités dispersées.
+
+Trois accroches antérieures, toutes annoncées à 3925 K, avaient semblé
+corréler avec l'affichage de la télécommande. Le test concentré ci-dessus —
+température imposée, 50 passages complets sur la luminosité — aurait produit
+des dizaines d'accroches si cette corrélation avait été réelle. Elle ne l'était
+pas.
+
+**Ce que cela laisse ouvert** : la structure du payload du Halo 1 n'a jamais été
+vérifiée, elle est supposée identique à celle du Halo 2. Si elle diffère, toute
+l'approche par fenêtre ancrée s'effondre — et rien dans nos mesures ne permet de
+trancher.
+
+## Détecteurs sans adresse — ce qu'ils disent
+
+Deux instruments ont été construits qui ne demandent aucune adresse, en
+exploitant le fait que `GIO3` ne s'anime que si un **préambule a été détecté** :
+
+- `debitgio` — balaie les trois débits. **Validé sur la balise** : 434 et 442
+  transitions à son débit réel, zéro aux deux autres. Discrimination parfaite.
+- `canalgio` — balaie les 84 canaux. **Validé sur la balise** : seul son canal
+  ressort, accompagné de son **image** seize canaux plus haut (fréquence
+  intermédiaire de 8 MHz), que le RSSI permet de distinguer du vrai canal.
+
+Appliqués à la télécommande, avec trafic attesté : **aucune transition, à aucun
+débit, sur aucun canal**, préambule de un comme de deux octets.
+
+La puce n'accroche donc jamais le préambule de la télécommande, alors que sa
+carte porte elle aussi un `BC5602`. Ce constat est solide et reste inexpliqué.

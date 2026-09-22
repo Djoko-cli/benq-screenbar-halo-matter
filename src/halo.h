@@ -194,11 +194,37 @@ class BenqHalo {
   // le payload est connu, donc avec la reponse d'avance.
   void validatePayloadSync(Print &out, uint32_t dwellMs = 3000);
 
+  // Chasse a l'adresse par mot de synchro ANCRE. Le detecteur de preambule
+  // ne s'arme que sur une suite alternee : la fenetre visee doit donc etre
+  // precedee d'un octet 0x55 ou 0xAA. On enumere les reglages de lampe qui
+  // produisent une telle ancre, au lieu de balayer a l'aveugle.
+  void huntAnchored(Print &out, uint32_t seconds = 180, uint8_t group = 0,
+                    uint32_t dwellMs = 60, uint16_t fixedKelvin = 0,
+                    int16_t fixedBack = -1);
+
+  // Cherche un preambule puis une adresse dans une capture, aux huit
+  // decalages de bit, et ne retient que ce qui passe le CRC.
+  bool scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len,
+                             const char *context);
+
   // Balaie les seize valeurs du selecteur GIO3 pendant que la balise emet,
   // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
   void sweepGio3(Print &out, uint32_t dwellMs = 1500);
+
+  // Determine le DEBIT de la source sans connaitre son adresse. GIO3 ne
+  // s'anime que si la puce a detecte un preambule, et la detection de
+  // preambule depend du debit : le debit qui fait sortir des transitions
+  // est celui de l'emetteur.
+  void probeRateByGio3(Print &out, uint32_t dwellMs = 3000);
+
+  // Meme principe pour le CANAL : le RSSI voit large, le demodulateur est
+  // etroit. Un signal audible a 2405 MHz peut tres bien etre demodulable
+  // seulement deux megahertz plus loin. On balaie donc la bande en
+  // regardant GIO3, toujours sans connaitre l'adresse.
+  void probeChannelByGio3(Print &out, uint8_t from = 0, uint8_t to = 83,
+                          uint32_t dwellMs = 700);
 
   // LA question decisive : les sorties trouvees sur GIO3 sont-elles AVANT
   // ou APRES le correlateur ? On refait la mesure avec une adresse fausse.
