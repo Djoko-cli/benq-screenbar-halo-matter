@@ -219,6 +219,9 @@ class BenqHalo {
   // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
   void listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen = 32);
 
+  // Emettre des octets bruts apres l'adresse, CRC materiel coupe.
+  void txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t count, uint16_t gapMs);
+
   // Emettre une trame Halo 1 (adresse enregistree + 6 octets + CRC materiel).
   void txHalo1(Print &out, const uint8_t payload[6], uint16_t count, uint16_t gapMs);
 
