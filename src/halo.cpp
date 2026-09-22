@@ -106,6 +106,14 @@ void BenqHalo::sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_
   radio.command(CMD_LIGHT_SLEEP);
   radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
 
+  // Reappliquer les reglages analogiques recommandes par Holtek. Mesure a
+  // l'appui (commande 'survie') : le reset logiciel en efface 15 sur 19, et
+  // comme toute configuration commence par un reset, ils n'ont JAMAIS ete
+  // actifs pendant une ecoute. Ce sont pourtant les reglages du modem --
+  // filtre de canal, LNA, PLL -- donc exactement ce qui decide si un signal
+  // se demodule.
+  if (applyHoltekTuning_) radio.registerConfigure(nullptr);
+
   // AGC_EN : reapplique ici, car tout reset logiciel remet CFG1 a 0x00. Mesure
   // a l'appui (commande 'rxdirect') : avec AGC_EN=0 le plus fort signal recu
   // plafonnait a 85 dB, avec AGC_EN=1 il descend a 41 dB. Toutes les chasses a
@@ -2412,11 +2420,16 @@ static const uint8_t kCalPattern[10] = {0xDE, 0xAD, 0x55, 0x0F, 0xA0, 0x3C, 0x01
 // font les commandes de chasse -- CRC materiel desactive en reception, payload
 // statique, pas d'auto-ACK -- car etalonner une autre configuration que celle
 // qu'on utilise ne prouverait rien.
+static bool gApplyHoltekTuning = true;
+
 static void configForLoopback(BC5602 &r, uint8_t channel, const uint8_t addr[4], bool receiver,
                               uint8_t rate) {
   r.softwareReset();
   delay(20);
   r.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+  // Le reset vient d'effacer les reglages analogiques : les remettre ici, sans
+  // quoi toute la mesure tourne sur les valeurs d'usine.
+  if (gApplyHoltekTuning) r.registerConfigure(nullptr);
   r.setBank(0);
   r.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
   r.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel);
@@ -2951,6 +2964,11 @@ const char *BenqHalo::dataRateName(uint8_t rate) {
   return "125 kbps";
 }
 
+void BenqHalo::setHoltekTuning(bool on) {
+  applyHoltekTuning_ = on;
+  gApplyHoltekTuning = on;
+}
+
 void BenqHalo::setDataRate(uint8_t rate) {
   dataRate_ = rate;
   saveConfig();
@@ -3354,6 +3372,67 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 // ---------------------------------------------------------------------------
 //  Les fonctions cachees de GIO3
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+//  Le fil GIO3 fait-il contact ? Test purement electrique, sans la radio.
+//  On tire la broche vers le haut puis vers le bas avec les resistances
+//  internes de l'ESP32 (~45 kOhm). Si rien n'est branche, la broche suit
+//  docilement les deux. Si la pastille du module la pilote, elle resiste a au
+//  moins une des deux tractions. Ce test ne peut pas etre trompe par l'absence
+//  de signal radio, contrairement a un comptage de fronts.
+// ---------------------------------------------------------------------------
+void BenqHalo::checkGio3Wire(Print &out) {
+  char line[168];
+  out.println();
+  out.println("=== Le fil GIO3 fait-il contact ? ===");
+  out.println("  Pastille 8 du module -> IO3. Test electrique, radio hors jeu.");
+  out.println("  On force la pastille a sortir un niveau, selecteur par");
+  out.println("  selecteur, et on regarde si la broche resiste aux resistances");
+  out.println("  internes de l'ESP32 (~45 kOhm). Une broche qui suit les DEUX");
+  out.println("  tractions n'est reliee a rien.");
+  out.println();
+
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  uint8_t driven = 0;
+
+  for (uint8_t sel = 0; sel < 16; sel++) {
+    radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | sel));
+    delay(2);
+
+    pinMode(PIN_GIO3_TAP, INPUT_PULLUP);
+    delay(3);
+    uint8_t up = 0;
+    for (uint8_t i = 0; i < 20; i++) { up += digitalRead(PIN_GIO3_TAP) ? 1 : 0; delayMicroseconds(200); }
+
+    pinMode(PIN_GIO3_TAP, INPUT_PULLDOWN);
+    delay(3);
+    uint8_t dn = 0;
+    for (uint8_t i = 0; i < 20; i++) { dn += digitalRead(PIN_GIO3_TAP) ? 1 : 0; delayMicroseconds(200); }
+
+    // Pilotee = elle tient un niveau CONTRE la resistance qui tire a l'oppose.
+    const bool heldHigh = (dn >= 18);
+    const bool heldLow = (up <= 2);
+    if (heldHigh || heldLow) driven++;
+    snprintf(line, sizeof(line), "  GIO3S=%-2u  tirage haut %2u/20   tirage bas %2u/20   %s", (unsigned)sel,
+             up, dn, heldHigh ? "PILOTEE a 1" : (heldLow ? "PILOTEE a 0" : "libre"));
+    out.println(line);
+    delay(1);
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+  pinMode(PIN_GIO3_TAP, INPUT);
+
+  out.println();
+  if (driven == 0) {
+    out.println("  Aucun selecteur ne tient la broche contre les resistances");
+    out.println("  internes. LE FIL NE FAIT PAS CONTACT. Toute mesure GIO3");
+    out.println("  faite dans cet etat est nulle et non avenue.");
+  } else {
+    snprintf(line, sizeof(line), "  %u selecteur(s) pilotent la broche : le fil fait contact.",
+             (unsigned)driven);
+    out.println(line);
+  }
+}
 
 void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
   if (!radio.present()) {
@@ -4204,6 +4283,18 @@ void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t
   const uint8_t savedChannel = channel_;
   const uint32_t mask = 1UL << PIN_GIO3_TAP;
 
+  // Temoin de reglage du modem. Le reset logiciel efface 15 des 19 valeurs
+  // recommandees ; comme toute configuration commence par un reset, la mesure
+  // doit dire elle-meme sur quels reglages elle a tourne.
+  configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+  uint8_t tunedTotal = 0;
+  const uint8_t tunedOk = radio.registerVerify(&tunedTotal);
+  snprintf(line, sizeof(line), "  Reglages analogiques en place au moment de la mesure : %u sur %u.",
+           (unsigned)tunedOk, (unsigned)tunedTotal);
+  out.println(line);
+  out.println();
+  Serial.flush();
+
   uint32_t best = 0, bestStrong = 0, bestStrongChecks = 1, totalStrong = 0, totalChecks = 1;
   uint8_t bestChannel = 0, bestStrongChannel = 0;
   uint8_t hits = 0;
@@ -4538,6 +4629,199 @@ void BenqHalo::sweepAddressWidths(Print &out, uint32_t dwellMs) {
     out.println("  Aucune largeur ne change quoi que ce soit. Cette variable est");
     out.println("  eliminee : il reste l'excursion de frequence et les reglages de");
     out.println("  modem non documentes.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Balayage d'un registre de modem
+// ---------------------------------------------------------------------------
+
+void BenqHalo::sweepModemRegister(Print &out, int bank, uint8_t reg, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+  const bool cfoMode = (bank < 0);
+  const uint16_t count = cfoMode ? 64 : 256;
+
+  out.println();
+  out.println("=== Balayage d'un registre de modem ===");
+  if (cfoMode) {
+    out.println("  Cible : les six bits de poids faible de CFO1 (0x21), registre");
+    out.println("  nomme 'Carrier Frequency Offset Control'. Le datasheet les dit");
+    out.println("  reserves, mais l'intitule du registre suggere un decalage de");
+    out.println("  porteuse -- ce qui expliquerait qu'un emetteur audible reste");
+    out.println("  indemodulable. 64 valeurs.");
+  } else {
+    snprintf(line, sizeof(line), "  Cible : banque %d, registre 0x%02X, 256 valeurs.", bank,
+             (unsigned)reg);
+    out.println(line);
+  }
+  snprintf(line, sizeof(line), "  Canal %u, debit %s, %lu ms par valeur.", (unsigned)channel_,
+           dataRateName(dataRate_), (unsigned long)dwellMs);
+  out.println(line);
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER PENDANT TOUT LE BALAYAGE.");
+  out.println();
+  Serial.flush();
+
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+  uint32_t best = 0;
+  uint16_t bestValue = 0;
+  uint32_t totalStrong = 0, totalChecks = 1;
+
+  for (uint16_t v = 0; v < count; v++) {
+    configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+
+    if (cfoMode) {
+      const uint8_t cfo = radio.readRegister(B0_CFO1 | CMD_READ_REGISTER);
+      // Conserver AMBLE2 (bit 6) et ne toucher qu'aux six bits bas.
+      radio.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER,
+                          (uint8_t)((cfo & 0xC0) | (uint8_t)(v & 0x3F)));
+    } else {
+      radio.setBank((uint8_t)bank);
+      radio.writeRegister(reg | CMD_WRITE_REGISTER, (uint8_t)v);
+      radio.setBank(0);
+    }
+
+    radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER,
+                        (uint8_t)((radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0) | 14));
+    radio.enterRxMode();
+    pinMode(PIN_GIO3_TAP, INPUT);
+
+    uint32_t edges = 0, strong = 0, checks = 0;
+    uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+    const uint32_t until = millis() + dwellMs;
+
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint16_t burst = 0; burst < 512; burst++) {
+        const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+        if (now != last) {
+          edges++;
+          last = now;
+        }
+      }
+      if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+      checks++;
+    }
+
+    totalStrong += strong;
+    totalChecks += checks;
+
+    if (edges > 10) {
+      snprintf(line, sizeof(line), "  valeur 0x%02X : %lu transitions, signal fort %lu/%lu   <<<",
+               (unsigned)v, (unsigned long)edges, (unsigned long)strong, (unsigned long)checks);
+      out.println(line);
+      Serial.flush();
+    }
+    if (edges > best) {
+      best = edges;
+      bestValue = v;
+    }
+    delay(1);
+  }
+
+  // Remettre la puce dans un etat sain.
+  configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+
+  out.println();
+  snprintf(line, sizeof(line), "  Trafic pendant le balayage : %lu pour mille de signal fort.",
+           (unsigned long)(totalStrong * 1000UL / totalChecks));
+  out.println(line);
+  if (best > 10) {
+    snprintf(line, sizeof(line), "  Meilleure valeur : 0x%02X, %lu transitions.",
+             (unsigned)bestValue, (unsigned long)best);
+    out.println(line);
+    out.println("  Ce reglage fait accrocher le demodulateur : c'est lui qu'on");
+    out.println("  cherchait. Note-le, il conditionne tout le reste.");
+  } else {
+    out.println("  Aucune valeur ne fait accrocher. Si le trafic etait present,");
+    out.println("  ce registre n'est pas en cause.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Les valeurs recommandees survivent-elles au reset logiciel ?
+// ---------------------------------------------------------------------------
+
+void BenqHalo::compareAfterReset(Print &out) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  struct RegRef {
+    uint8_t bank;
+    uint8_t addr;
+    uint8_t recommended;
+  };
+  // Les valeurs recommandees par Holtek, telles que registerConfigure() les ecrit.
+  const RegRef refs[] = {
+      {0, 0x0D, 0x20}, {0, 0x0F, 0x14}, {0, 0x16, 0x66}, {0, 0x17, 0xAA}, {0, 0x18, 0x45},
+      {1, 0x20, 0x0C}, {1, 0x21, 0x03}, {1, 0x23, 0x10}, {1, 0x25, 0xCC}, {1, 0x26, 0x4C},
+      {1, 0x27, 0x80}, {2, 0x28, 0xA0}, {2, 0x2D, 0x18}, {2, 0x2E, 0xEC}, {2, 0x36, 0x03},
+      {2, 0x38, 0x0A}, {2, 0x39, 0x12}, {2, 0x3B, 0x94}, {2, 0x3C, 0x43},
+  };
+  const uint8_t n = sizeof(refs) / sizeof(refs[0]);
+
+  out.println();
+  out.println("=== Les valeurs recommandees survivent-elles au reset ? ===");
+  out.println("  Toutes nos configurations commencent par un reset logiciel. Si");
+  out.println("  celui-ci restaure les valeurs d'usine, alors les valeurs que nous");
+  out.println("  ecrivons au demarrage ne sont JAMAIS actives pendant les chasses,");
+  out.println("  et les balayer reviendrait a explorer quelque chose d'inerte.");
+  out.println();
+
+  uint8_t before[32];
+  for (uint8_t i = 0; i < n; i++) {
+    radio.setBank(refs[i].bank);
+    before[i] = radio.readRegister(refs[i].addr | CMD_READ_REGISTER);
+  }
+  radio.setBank(0);
+
+  radio.softwareReset();
+  delay(20);
+  radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+  radio.setBank(0);
+
+  uint8_t changed = 0, matchesRecommended = 0;
+  out.println("  banque reg   avant   apres reset   recommande");
+  for (uint8_t i = 0; i < n; i++) {
+    radio.setBank(refs[i].bank);
+    const uint8_t after = radio.readRegister(refs[i].addr | CMD_READ_REGISTER);
+    radio.setBank(0);
+
+    if (after != before[i]) changed++;
+    if (after == refs[i].recommended) matchesRecommended++;
+
+    snprintf(line, sizeof(line), "    %u    0x%02X   0x%02X      0x%02X          0x%02X   %s",
+             (unsigned)refs[i].bank, (unsigned)refs[i].addr, (unsigned)before[i], (unsigned)after,
+             (unsigned)refs[i].recommended, (after != before[i]) ? "EFFACE" : "");
+    out.println(line);
+    Serial.flush();
+  }
+
+  out.println();
+  snprintf(line, sizeof(line), "  %u registre(s) sur %u modifies par le reset ;", (unsigned)changed,
+           (unsigned)n);
+  out.println(line);
+  snprintf(line, sizeof(line), "  %u sur %u portent encore la valeur recommandee apres reset.",
+           (unsigned)matchesRecommended, (unsigned)n);
+  out.println(line);
+  out.println();
+  if (changed > n / 2) {
+    out.println("  Le reset logiciel efface l'essentiel de ces reglages. Ils ne");
+    out.println("  sont donc PAS actifs pendant les chasses, qui commencent toutes");
+    out.println("  par un reset -- inutile de les balayer.");
+  } else {
+    out.println("  Ces reglages survivent au reset : ils sont bien actifs pendant");
+    out.println("  les chasses, et les balayer a donc un sens.");
   }
   out.println();
 }

@@ -774,3 +774,42 @@ préambule, 3 largeurs d'adresse, 2 séquences d'initialisation. Les variables
 restantes — **excursion de fréquence** et réglages de **modem** non documentés —
 ne sont pas accessibles par balayage. Elles sont dans le firmware de la
 télécommande, lisible par `SWD` sur `J5`.
+
+
+## Le reset logiciel efface les reglages analogiques (2026-09-22)
+
+Mesure `survie` : sur les 19 valeurs recommandees par Holtek, **15 sont
+remises a leur valeur d'usine par un reset logiciel**. Or `resetRadio()`,
+`configForLoopback()` et `sharedRadioConfig()` commencent tous par un reset.
+
+Consequence : de l'ecriture de ces valeurs dans `begin()` jusqu'au 22 septembre,
+**elles n'ont jamais ete actives pendant une ecoute**. Tous les balayages de
+canaux, de debits, de largeurs d'adresse et de longueurs de preambule ont tourne
+sur un modem aux valeurs d'usine. Exception : le balayage `modem`, qui ecrit son
+registre apres la configuration.
+
+Corrige : `registerConfigure()` est rejoue apres chaque reset, dans les deux
+chemins de configuration, pilotable par `holtek 0|1`. Le temoin est imprime par
+la mesure elle-meme : **18 sur 19** en place (le 19e est l'anomalie connue du
+registre 0x2D de la banque 2, ecrit 0x18 et relu 0x58).
+
+Premiere chasse avec les reglages actifs, canaux 3 a 7, 125 kbps, 30 s chacun :
+canal 5 a 2433 signaux forts sur 145713 (16,7 pour mille contre 7 de moyenne sur
+la bande, et 4,5 au repos) -- la telecommande est bien entendue -- mais **zero
+transition sur GIO3**.
+
+## Le fil GIO3 est valide electriquement (2026-09-22)
+
+Commande `fil` : on force la pastille a sortir un niveau, selecteur par
+selecteur, et on regarde si la broche resiste aux resistances internes de
+l'ESP32. Les 16 selecteurs pilotent la broche a un niveau franc (0/20 ou 20/20
+contre les DEUX tractions), et **le niveau change avec le selecteur**. Cela
+valide la chaine entiere : ecriture SPI -> pastille -> fil -> lecture ESP32.
+
+Ce test ne demande aucune source radio, contrairement a un comptage de fronts :
+il distingue un fil debranche d'une absence de signal, ce qu'un zero de
+transitions ne sait pas faire.
+
+Reste a valider fonctionnellement : qu'un selecteur BOUGE quand une trame
+arrive. Cela demande la balise sur la deuxieme carte, actuellement debranchee.
+Les selecteurs 2, 4, 9 et 14 avaient ete vus actifs -- avec la balise allumee.

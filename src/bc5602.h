@@ -154,6 +154,9 @@ class BC5602 {
   // reset ne sont PAS les valeurs operationnelles -- sans cette etape le SPI
   // fonctionne parfaitement et la reception ne demodule rien.
   // Renvoie le nombre de registres qui ne se relisent pas a la valeur ecrite.
+  // Temoin de reglage : nombre de valeurs recommandees encore en place.
+  uint8_t registerVerify(uint8_t *total = nullptr);
+
   uint8_t registerConfigure(Print *out = nullptr);
   // Lance la calibration du VCO et attend que le materiel remette ACAL_EN a
   // zero. Renvoie false si elle n'a pas abouti dans le delai imparti.
