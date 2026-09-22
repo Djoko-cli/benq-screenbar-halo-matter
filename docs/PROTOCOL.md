@@ -574,3 +574,32 @@ une vraie liaison d'une lecture heureuse.
 Réserve connue : Artery livre souvent ses microcontrôleurs avec la lecture de la
 flash verrouillée. La liaison peut donc s'établir sans que le contenu soit
 accessible.
+
+## L'accrochage en milieu de trame est impossible — démontré
+
+La commande `find` reposait sur un procédé jamais validé : donner au corrélateur
+trois octets pris dans le **payload** comme pseudo-adresse, en espérant qu'il s'y
+cale et livre la suite de la trame.
+
+**Testé le 2026-09-22 contre la balise d'étalonnage**, dont le payload est connu
+(`DE AD BE EF 01 02 03 04 05 06`), pendant qu'elle confirmait **2895 émissions
+par `TX_DS`** et avec un récepteur validé le même jour :
+
+| Fenêtre | Octets | Trames reçues |
+|---|---|---:|
+| 0-2 | `DE AD BE` | 0 |
+| 1-3 | `AD BE EF` | 0 |
+| … | … | 0 |
+| 7-9 | `04 05 06` | 0 |
+
+**Aucune des huit fenêtres n'accroche, alors qu'on connaissait la réponse.** Le
+corrélateur ne se cale qu'après un **préambule valide** : il ne peut pas
+s'accrocher en milieu de trame.
+
+`find` était donc structurellement condamnée depuis le début, au même titre que
+l'accrochage sur le préambule. Les deux procédés sont clos.
+
+**Conséquence** : il n'existe plus aucune voie purement RF vers l'adresse. Le
+corrélateur l'exige, et aucune ruse ne le contourne. Elle doit être lue là où
+elle est écrite en clair — sur le bus SPI de la télécommande, ou dans la flash de
+son microcontrôleur via `SWD`.

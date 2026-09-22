@@ -90,6 +90,7 @@ static void cmdHelp() {
   Serial.println("  autotest              verifie la carte maillon par maillon, sans partenaire");
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
   Serial.println("  swd                   cherche SWDIO et interroge le microcontroleur");
+  Serial.println("  syncpayload [ms]      le correlateur sait-il se caler au milieu d'une trame ?");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
   Serial.println("  debit [125|250|500]   debit radio, persiste ; sans argument, affiche");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
@@ -314,6 +315,12 @@ static void handleLine(char *line) {
     if (v >= 3 && v <= 120) secs = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.tapTest(Serial, secs);
+  } else if (!strcmp(line, "syncpayload")) {
+    uint32_t dwell = 3000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 500 && v <= 20000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.validatePayloadSync(Serial, dwell);
   } else if (!strcmp(line, "swd")) {
     halo.setMode(HaloMode::Normal);
     Serial.println();
