@@ -11,5 +11,8 @@ void cliBegin();
 void ccIdentify(Print &out);
 void ccDiagnose(Print &out);
 void ccRawProbe(Print &out);
+void ccListen(Print &out, uint32_t dwellMs);
+void ccCapture(Print &out, uint32_t pattern, uint32_t nbits);
+void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats);
 extern uint8_t ccPins[8];
 void cliPoll();
