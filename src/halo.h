@@ -219,6 +219,12 @@ class BenqHalo {
   // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
   void listenHalo1(Print &out, uint32_t dwellMs);
 
+  // Ecart au-dela duquel deux trames appartiennent a des rafales distinctes.
+  static constexpr uint32_t kBurstGapMs = 40;
+  uint16_t halo1Crc(const uint8_t payload[6]) const;
+  void groupVerdict(Print &out, const uint8_t group[][8], uint8_t n, uint32_t &exact,
+                    uint32_t &repaired);
+
   // La sequence de reception du projet amont, sans reset logiciel.
   void listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
                           uint8_t payloadLen = 13);

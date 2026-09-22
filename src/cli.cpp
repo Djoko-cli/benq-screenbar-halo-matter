@@ -124,6 +124,7 @@ static void cmdHelp() {
   Serial.println("  cccommun [seuil]      ce que deux salves ont en commun : aucune hypothese");
   Serial.println("  ccdump [seuil] [n]    vidage brut des salves, pour analyse sur l'ordinateur");
   Serial.println("  ccflux [bits] [n]     capture CONTINUE videe telle quelle (pas de declenchement)");
+  Serial.println("  ccdebit [lo] [hi] [n] a quel debit EXACT la telecommande emet-elle ?");
   Serial.println("  ccfreq [span] [pas] [ms]  sur quelle frequence la source est-elle centree ?");
   Serial.println("  ccoff [seuil] [ms]    ecart de porteuse mesure par la puce (FREQEST)");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
@@ -471,6 +472,16 @@ static void handleLine(char *line) {
       if (v >= 200 && v <= 20000) d = (uint32_t)v;
     }
     ccFreqSweep(Serial, span, step, d);
+  } else if (!strcmp(line, "ccdebit")) {
+    char *end = nullptr;
+    long lo = 46, hi = 72, n = 3;
+    if (*arg) lo = strtol(arg, &end, 10);
+    if (lo < 0 || lo > 255) lo = 46;
+    if (end && *end) hi = strtol(end, &end, 10);
+    if (hi < lo || hi > 255) hi = 72;
+    if (end && *end) n = strtol(end, nullptr, 10);
+    if (n < 1 || n > 10) n = 3;
+    ccRateSweep(Serial, (uint8_t)lo, (uint8_t)hi, (uint8_t)n);
   } else if (!strcmp(line, "ccflux")) {
     char *end = nullptr;
     uint32_t nb = 32768;
@@ -1171,6 +1182,44 @@ static uint8_t ccMatchBits(const uint8_t *buf, uint32_t at, uint32_t pattern, bo
   return same;
 }
 
+// ---------------------------------------------------------------------------
+//  Echantillonnage du flux du CC2500, PAR TRANCHES.
+//
+//  Garder les interruptions masquees pendant toute une capture de 32768 bits
+//  represente 260 ms a 125 kbit/s, et davantage aux debits plus lents. Le chien
+//  de garde des interruptions se declenche a 300 ms : mesure a l'appui, la
+//  carte a redemarre en plein balayage de debit. On masque donc par tranches de
+//  8192 bits, soit 65 ms, en rendant la main entre elles. Le prix est au pire
+//  une trame perdue par tranche, ce qui est sans commune mesure avec un
+//  redemarrage en pleine mesure.
+//
+//  Renvoie le nombre de bits reellement captures.
+// ---------------------------------------------------------------------------
+static uint32_t ccSampleBits(uint8_t *dst, uint32_t nbits, uint32_t m0, uint32_t m2,
+                             uint32_t timeoutMs) {
+  uint32_t got = 0;
+  const uint32_t deadline = millis() + timeoutMs;
+  uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+  while (got < nbits) {
+    const uint32_t chunkEnd = (got + 8192 > nbits) ? nbits : got + 8192;
+    noInterrupts();
+    while (got < chunkEnd) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) dst[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      if ((got & 0xFF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+    }
+    interrupts();
+    delay(1);
+    if ((int32_t)(millis() - deadline) >= 0) break;
+  }
+  return got;
+}
+
 void ccCapture(Print &out, uint32_t pattern, uint32_t nbits) {
   const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
   if (nbits > sizeof(ccBits) * 8) nbits = sizeof(ccBits) * 8;
@@ -1200,23 +1249,9 @@ void ccCapture(Print &out, uint32_t pattern, uint32_t nbits) {
   memset(ccBits, 0, sizeof(ccBits));
 
   const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
-  uint32_t got = 0;
-  uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
-  // Garde-fou : si l'horloge s'arretait, la boucle tournerait sans fin.
-  const uint32_t deadline = millis() + 2000;
-
-  noInterrupts();
-  while (got < nbits) {
-    const uint32_t now = REG_READ(GPIO_IN_REG);
-    const uint32_t clk = now & m2;
-    if (clk && !prev) {
-      if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
-      got++;
-    }
-    prev = clk;
-    if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
-  }
-  interrupts();
+  // Capture par tranches : voir ccSampleBits. Le garde-fou de 2 s couvre le cas
+  // ou l'horloge du CC2500 s'arreterait.
+  const uint32_t got = ccSampleBits(ccBits, nbits, m0, m2, 2000);
 
   out.printf("  %lu bits captures.\n", (unsigned long)got);
   if (got < nbits) out.println("  (interrompu : l'horloge s'est arretee)");
@@ -1329,21 +1364,7 @@ void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) 
 
   for (uint8_t pass = 0; pass < repeats; pass++) {
     memset(ccBits, 0, sizeof(ccBits));
-    uint32_t got = 0;
-    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
-    const uint32_t deadline = millis() + 2000;
-    noInterrupts();
-    while (got < nbits) {
-      const uint32_t now = REG_READ(GPIO_IN_REG);
-      const uint32_t clk = now & m2;
-      if (clk && !prev) {
-        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
-        got++;
-      }
-      prev = clk;
-      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
-    }
-    interrupts();
+    uint32_t got = ccSampleBits(ccBits, nbits, m0, m2, 2000);
     totalBits += got;
 
     // Temoin de trafic, sans lequel un resultat nul ne veut rien dire : un
@@ -1610,21 +1631,7 @@ void ccCrcHunt(Print &out, uint32_t nbits, uint8_t repeats, uint16_t minLen, uin
   const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
   for (uint8_t pass = 0; pass < repeats; pass++) {
     memset(ccBits, 0, sizeof(ccBits));
-    uint32_t got = 0;
-    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
-    const uint32_t deadline = millis() + 2000;
-    noInterrupts();
-    while (got < nbits) {
-      const uint32_t now = REG_READ(GPIO_IN_REG);
-      const uint32_t clk = now & m2;
-      if (clk && !prev) {
-        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
-        got++;
-      }
-      prev = clk;
-      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
-    }
-    interrupts();
+    uint32_t got = ccSampleBits(ccBits, nbits, m0, m2, 2000);
     total += got;
     for (uint32_t k = 1; k < got; k++)
       if (ccBitAt(ccBits, k) != ccBitAt(ccBits, k - 1)) flips++;
@@ -2309,21 +2316,7 @@ void ccStream(Print &out, uint32_t nbits, uint8_t passes) {
   const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
   for (uint8_t p = 0; p < passes; p++) {
     memset(ccBits, 0, sizeof(ccBits));
-    uint32_t got = 0;
-    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
-    const uint32_t deadline = millis() + 2000;
-    noInterrupts();
-    while (got < nbits) {
-      const uint32_t now = REG_READ(GPIO_IN_REG);
-      const uint32_t clk = now & m2;
-      if (clk && !prev) {
-        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
-        got++;
-      }
-      prev = clk;
-      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
-    }
-    interrupts();
+    uint32_t got = ccSampleBits(ccBits, nbits, m0, m2, 2000);
 
     // Vidage par lignes de 32 octets, prefixees pour etre retrouvees au grep.
     const uint32_t bytesGot = got / 8;
@@ -2337,6 +2330,125 @@ void ccStream(Print &out, uint32_t nbits, uint8_t passes) {
     }
     out.printf("FIN %u %lu\n", p, (unsigned long)got);
     Serial.flush();
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  A quel debit EXACT la telecommande emet-elle ?
+//
+//  Fait central : les trames recues sont justes sur les premiers octets puis
+//  degenerent. C'est la signature d'un ecart de debit. Un decalage de 1 %
+//  laisse passer les 32 bits d'adresse -- 0,3 bit de derive, sans effet -- puis
+//  fait glisser d'un bit entier au bout des 96 bits de la trame : l'adresse
+//  correle, le CRC tombe faux. Exactement ce qu'on observe.
+//
+//  Le BM5602 n'a que trois debits figes. Le CC2500 se regle en continu :
+//  R = (256 + DRATE_M) x 2^DRATE_E x 26 MHz / 2^28, donc un pas de DRATE_M vaut
+//  1/315, soit 0,32 %. On balaie, et le juge est le CRC -- adresse connue,
+//  charge utile de 6 octets, CRC-16/CCITT init 0xFFFF sur l'ensemble.
+// ---------------------------------------------------------------------------
+void ccRateSweep(Print &out, uint8_t mLo, uint8_t mHi, uint8_t passes) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  out.println();
+  out.println("=== A quel debit exact la telecommande emet-elle ? ===");
+  out.printf("  DRATE_M de %u a %u (%.1f a %.1f kbit/s), %u capture(s) par pas.\n", mLo, mHi,
+             (256.0 + mLo) * 4096.0 * 26000.0 / 268435456.0,
+             (256.0 + mHi) * 4096.0 * 26000.0 / 268435456.0, passes);
+  out.println("  Juge : le CRC. Adresse connue, charge utile de 6 octets.");
+  out.println("  >>> AGIS SUR LA TELECOMMANDE SANS T'ARRETER.");
+  out.println();
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  const uint8_t air[4] = {halo.address()[3], halo.address()[2], halo.address()[1],
+                          halo.address()[0]};
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  uint8_t bestM = mLo;
+  uint16_t bestCrc = 0;
+
+  for (uint16_t m = mLo; m <= mHi; m++) {
+    radio2.strobe(cc2500::STROBE_SIDLE);
+    radio2.writeRegister(cc2500::REG_MDMCFG3, (uint8_t)m);
+    radio2.strobe(cc2500::STROBE_SCAL);
+    delay(3);
+    radio2.strobe(cc2500::STROBE_SRX);
+    delay(3);
+
+    uint16_t addrHits = 0, crcOk = 0;
+    for (uint8_t p = 0; p < passes; p++) {
+      memset(ccBits, 0, sizeof(ccBits));
+      uint32_t got = 0;
+      uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+      const uint32_t deadline = millis() + 1500;
+      noInterrupts();
+      while (got < sizeof(ccBits) * 8) {
+        const uint32_t now = REG_READ(GPIO_IN_REG);
+        const uint32_t clk = now & m2;
+        if (clk && !prev) {
+          if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+          got++;
+        }
+        prev = clk;
+        if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+      }
+      interrupts();
+
+      for (uint32_t i = 0; i + 112 <= got; i++) {
+        bool match = true;
+        for (uint8_t k = 0; k < 32 && match; k++) {
+          const uint32_t b = i + k;
+          if (((ccBits[b >> 3] >> (7 - (b & 7))) & 1) != ((air[k >> 3] >> (7 - (k & 7))) & 1))
+            match = false;
+        }
+        if (!match) continue;
+        addrHits++;
+        uint16_t crc = 0xFFFF;
+        for (uint8_t q = 0; q < 80; q++) {
+          const uint32_t b = i + q;
+          crc ^= (uint16_t)(((ccBits[b >> 3] >> (7 - (b & 7))) & 1) << 15);
+          crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        }
+        uint16_t w = 0;
+        for (uint8_t q = 0; q < 16; q++) {
+          const uint32_t b = i + 80 + q;
+          w = (uint16_t)((w << 1) | ((ccBits[b >> 3] >> (7 - (b & 7))) & 1));
+        }
+        if (w == crc) crcOk++;
+        i += 111;
+      }
+      delay(1);
+    }
+
+    const float kbps = (256.0f + m) * 4096.0f * 26000.0f / 268435456.0f;
+    char lineBuf[132];
+    snprintf(lineBuf, sizeof(lineBuf), "  DRATE_M %2u = %7.2f kbit/s : %3u adresse(s), %2u CRC valide(s)%s",
+             (unsigned)m, (double)kbps, addrHits, crcOk, crcOk ? "   <<<" : "");
+    out.println(lineBuf);
+    Serial.flush();
+    if (crcOk > bestCrc) {
+      bestCrc = crcOk;
+      bestM = (uint8_t)m;
+    }
+  }
+
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  radio2.writeRegister(cc2500::REG_MDMCFG3, 0x3B);
+  out.println();
+  if (bestCrc) {
+    out.printf("  Meilleur debit : DRATE_M %u, soit %.2f kbit/s, %u trame(s) valide(s).\n", bestM,
+               (double)((256.0f + bestM) * 4096.0f * 26000.0f / 268435456.0f), bestCrc);
+  } else {
+    out.println("  Aucun debit ne donne de CRC valide. Si des adresses ont ete");
+    out.println("  vues, l'ecart de debit n'est pas la seule cause.");
   }
 }
 

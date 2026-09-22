@@ -3443,17 +3443,23 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
   }
   char line[176];
   out.println();
-  out.println("=== Reception Halo 1 : 6 octets de charge utile, CRC materiel ===");
+  out.println("=== Reception Halo 1 avec vote majoritaire ===");
   snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X.", (unsigned)channel_,
            dataRateName(dataRate_), addr_[0], addr_[1], addr_[2], addr_[3]);
   out.println(line);
-  out.println("  Le CRC est verifie par la puce : toute trame affichee est exacte.");
-  out.println("  >>> TOURNE LA MOLETTE, ou agis sur la telecommande.");
+  out.println("  La telecommande RETRANSMET chaque trame plusieurs fois d'affilee.");
+  out.println("  On lit donc 32 octets d'un coup -- le maximum de la FIFO -- pour");
+  out.println("  capturer la premiere copie ET les suivantes sans rearmer entre");
+  out.println("  elles, puis on les retrouve en cherchant l'adresse bit a bit.");
+  out.println("  Les erreurs binaires ne tombant pas");
+  out.println("  au meme endroit d'une copie a l'autre, un vote bit a bit sur");
+  out.println("  les copies d'une meme rafale reconstitue la trame exacte --");
+  out.println("  sans gagner un seul decibel.");
+  out.println("  >>> AGIS SUR LA TELECOMMANDE : molette, boutons, allumage.");
   out.println();
   Serial.flush();
 
-  // Chemin sans reset logiciel, celui du projet amont : le reset efface 15 des
-  // 19 valeurs analogiques recommandees.
+  // Chemin sans reset logiciel : le reset efface 15 des 19 valeurs recommandees.
   radio.command(CMD_LIGHT_SLEEP);
   radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
   radio.setBank(0);
@@ -3464,8 +3470,19 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
   radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
   radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 6);
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, PKT1_CRC_ENABLE);
+  // 8 octets : 6 de charge utile plus les 2 du CRC, qui passent dans la FIFO
+  // quand le CRC materiel est desactive. Mesure a l'appui : avec le CRC
+  // materiel actif la puce rejette TOUTES les trames alors que le modele
+  // logiciel en valide -- son moteur de paquets ne couvre donc pas le meme
+  // champ. On verifie nous-memes, ce qui laisse en outre voir les rejets.
+  // 32 octets, le maximum de la FIFO. Mesure a l'appui : la puce accroche la
+  // PREMIERE trame d'une rafale, et pendant qu'on la lit et qu'on rearme, les
+  // retransmissions passent -- elles se suivent a quelques centaines de
+  // microsecondes. En lisant large, on capture la premiere trame ET les
+  // suivantes dans la meme lecture, sans aucun rearmement entre elles. On les
+  // retrouve ensuite en cherchant l'adresse dans le flux de bits.
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
+  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
   radio.clearInterrupts();
   radio.command(CMD_FLUSH_RX_FIFO);
@@ -3473,38 +3490,151 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs) {
   radio.command(CMD_RX_MODE);
 
   uint8_t total = 0;
-  const uint8_t ok = radio.registerVerify(&total);
+  const uint8_t regOk = radio.registerVerify(&total);
   radio.setBank(0);
-  snprintf(line, sizeof(line), "  Reglages analogiques en place : %u sur %u. OMST %u.", ok, total,
+  snprintf(line, sizeof(line), "  Reglages analogiques en place : %u sur %u. OMST %u.", regOk, total,
            (unsigned)radio.operationMode());
   out.println(line);
   Serial.flush();
 
-  uint32_t frames = 0, strong = 0, checks = 0;
+  static uint8_t group[12][8];
+  uint8_t nGroup = 0;
+  uint32_t lastFrameMs = 0;
+  uint32_t seen = 0, exact = 0, repaired = 0, groups = 0, strong = 0, checks = 0;
+
   const uint32_t until = millis() + dwellMs;
+  uint32_t spin = 0;
   while ((int32_t)(millis() - until) < 0) {
+    // Boucle serree : les retransmissions se suivent de pres, et toute lecture
+    // superflue entre deux armements en fait rater.
     const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     if (irq & IRQ_RX_DR) {
-      uint8_t buf[6];
-      radio.readFifo(buf, 6, false);
-      frames++;
-      snprintf(line, sizeof(line), "  TRAME %3lu : %02X %02X %02X %02X %02X %02X",
-               (unsigned long)frames, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
-      out.println(line);
-      Serial.flush();
+      uint8_t buf[32];
+      radio.readFifo(buf, 32, false);
       radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
       radio.command(CMD_FLUSH_RX_FIFO);
+      radio.command(CMD_RX_MODE);
+
+      // La premiere copie commence juste apres l'adresse, deja consommee par
+      // le correlateur.
+      nGroup = 0;
+      memcpy(group[nGroup++], buf, 8);
+      seen++;
+
+      // Les copies suivantes sont quelque part dans les 24 octets restants,
+      // precedees de leur propre adresse. On la cherche bit a bit : rien ne
+      // garantit qu'une retransmission tombe sur une frontiere d'octet.
+      const uint8_t air[4] = {addr_[3], addr_[2], addr_[1], addr_[0]};
+      for (uint16_t bit = 64; bit + 32 + 64 <= 32 * 8 && nGroup < 12;) {
+        bool match = true;
+        for (uint8_t k = 0; k < 32 && match; k++) {
+          const uint16_t b = bit + k;
+          const uint8_t got = (buf[b >> 3] >> (7 - (b & 7))) & 1;
+          const uint8_t want = (air[k >> 3] >> (7 - (k & 7))) & 1;
+          if (got != want) match = false;
+        }
+        if (!match) {
+          bit++;
+          continue;
+        }
+        uint8_t copy[8];
+        for (uint8_t q = 0; q < 8; q++) {
+          uint8_t v = 0;
+          for (uint8_t k = 0; k < 8; k++) {
+            const uint16_t b = bit + 32 + q * 8 + k;
+            v = (uint8_t)((v << 1) | ((buf[b >> 3] >> (7 - (b & 7))) & 1));
+          }
+          copy[q] = v;
+        }
+        memcpy(group[nGroup++], copy, 8);
+        seen++;
+        bit += 32 + 64;
+      }
+
+      groupVerdict(out, group, nGroup, exact, repaired);
+      groups++;
+      nGroup = 0;
+      lastFrameMs = millis();
+      continue;
     }
-    if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
-    if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
-    checks++;
-    delay(1);
+
+    if ((spin++ & 0xFF) == 0) {
+      if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
+      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+      checks++;
+      delay(1);
+    }
+  }
+  out.println();
+  snprintf(line, sizeof(line),
+           "  %lu rafale(s), %lu trame(s) recue(s), %lu exacte(s) d'emblee, %lu reparee(s).",
+           (unsigned long)groups, (unsigned long)seen, (unsigned long)exact,
+           (unsigned long)repaired);
+  out.println(line);
+  snprintf(line, sizeof(line), "  Signal fort %lu/%lu.", (unsigned long)strong,
+           (unsigned long)checks);
+  out.println(line);
+}
+
+// CRC-16/CCITT 0x1021, init 0xFFFF, sur l'adresse SUR L'AIR puis la charge
+// utile. L'adresse est stockee a l'envers de son ordre d'emission.
+uint16_t BenqHalo::halo1Crc(const uint8_t payload[6]) const {
+  uint16_t crc = 0xFFFF;
+  for (uint8_t i = 0; i < 10; i++) {
+    const uint8_t b = (i < 4) ? addr_[3 - i] : payload[i - 4];
+    for (int8_t k = 7; k >= 0; k--) {
+      crc ^= (uint16_t)(((b >> k) & 1) << 15);
+      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    }
+  }
+  return crc;
+}
+
+// Verdict d'une rafale : d'abord chercher une copie deja exacte, sinon voter
+// bit a bit. Les erreurs ne tombant pas au meme endroit d'une copie a l'autre,
+// la majorite reconstitue l'original des trois copies environ.
+void BenqHalo::groupVerdict(Print &out, const uint8_t group[][8], uint8_t n, uint32_t &exact,
+                            uint32_t &repaired) {
+  char line[176];
+  for (uint8_t i = 0; i < n; i++) {
+    const uint16_t got = (uint16_t)((group[i][6] << 8) | group[i][7]);
+    if (halo1Crc(group[i]) == got) {
+      exact++;
+      snprintf(line, sizeof(line),
+               "  TRAME (copie exacte, rafale de %u) : %02X %02X %02X %02X %02X %02X", n,
+               group[i][0], group[i][1], group[i][2], group[i][3], group[i][4], group[i][5]);
+      out.println(line);
+      Serial.flush();
+      return;
+    }
+  }
+  if (n < 3) {
+    snprintf(line, sizeof(line), "  rafale de %u copie(s) : trop peu pour voter", n);
+    out.println(line);
+    Serial.flush();
+    return;
   }
 
-  out.println();
-  snprintf(line, sizeof(line), "  %lu trame(s) exacte(s), signal fort %lu/%lu.",
-           (unsigned long)frames, (unsigned long)strong, (unsigned long)checks);
+  uint8_t voted[8];
+  for (uint8_t b = 0; b < 8; b++) {
+    voted[b] = 0;
+    for (int8_t k = 7; k >= 0; k--) {
+      uint8_t ones = 0;
+      for (uint8_t i = 0; i < n; i++) ones = (uint8_t)(ones + ((group[i][b] >> k) & 1));
+      if (ones * 2 > n) voted[b] |= (uint8_t)(1 << k);
+    }
+  }
+  const uint16_t got = (uint16_t)((voted[6] << 8) | voted[7]);
+  if (halo1Crc(voted) == got) {
+    repaired++;
+    snprintf(line, sizeof(line), "  TRAME (reparee par vote sur %u copies) : %02X %02X %02X %02X %02X %02X",
+             n, voted[0], voted[1], voted[2], voted[3], voted[4], voted[5]);
+  } else {
+    snprintf(line, sizeof(line), "  rafale de %u : vote insuffisant (%02X %02X %02X %02X %02X %02X)",
+             n, voted[0], voted[1], voted[2], voted[3], voted[4], voted[5]);
+  }
   out.println(line);
+  Serial.flush();
 }
 
 

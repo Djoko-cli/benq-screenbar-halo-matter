@@ -15,6 +15,7 @@ void ccListen(Print &out, uint32_t dwellMs);
 void ccCapture(Print &out, uint32_t pattern, uint32_t nbits);
 void ccFreqOffset(Print &out, int trigDbm, uint32_t dwellMs);
 void ccFreqSweep(Print &out, int32_t spanKhz, int32_t stepKhz, uint32_t dwellMs);
+void ccRateSweep(Print &out, uint8_t mLo, uint8_t mHi, uint8_t passes);
 void ccStream(Print &out, uint32_t nbits, uint8_t passes);
 void ccDumpBursts(Print &out, int trigDbm, uint8_t count);
 void ccCommonRuns(Print &out, int trigDbm);
