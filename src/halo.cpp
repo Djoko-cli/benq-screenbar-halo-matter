@@ -2967,9 +2967,11 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
   out.println("  et une MASSE COMMUNE, indispensable.");
   out.println("  On guette la commande 0x10 (write PTX address) suivie des");
   out.println("  octets d'adresse.");
-  snprintf(line, sizeof(line), "  Duree : %lu s. Redemarre la telecommande pendant ce temps.",
-           (unsigned long)seconds);
+  snprintf(line, sizeof(line), "  Duree : %lu s.", (unsigned long)seconds);
   out.println(line);
+  out.println("  Une ligne d'etat par seconde : ajuste les fils en la regardant.");
+  out.println("  Au repos on attend CSN proche de 100%h et SCK proche de 0%h.");
+  out.println("  CSN a 0%h = son fil touche la masse ou une pastille voisine.");
   Serial.flush();
 
   // Liberer le bus maitre : le C6 n'a qu'un seul peripherique SPI utilisable.
@@ -2983,10 +2985,18 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
   bus.quadhd_io_num = -1;
   bus.max_transfer_sz = 64;
 
+  // Plusieurs transactions pre-armees : une initialisation de BC5602 est une
+  // rafale de dizaines d'echanges colles les uns aux autres. Avec une seule
+  // transaction armee a la fois, on attrape la premiere et on dort pendant
+  // toute la suite.
+  constexpr uint8_t kQueue = 6;
+  constexpr uint16_t kMaxStored = 400;
+  constexpr uint8_t kKeepBytes = 32;  // la transaction entiere, sans troncature
+
   spi_slave_interface_config_t slave = {};
   slave.spics_io_num = PIN_TAP_CS;
   slave.flags = 0;
-  slave.queue_size = 4;
+  slave.queue_size = kQueue;
   slave.mode = 0;  // comme le BC5602 : CPOL=0, CPHA=0
 
   if (spi_slave_initialize(SPI2_HOST, &bus, &slave, SPI_DMA_CH_AUTO) != ESP_OK) {
@@ -2995,143 +3005,234 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
     return;
   }
 
-  static WORD_ALIGNED_ATTR uint8_t rx[64];
-  uint32_t frames = 0, addressWrites = 0, noise = 0;
+  static WORD_ALIGNED_ATTR uint8_t pool[kQueue][32];
+  static spi_slave_transaction_t descs[kQueue];
+  static uint8_t store[kMaxStored][kKeepBytes];
+  static uint8_t storeLen[kMaxStored];
+
+  uint8_t armed = 0;
+  for (uint8_t i = 0; i < kQueue; i++) {
+    descs[i] = {};
+    descs[i].length = 8 * 32;
+    descs[i].rx_buffer = pool[i];
+    descs[i].tx_buffer = nullptr;
+    if (spi_slave_queue_trans(SPI2_HOST, &descs[i], portMAX_DELAY) == ESP_OK) armed++;
+  }
+
+  uint32_t frames = 0, addressWrites = 0, noise = 0, stored = 0, dropped = 0;
   const uint32_t deadline = millis() + seconds * 1000UL;
 
+  // Une ligne d'etat par seconde, et RIEN d'autre : afficher chaque
+  // transaction rendrait la carte sourde pendant l'essentiel de la rafale.
+  // Les niveaux sont lus a meme le registre GPIO, sans prendre le controle des
+  // broches -- le peripherique SPI continue de les utiliser normalement.
+  const uint32_t maskCs = 1UL << PIN_TAP_CS;
+  const uint32_t maskSck = 1UL << PIN_TAP_SCK;
+  const uint32_t maskSdio = 1UL << PIN_TAP_MOSI;
+  uint32_t nextStatus = millis() + 1000;
+  const uint32_t started = millis();
+
+  out.println("  temps   CSN    SCK    SDIO   |  trames  bruit  gardees");
+  Serial.flush();
+
   while ((int32_t)(millis() - deadline) < 0) {
-    memset(rx, 0, sizeof(rx));
-    spi_slave_transaction_t t = {};
-    t.length = 8 * 32;  // taille maximale acceptee ; CSN decoupe reellement
-    t.rx_buffer = rx;
-    t.tx_buffer = nullptr;
-
-    if (spi_slave_transmit(SPI2_HOST, &t, pdMS_TO_TICKS(500)) != ESP_OK) continue;
-
-    const uint32_t bits = t.trans_len;
-    if (bits < 8) continue;
-    const uint8_t bytes = (uint8_t)(bits / 8);
-    frames++;
-
-    // Un contact intermittent produit des transactions dont tous les octets
-    // sont identiques, ou des suites de uns puis de zeros : la signature d'un
-    // registre a decalage cadence par une ligne qui bascule au hasard. Les
-    // afficher noierait une vraie trame sous des milliers de lignes.
-    bool uniform = true;
-    for (uint8_t i = 1; i < bytes; i++)
-      if (rx[i] != rx[0]) {
-        uniform = false;
-        break;
+    if ((int32_t)(millis() - nextStatus) >= 0) {
+      nextStatus += 1000;
+      uint16_t hiCs = 0, hiSck = 0, hiSdio = 0;
+      for (uint16_t k = 0; k < 200; k++) {
+        const uint32_t g = REG_READ(GPIO_IN_REG);
+        if (g & maskCs) hiCs++;
+        if (g & maskSck) hiSck++;
+        if (g & maskSdio) hiSdio++;
       }
+      snprintf(line, sizeof(line),
+               "  %3lus  %3u%%h  %3u%%h  %3u%%h  |  %5lu  %5lu  %5lu",
+               (unsigned long)((millis() - started) / 1000), (unsigned)(hiCs / 2),
+               (unsigned)(hiSck / 2), (unsigned)(hiSdio / 2), (unsigned long)frames,
+               (unsigned long)noise, (unsigned long)stored);
+      // Sans flush : l'ecriture part dans le tampon et rend la main tout de
+      // suite, la carte ne devient pas sourde.
+      out.println(line);
+    }
+
+    spi_slave_transaction_t *done = nullptr;
+    if (spi_slave_get_trans_result(SPI2_HOST, &done, pdMS_TO_TICKS(200)) != ESP_OK) continue;
+
+    const uint32_t bits = done->trans_len;
+    const uint8_t bytes = (bits >= 8) ? (uint8_t)(bits / 8) : 0;
+    if (bytes >= 2) {
+      frames++;
+      const uint8_t *b = (const uint8_t *)done->rx_buffer;
+
+      // Le tri se fait ICI, pas a l'affichage : sinon le tampon se remplit de
+      // bruit dans les premieres secondes et la rafale de demarrage, qui
+      // arrive ensuite, est jetee faute de place. Un contact intermittent
+      // produit des transactions uniformes, ou des suites de uns puis de
+      // zeros -- signature d'un registre a decalage cadence au hasard. Une
+      // vraie commande comme 0x10 suivie d'octets varies n'est jamais ecartee.
+      bool uniform = true;
+      for (uint8_t i = 1; i < bytes; i++)
+        if (b[i] != b[0]) {
+          uniform = false;
+          break;
+        }
+      bool tailAllZero = true;
+      for (uint8_t i = 1; i < bytes; i++)
+        if (b[i] != 0x00) {
+          tailAllZero = false;
+          break;
+        }
+      const bool leadingOnes = tailAllZero && (b[0] == 0x00 || (uint8_t)(b[0] + 1) == 0x00 ||
+                                               (b[0] & (uint8_t)(b[0] + 1)) == 0);
+
+      if (uniform || leadingOnes) {
+        noise++;
+      } else if (stored < kMaxStored) {
+        const uint8_t keep = (bytes < kKeepBytes) ? bytes : kKeepBytes;
+        memcpy(store[stored], b, keep);
+        storeLen[stored] = keep;
+        stored++;
+      } else {
+        dropped++;
+      }
+    }
+    done->trans_len = 0;
+    // Le rearmement peut echouer si la file est pleine ; l'ignorer viderait
+    // silencieusement la file et rendrait la carte sourde pour la suite.
+    if (spi_slave_queue_trans(SPI2_HOST, done, 0) != ESP_OK) armed--;
+    if (armed == 0) break;
+  }
+
+  // L'affichage vient AVANT le demontage : un incident en liberant le
+  // peripherique ne doit jamais emporter une capture reussie.
+  // Restitution, une fois la capture terminee.
+  for (uint16_t k = 0; k < stored; k++) {
+    const uint8_t *b = store[k];
+    const uint8_t bytes = storeLen[k];
+
     bool tailAllZero = true;
     for (uint8_t i = 1; i < bytes; i++)
-      if (rx[i] != 0x00) {
+      if (b[i] != 0x00) {
         tailAllZero = false;
         break;
       }
-    const bool leadingOnes = tailAllZero && (rx[0] == 0x00 || (uint8_t)(rx[0] + 1) == 0x00 ||
-                                             (rx[0] & (uint8_t)(rx[0] + 1)) == 0);
 
-    if (bytes < 2 || uniform || leadingOnes) {
-      noise++;
-      continue;
-    }
+    const bool isAddress = (b[0] == 0x10 && bytes >= 5 && !tailAllZero);
+    if (isAddress) addressWrites++;
 
-    int n = snprintf(line, sizeof(line), "  %3lu:", (unsigned long)frames);
-    for (uint8_t i = 0; i < bytes && i < 20; i++)
-      n += snprintf(line + n, sizeof(line) - n, " %02X", rx[i]);
-    // Une vraie ecriture d'adresse, c'est 0x10 suivi de quatre octets qui ne
-    // sont pas tous nuls. Sans cette exigence, le bruit decroche le marqueur.
-    if (rx[0] == 0x10 && bytes >= 5 && !tailAllZero) {
-      addressWrites++;
-      snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE");
+    // Seize octets par ligne : au-dela, le moniteur fragmente et l'hexa
+    // devient illisible. Et surtout, plus de troncature -- c'est elle qui
+    // masquait le contenu discriminant au-dela du vingtieme octet.
+    for (uint8_t off = 0; off < bytes; off += 16) {
+      int n = (off == 0) ? snprintf(line, sizeof(line), "  %3u:", (unsigned)(k + 1))
+                         : snprintf(line, sizeof(line), "      ");
+      for (uint8_t i = off; i < bytes && i < (uint8_t)(off + 16); i++)
+        n += snprintf(line + n, sizeof(line) - n, " %02X", b[i]);
+      if (off == 0 && isAddress) snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE");
+      out.println(line);
     }
-    out.println(line);
     Serial.flush();
   }
 
+  // Vider la file avant de liberer : liberer le pilote avec des transactions
+  // encore armees lui fait relacher des descripteurs DMA toujours en usage,
+  // ce qui provoque une exception (Load access fault a l'adresse 0x70).
+  for (;;) {
+    spi_slave_transaction_t *leftover = nullptr;
+    if (spi_slave_get_trans_result(SPI2_HOST, &leftover, pdMS_TO_TICKS(50)) != ESP_OK) break;
+  }
   spi_slave_free(SPI2_HOST);
   radio.resumeBus();
 
   out.println();
-  snprintf(line, sizeof(line),
-           "  Termine : %lu transaction(s), dont %lu de bruit ecartee(s)", (unsigned long)frames,
-           (unsigned long)noise);
+  snprintf(line, sizeof(line), "  Termine : %lu transaction(s), %lu de bruit ecartee(s),",
+           (unsigned long)frames, (unsigned long)noise);
   out.println(line);
-  snprintf(line, sizeof(line), "  et %lu ecriture(s) d'adresse plausible(s).",
-           (unsigned long)addressWrites);
+  snprintf(line, sizeof(line), "  %lu ecriture(s) d'adresse plausible(s), %lu perdue(s) faute de place.",
+           (unsigned long)addressWrites, (unsigned long)dropped);
   out.println(line);
-  if (frames > 0 && noise == frames) {
-    out.println("  Tout etait du bruit : le contact n'a pas tenu pendant la");
-    out.println("  capture. Relance 'taptest' pendant que les fils sont en place.");
-  }
   if (frames == 0) {
-    out.println("  Rien capte. Verifie la masse commune, puis que SCK et CSN sont");
-    out.println("  bien sur les bonnes pastilles -- CSN doit descendre a chaque");
-    out.println("  echange, c'est lui qui decoupe les transactions.");
+    out.println("  Rien capte. Verifie la masse commune, puis lance 'taptest'");
+    out.println("  pendant que les fils sont en place.");
+  } else if (noise == frames) {
+    out.println("  Tout etait du bruit : le contact n'a pas tenu. Relance");
+    out.println("  'taptest' sans rien deplacer.");
   }
   out.println();
 }
 
-void BenqHalo::tapTest(Print &out) {
+void BenqHalo::tapTest(Print &out, uint32_t seconds) {
   char line[176];
 
   out.println();
-  out.println("=== Le contact tient-il ? ===");
-  out.println("  Chaque ligne est tiree vers le bas puis vers le haut. Une ligne");
-  out.println("  que la telecommande pilote ignore ces tirages ; une ligne qui");
-  out.println("  flotte les suit. Fais ce test PILE EN PLACE, telecommande au");
-  out.println("  repos : CSN doit alors etre tenue HAUT en permanence.");
+  out.println("=== Le contact tient-il ? (suivi en direct) ===");
+  out.println("  Ajuste les fils en regardant cette sortie. Au repos, pile en");
+  out.println("  place, CSN doit etre HAUTE, SCK BASSE. Une ligne qui suit nos");
+  out.println("  resistances internes est une ligne qui flotte.");
+  snprintf(line, sizeof(line), "  Suivi pendant %lu s, une ligne par seconde.",
+           (unsigned long)seconds);
+  out.println(line);
+  out.println();
   Serial.flush();
 
   radio.suspendBus();
 
-  struct TapLine {
-    const char *name;
-    uint8_t pin;
-    const char *expected;
-  };
-  const TapLine lines[3] = {
-      {"CSN  (broche 11)", (uint8_t)PIN_TAP_CS, "doit etre tenue HAUTE au repos"},
-      {"SCK  (broche 12)", (uint8_t)PIN_TAP_SCK, "au repos, niveau stable"},
-      {"SDIO (broche 14)", (uint8_t)PIN_TAP_MOSI, "au repos, niveau stable"},
-  };
+  const uint8_t pins[3] = {(uint8_t)PIN_TAP_CS, (uint8_t)PIN_TAP_SCK, (uint8_t)PIN_TAP_MOSI};
+  const char *const names[3] = {"CSN", "SCK", "SDIO"};
 
-  uint8_t connected = 0;
-  for (uint8_t i = 0; i < 3; i++) {
-    uint8_t pd = 0, pu = 0;
-    pinLevels(lines[i].pin, pd, pu);
-    const int delta = (int)pu - (int)pd;
-    const bool driven = (delta < 30);
-    if (driven) connected++;
+  const uint32_t deadline = millis() + seconds * 1000UL;
+  uint32_t allGood = 0, rounds = 0;
 
-    uint32_t trans[3] = {0, 0, 0};
-    uint32_t samples = 0;
-    const uint8_t trio[3] = {lines[i].pin, lines[i].pin, lines[i].pin};
-    countTransitions3(trio, 300, trans, samples);
+  while ((int32_t)(millis() - deadline) < 0) {
+    int n = snprintf(line, sizeof(line), " ");
+    uint8_t good = 0;
 
-    snprintf(line, sizeof(line), "  [%s] %-17s IO%-2u  bas %3u%%  haut %3u%%  %lu transitions",
-             driven ? "OK " : "NON", lines[i].name, (unsigned)lines[i].pin, (unsigned)pd,
-             (unsigned)pu, (unsigned long)trans[0]);
+    for (uint8_t i = 0; i < 3; i++) {
+      uint8_t pd = 0, pu = 0;
+      pinLevels(pins[i], pd, pu);
+      const int delta = (int)pu - (int)pd;
+      const bool driven = (delta < 30);
+      const bool high = (pu > 50);
+
+      // CSN au repos doit etre HAUTE. Sans cette exigence, une telecommande
+      // non alimentee -- toutes lignes tirees vers la masse -- passerait pour
+      // un montage correct.
+      const char *state;
+      if (!driven) state = "flotte";
+      else if (i == 0 && !high) state = "BAS !";
+      else state = high ? "haut" : "bas";
+
+      const bool ok = driven && (i != 0 || high);
+      if (ok) good++;
+      n += snprintf(line + n, sizeof(line) - n, "  %-4s %-6s %s", names[i], state,
+                    ok ? "ok" : "NON");
+    }
+
+    rounds++;
+    if (good == 3) {
+      allGood++;
+      snprintf(line + n, sizeof(line) - n, "   <<< LES TROIS TIENNENT");
+    }
     out.println(line);
     Serial.flush();
+    delay(900);
   }
 
   radio.resumeBus();
 
   out.println();
-  if (connected == 3) {
-    out.println("  Les trois lignes sont pilotees : le contact tient, la capture");
-    out.println("  peut etre lancee.");
-  } else if (connected == 0) {
-    out.println("  AUCUNE ligne n'est pilotee : les trois flottent. Verifie");
-    out.println("  d'abord la MASSE -- sans elle rien n'a de reference -- puis");
-    out.println("  que la pile est bien en place.");
+  snprintf(line, sizeof(line), "  %lu seconde(s) sur %lu avec les trois contacts.",
+           (unsigned long)allGood, (unsigned long)rounds);
+  out.println(line);
+  if (allGood == rounds && rounds > 0) {
+    out.println("  Contact stable : enchaine 'sniffspi 30' sans rien bouger.");
+  } else if (allGood == 0) {
+    out.println("  Jamais les trois en meme temps. Reprends la ligne marquee NON");
+    out.println("  le plus souvent ; si CSN affiche 'BAS !', son fil touche");
+    out.println("  probablement la masse ou une pastille voisine.");
   } else {
-    snprintf(line, sizeof(line), "  Seulement %u ligne(s) sur 3 tiennent le contact.",
-             (unsigned)connected);
-    out.println(line);
-    out.println("  Reprends celles marquees NON : c'est la qu'un fil ne touche pas.");
+    out.println("  Contact intermittent : cale mieux le fil qui decroche avant");
+    out.println("  de lancer la capture.");
   }
   out.println();
 }

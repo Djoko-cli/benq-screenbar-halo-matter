@@ -88,7 +88,7 @@ static void cmdHelp() {
   Serial.println("  etalon rx [s]         ETALONNAGE a deux cartes : cette carte ECOUTE");
   Serial.println("  autotest              verifie la carte maillon par maillon, sans partenaire");
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
-  Serial.println("  taptest               le contact des 3 fils d'ecoute tient-il ?");
+  Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
   Serial.println("  debit [125|250|500]   debit radio, persiste ; sans argument, affiche");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
   Serial.println("  aw [3|4|5]            longueur d'adresse attendue");
@@ -307,8 +307,11 @@ static void handleLine(char *line) {
     Serial.print("Debit radio : ");
     Serial.println(BenqHalo::dataRateName(halo.dataRate()));
   } else if (!strcmp(line, "taptest")) {
+    uint32_t secs = 20;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 3 && v <= 120) secs = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
-    halo.tapTest(Serial);
+    halo.tapTest(Serial, secs);
   } else if (!strcmp(line, "sniffspi")) {
     uint32_t secs = 60;
     const long v = strtol(arg, nullptr, 10);
