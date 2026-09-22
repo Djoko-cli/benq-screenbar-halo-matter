@@ -461,3 +461,40 @@ microcontrôleur la charge dans son BC5602 (commande « write PTX address »).
 La lampe est sans doute la cible la plus simple : plus volumineuse, alimentée en
 USB donc facile à redémarrer à volonté, et elle porte la même adresse que la
 télécommande. Un ESP32 suffit à capturer ce bus.
+
+## Écoute du bus SPI de la télécommande — point d'étape
+
+La télécommande a été ouverte. Sa carte porte un **`BC5602` nu** (repère `U4`,
+QFN-16), le quartz `Y1` à sa gauche et l'antenne sérigraphiée au-dessus — deux
+repères physiques qui confirment l'orientation du boîtier.
+
+Numérotation déduite des repères de coin sérigraphiés (`4/5`, `8/9`, `12/13`,
+`16/1`), antenne en haut et quartz à gauche : bord haut `1-4` de droite à gauche,
+bord gauche `5-8` de haut en bas, bord bas `9-12` de gauche à droite, bord droit
+`13-16` de bas en haut.
+
+**Les trois signaux sortent sur des pastilles de test**, vérifié au multimètre —
+inutile de souder sur le QFN :
+
+| Broche | Signal | Pastille |
+|---:|---|---|
+| 11 | `CSN` | la plus basse de la colonne de droite |
+| 12 | `SCK` | celle du milieu, près de `C34` |
+| 14 | `SDIO` | la plus haute |
+
+Une masse est disponible sur une pastille au-dessus à gauche de la puce.
+
+Niveaux au repos relevés par la commande `taptest`, pile en place : `CSN` tenue
+**haute**, `SCK` tenue **basse**, `SDIO` haute. Ce sont les états d'un bus SPI
+sain en mode 0, et ils ne peuvent pas provenir de lignes flottantes : les
+pastilles sont donc les bonnes.
+
+**Ce qui bloque est purement mécanique.** Un contact maintenu au ruban et à la
+main ne survit pas à une capture : le journal se remplit de `FF`, `00`, `80`,
+`C0`, `E0`, `F8`, `FC` — des suites de uns puis de zéros, signature d'un registre
+à décalage cadencé par une ligne qui bascule au hasard. La capture filtre
+désormais ce bruit, et n'annonce une écriture d'adresse que si `0x10` est suivi
+d'au moins quatre octets non tous nuls.
+
+Il faut des **pointes de test à ressort** pour maintenir les quatre contacts
+pendant qu'on retire et remet la pile.

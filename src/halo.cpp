@@ -2996,7 +2996,7 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
   }
 
   static WORD_ALIGNED_ATTR uint8_t rx[64];
-  uint32_t frames = 0, addressWrites = 0;
+  uint32_t frames = 0, addressWrites = 0, noise = 0;
   const uint32_t deadline = millis() + seconds * 1000UL;
 
   while ((int32_t)(millis() - deadline) < 0) {
@@ -3013,10 +3013,36 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
     const uint8_t bytes = (uint8_t)(bits / 8);
     frames++;
 
+    // Un contact intermittent produit des transactions dont tous les octets
+    // sont identiques, ou des suites de uns puis de zeros : la signature d'un
+    // registre a decalage cadence par une ligne qui bascule au hasard. Les
+    // afficher noierait une vraie trame sous des milliers de lignes.
+    bool uniform = true;
+    for (uint8_t i = 1; i < bytes; i++)
+      if (rx[i] != rx[0]) {
+        uniform = false;
+        break;
+      }
+    bool tailAllZero = true;
+    for (uint8_t i = 1; i < bytes; i++)
+      if (rx[i] != 0x00) {
+        tailAllZero = false;
+        break;
+      }
+    const bool leadingOnes = tailAllZero && (rx[0] == 0x00 || (uint8_t)(rx[0] + 1) == 0x00 ||
+                                             (rx[0] & (uint8_t)(rx[0] + 1)) == 0);
+
+    if (bytes < 2 || uniform || leadingOnes) {
+      noise++;
+      continue;
+    }
+
     int n = snprintf(line, sizeof(line), "  %3lu:", (unsigned long)frames);
     for (uint8_t i = 0; i < bytes && i < 20; i++)
       n += snprintf(line + n, sizeof(line) - n, " %02X", rx[i]);
-    if (rx[0] == 0x10) {
+    // Une vraie ecriture d'adresse, c'est 0x10 suivi de quatre octets qui ne
+    // sont pas tous nuls. Sans cette exigence, le bruit decroche le marqueur.
+    if (rx[0] == 0x10 && bytes >= 5 && !tailAllZero) {
       addressWrites++;
       snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE");
     }
@@ -3028,13 +3054,84 @@ void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
   radio.resumeBus();
 
   out.println();
-  snprintf(line, sizeof(line), "  Termine : %lu transaction(s), dont %lu ecriture(s) d'adresse.",
-           (unsigned long)frames, (unsigned long)addressWrites);
+  snprintf(line, sizeof(line),
+           "  Termine : %lu transaction(s), dont %lu de bruit ecartee(s)", (unsigned long)frames,
+           (unsigned long)noise);
   out.println(line);
+  snprintf(line, sizeof(line), "  et %lu ecriture(s) d'adresse plausible(s).",
+           (unsigned long)addressWrites);
+  out.println(line);
+  if (frames > 0 && noise == frames) {
+    out.println("  Tout etait du bruit : le contact n'a pas tenu pendant la");
+    out.println("  capture. Relance 'taptest' pendant que les fils sont en place.");
+  }
   if (frames == 0) {
     out.println("  Rien capte. Verifie la masse commune, puis que SCK et CSN sont");
     out.println("  bien sur les bonnes pastilles -- CSN doit descendre a chaque");
     out.println("  echange, c'est lui qui decoupe les transactions.");
+  }
+  out.println();
+}
+
+void BenqHalo::tapTest(Print &out) {
+  char line[176];
+
+  out.println();
+  out.println("=== Le contact tient-il ? ===");
+  out.println("  Chaque ligne est tiree vers le bas puis vers le haut. Une ligne");
+  out.println("  que la telecommande pilote ignore ces tirages ; une ligne qui");
+  out.println("  flotte les suit. Fais ce test PILE EN PLACE, telecommande au");
+  out.println("  repos : CSN doit alors etre tenue HAUT en permanence.");
+  Serial.flush();
+
+  radio.suspendBus();
+
+  struct TapLine {
+    const char *name;
+    uint8_t pin;
+    const char *expected;
+  };
+  const TapLine lines[3] = {
+      {"CSN  (broche 11)", (uint8_t)PIN_TAP_CS, "doit etre tenue HAUTE au repos"},
+      {"SCK  (broche 12)", (uint8_t)PIN_TAP_SCK, "au repos, niveau stable"},
+      {"SDIO (broche 14)", (uint8_t)PIN_TAP_MOSI, "au repos, niveau stable"},
+  };
+
+  uint8_t connected = 0;
+  for (uint8_t i = 0; i < 3; i++) {
+    uint8_t pd = 0, pu = 0;
+    pinLevels(lines[i].pin, pd, pu);
+    const int delta = (int)pu - (int)pd;
+    const bool driven = (delta < 30);
+    if (driven) connected++;
+
+    uint32_t trans[3] = {0, 0, 0};
+    uint32_t samples = 0;
+    const uint8_t trio[3] = {lines[i].pin, lines[i].pin, lines[i].pin};
+    countTransitions3(trio, 300, trans, samples);
+
+    snprintf(line, sizeof(line), "  [%s] %-17s IO%-2u  bas %3u%%  haut %3u%%  %lu transitions",
+             driven ? "OK " : "NON", lines[i].name, (unsigned)lines[i].pin, (unsigned)pd,
+             (unsigned)pu, (unsigned long)trans[0]);
+    out.println(line);
+    Serial.flush();
+  }
+
+  radio.resumeBus();
+
+  out.println();
+  if (connected == 3) {
+    out.println("  Les trois lignes sont pilotees : le contact tient, la capture");
+    out.println("  peut etre lancee.");
+  } else if (connected == 0) {
+    out.println("  AUCUNE ligne n'est pilotee : les trois flottent. Verifie");
+    out.println("  d'abord la MASSE -- sans elle rien n'a de reference -- puis");
+    out.println("  que la pile est bien en place.");
+  } else {
+    snprintf(line, sizeof(line), "  Seulement %u ligne(s) sur 3 tiennent le contact.",
+             (unsigned)connected);
+    out.println(line);
+    out.println("  Reprends celles marquees NON : c'est la qu'un fil ne touche pas.");
   }
   out.println();
 }
