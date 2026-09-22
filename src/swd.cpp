@@ -23,7 +23,10 @@ static inline void writeBit(bool bit) {
 }
 
 static inline bool readBit() {
-  delayMicroseconds(half_);
+  // Quand personne ne pilote la ligne, elle ne remonte qu'a travers la
+  // resistance de tirage interne -- quelques microsecondes avec la capacite
+  // d'un fil Dupont. Lire trop tot renverrait un zero trompeur.
+  delayMicroseconds(half_ + 4);
   const bool bit = digitalRead(io_) != 0;
   digitalWrite(clk_, HIGH);
   delayMicroseconds(half_);
@@ -178,6 +181,26 @@ void probeCandidates(Print &out, uint8_t clkPin, const uint8_t *candidates, uint
   for (uint8_t i = 0; i < count; i++) {
     const uint8_t pin = candidates[i];
     if (pin == clkPin) continue;
+
+    // Les trous 2, 4, 5 et 6 de J5 se tiennent a 2,49 V par leurs tirages
+    // internes. Une broche qui ne lit pas un niveau haut au repos n'est donc
+    // reliee a aucun d'eux -- autant le dire tout de suite plutot que de
+    // laisser croire a une cible muette.
+    pinMode(pin, INPUT_PULLDOWN);
+    delayMicroseconds(500);
+    uint8_t highWithPulldown = 0;
+    for (uint8_t k = 0; k < 20; k++)
+      if (digitalRead(pin)) highWithPulldown++;
+
+    if (highWithPulldown < 15) {
+      snprintf(line, sizeof(line),
+               "  SWDIO sur IO%-2u : au repos, la ligne n'est pas tenue haute --", (unsigned)pin);
+      out.println(line);
+      out.println("     ce fil n'est relie a aucun trou de J5, ou la telecommande");
+      out.println("     n'est pas alimentee.");
+      Serial.flush();
+      continue;
+    }
 
     begin(clkPin, pin);
     connect();
