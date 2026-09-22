@@ -84,7 +84,7 @@ static void cmdHelp() {
   Serial.println("  presence              entend-on la telecommande, et sur quel canal");
   Serial.println("  rafale [s] [seuil]    duree des rafales -> en deduit le debit");
   Serial.println("  boucle [n]            etalonnage a une carte : deux modules sur le meme bus");
-  Serial.println("  etalon tx [s]         ETALONNAGE a deux cartes : cette carte EMET");
+  Serial.println("  etalon tx [s] [1|2]   ETALONNAGE : cette carte EMET (preambule 1 ou 2 o.)");
   Serial.println("  etalon rx [s]         ETALONNAGE a deux cartes : cette carte ECOUTE");
   Serial.println("  autotest              verifie la carte maillon par maillon, sans partenaire");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
@@ -305,9 +305,14 @@ static void handleLine(char *line) {
     } else {
       const char *num = arg;
       while (*num && *num != ' ') num++;
-      const long v = strtol(num, nullptr, 10);
+      char *end = nullptr;
+      const long v = strtol(num, &end, 10);
+      // Argument facultatif : longueur du preambule emis, 1 ou 2 octets.
+      const long amb = (end && *end) ? strtol(end, nullptr, 10) : 2;
       halo.setMode(HaloMode::Normal);
-      if (tx) halo.calibrationBeacon(Serial, (v >= 10 && v <= 600) ? (uint32_t)v : 120);
+      if (tx)
+        halo.calibrationBeacon(Serial, (v >= 10 && v <= 600) ? (uint32_t)v : 120,
+                               (amb == 1) ? 1 : 2);
       else halo.calibrationListen(Serial, (v >= 5 && v <= 120) ? (uint32_t)v : 15);
     }
   } else if (!strcmp(line, "boucle")) {

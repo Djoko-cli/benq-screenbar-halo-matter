@@ -177,7 +177,7 @@ class BenqHalo {
   // Etalonnage a DEUX CARTES : meme firmware des deux cotes, seul le role
   // change. Une carte emet un motif connu, l'autre ecoute puis verifie
   // qu'elle rejette bien une adresse fausse d'un octet.
-  void calibrationBeacon(Print &out, uint32_t seconds = 120);
+  void calibrationBeacon(Print &out, uint32_t seconds = 120, uint8_t preambleBytes = 2);
   void calibrationListen(Print &out, uint32_t seconds = 15);
 
   // Auto-test d'une seule carte, sans partenaire radio : chaque maillon est
