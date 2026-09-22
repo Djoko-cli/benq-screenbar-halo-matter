@@ -219,6 +219,11 @@ class BenqHalo {
   // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
   void listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen = 32);
 
+  // Format BC5602 standard, accuse automatique (audit du 23/09).
+  void txAck(Print &out, const uint8_t addrReg[4], uint8_t channel, const uint8_t *payload,
+             uint8_t len, uint8_t trials, uint16_t gapMs);
+  void prxAck(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms);
+
   // Emettre des octets bruts apres l'adresse, CRC materiel coupe.
   void txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t count, uint16_t gapMs);
 

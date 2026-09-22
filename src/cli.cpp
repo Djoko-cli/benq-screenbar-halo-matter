@@ -114,6 +114,8 @@ static void cmdHelp() {
   Serial.println("  xo [0..31]            trim du quartz du BM5602 : reglage fin de la porteuse");
   Serial.println("  tx6 <hex12> [n] [ms]  emettre une trame Halo 1 (adresse + 6 octets + CRC)");
   Serial.println("  txraw <hex> [n] [ms]  emettre des octets bruts apres l'adresse, CRC materiel coupe");
+  Serial.println("  txack <adr> <canal> <charge> [n] [ms]  format standard, accuse automatique");
+  Serial.println("  prxack <adr> <canal> [ms]  recepteur de banc qui accuse automatiquement");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -598,27 +600,81 @@ static void handleLine(char *line) {
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
     ccListen(Serial, dwell);
-  } else if (!strcmp(line, "txraw")) {
-    // txraw <hex, 1 a 30 octets> [nombre] [intervalle ms]
-    uint8_t buf[32];
-    uint8_t len = 0;
-    char *p = arg;
-    while (isxdigit((unsigned char)p[0]) && isxdigit((unsigned char)p[1]) && len < 30) {
-      char pair[3] = {p[0], p[1], 0};
-      buf[len++] = (uint8_t)strtol(pair, nullptr, 16);
-      p += 2;
-    }
-    if (!len) {
-      Serial.println("Usage : txraw <hex> [nombre] [intervalle ms]");
+  } else if (!strcmp(line, "txack")) {
+    // txack <adresse 8 hex, ordre d'ecriture> <canal> <charge hex> [essais] [intervalle ms]
+    char *a = arg;
+    char *b = splitWord(a);
+    char *pl = splitWord(b);
+    char *rest = splitWord(pl);
+    uint8_t addrReg[4], pay[32];
+    const int na = parseHexBytes(a, addrReg, 4);
+    const int np = parseHexBytes(pl, pay, 32);
+    const long ch = strtol(b, nullptr, 10);
+    char *end = rest;
+    long trials = 3, gap = 200;
+    if (*end) trials = strtol(end, &end, 10);
+    if (end && *end) gap = strtol(end, nullptr, 10);
+    if (na != 4 || np < 1 || ch < 0 || ch > 83) {
+      Serial.println("Usage : txack <adresse 8 hex> <canal> <charge hex> [essais] [intervalle ms]");
     } else {
+      // Garde-fous. Jamais l'adresse d'appairage (dans les deux ordres), jamais
+      // un octet de tete 0x0A (commande d'appairage du Halo 2).
+      const bool pairing = (addrReg[0] == 0xE2 && addrReg[1] == 0x08 && addrReg[2] == 0x00 &&
+                            addrReg[3] == 0xB0) ||
+                           (addrReg[0] == 0xB0 && addrReg[1] == 0x00 && addrReg[2] == 0x08 &&
+                            addrReg[3] == 0xE2);
+      if (pairing || pay[0] == 0x0A) {
+        Serial.println("Refuse : adresse ou commande d'appairage.");
+      } else {
+        // Sur le canal de la lampe, pas de rafale : 10 essais au plus, espaces
+        // d'une demi-seconde, pour lui laisser finir ses transitions.
+        if (ch == RF_CHANNEL_1) {
+          if (trials > 10) trials = 10;
+          if (gap < 500) gap = 500;
+        }
+        if (trials < 1) trials = 1;
+        if (trials > 200) trials = 200;
+        if (gap < 0) gap = 0;
+        if (gap > 5000) gap = 5000;
+        halo.setMode(HaloMode::Normal);
+        halo.txAck(Serial, addrReg, (uint8_t)ch, pay, (uint8_t)np, (uint8_t)trials, (uint16_t)gap);
+      }
+    }
+  } else if (!strcmp(line, "prxack")) {
+    // prxack <adresse 8 hex, ordre d'ecriture> <canal> [ms]
+    char *a = arg;
+    char *b = splitWord(a);
+    char *rest = splitWord(b);
+    uint8_t addrReg[4];
+    const int na = parseHexBytes(a, addrReg, 4);
+    const long ch = strtol(b, nullptr, 10);
+    long ms = 20000;
+    if (*rest) ms = strtol(rest, nullptr, 10);
+    if (na != 4 || ch < 0 || ch > 83 || ms < 500 || ms > 600000) {
+      Serial.println("Usage : prxack <adresse 8 hex> <canal> [ms]");
+    } else {
+      halo.setMode(HaloMode::Normal);
+      halo.prxAck(Serial, addrReg, (uint8_t)ch, (uint32_t)ms);
+    }
+  } else if (!strcmp(line, "txraw")) {
+    // txraw <hex d'un seul tenant> [nombre] [intervalle ms]
+    // Correction de l'audit (B10) : l'ancienne lecture s'arretait au premier
+    // espace et emettait en silence une trame tronquee.
+    char *hex = arg;
+    char *rest = splitWord(hex);
+    uint8_t buf[32];
+    const int len = parseHexBytes(hex, buf, 30);
+    if (len < 1) {
+      Serial.println("Usage : txraw <hex d'un seul tenant> [nombre] [intervalle ms]");
+    } else {
+      char *end = rest;
       long n = 3, gap = 2;
-      char *end = p;
       if (*end) n = strtol(end, &end, 10);
-      if (*end) gap = strtol(end, nullptr, 10);
+      if (end && *end) gap = strtol(end, nullptr, 10);
       if (n < 1 || n > 5000) n = 3;
       if (gap < 0 || gap > 2000) gap = 2;
       halo.setMode(HaloMode::Normal);
-      halo.txRaw(Serial, buf, len, (uint16_t)n, (uint16_t)gap);
+      halo.txRaw(Serial, buf, (uint8_t)len, (uint16_t)n, (uint16_t)gap);
     }
   } else if (!strcmp(line, "tx6")) {
     // tx6 <12 chiffres hex> [nombre] [intervalle ms]
