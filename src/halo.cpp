@@ -2556,9 +2556,9 @@ void BenqHalo::calibrationBeacon(Print &out, uint32_t seconds, uint8_t preambleB
 
   out.println();
   out.println("=== Balise d'etalonnage (role EMETTEUR) ===");
-  snprintf(line, sizeof(line), "  Adresse sur l'air %02X %02X %02X %02X, canal %u, 125 kbps.",
+  snprintf(line, sizeof(line), "  Adresse sur l'air %02X %02X %02X %02X, canal %u, %s.",
            kCalAirAddr[0], kCalAirAddr[1], kCalAirAddr[2], kCalAirAddr[3],
-           (unsigned)RF_CHANNEL_1);
+           (unsigned)RF_CHANNEL_1, dataRateName(dataRate_));
   out.println(line);
   int n = snprintf(line, sizeof(line), "  Motif emis : ");
   for (uint8_t i = 0; i < 10; i++)
@@ -3233,6 +3233,106 @@ void BenqHalo::tapTest(Print &out, uint32_t seconds) {
   } else {
     out.println("  Contact intermittent : cale mieux le fil qui decroche avant");
     out.println("  de lancer la capture.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Le correlateur sait-il se caler au milieu d'une trame ?
+// ---------------------------------------------------------------------------
+
+void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== Accrochage sur le payload : le procede marche-t-il ? ===");
+  out.println("  La commande 'find' donne au correlateur trois octets pris dans");
+  out.println("  le payload, en esperant qu'il s'y cale et livre la suite. Ce");
+  out.println("  principe n'a jamais ete verifie -- seulement lance contre la");
+  out.println("  lampe, sans jamais savoir s'il pouvait fonctionner.");
+  out.println();
+  out.println("  Ici on l'essaie contre la balise, dont on connait le payload :");
+  int n = snprintf(line, sizeof(line), "    ");
+  for (uint8_t i = 0; i < 10; i++)
+    n += snprintf(line + n, sizeof(line) - n, "%02X ", kCalPattern[i]);
+  out.println(line);
+  out.println("  Huit fenetres de trois octets sont essayees. Si aucune n'accroche");
+  out.println("  alors qu'on connait la reponse, le procede est condamne.");
+  out.println("  >>> La balise doit tourner sur l'autre carte : 'etalon tx 180 2'.");
+  Serial.flush();
+
+  uint8_t hits = 0;
+
+  for (uint8_t off = 0; off + 2 < 10; off++) {
+    // Sur l'air les octets defilent dans l'ordre du payload ; le registre se
+    // remplit a l'envers.
+    const uint8_t reg3[3] = {kCalPattern[off + 2], kCalPattern[off + 1], kCalPattern[off]};
+
+    channel_ = RF_CHANNEL_1;
+    sharedRadioConfig(ADDR_LEN_3, reg3, 3);
+
+    uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+    radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
+    radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+    radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
+    radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
+    radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
+    radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
+    radio.clearInterrupts();
+    radio.command(CMD_FLUSH_RX_FIFO);
+    radio.enterRxMode();
+
+    uint32_t got = 0;
+    bool shown = false;
+    const uint32_t until = millis() + dwellMs;
+
+    while ((int32_t)(millis() - until) < 0) {
+      if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+      if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) {
+        delayMicroseconds(200);
+        continue;
+      }
+
+      uint8_t buf[32];
+      radio.readFifo(buf, 32, false);
+      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+      radio.command(CMD_FLUSH_RX_FIFO);
+      got++;
+
+      if (!shown) {
+        shown = true;
+        int k = snprintf(line, sizeof(line), "     recu : ");
+        for (uint8_t i = 0; i < 12; i++)
+          k += snprintf(line + k, sizeof(line) - k, "%02X ", buf[i]);
+        out.println(line);
+      }
+      if ((got & 0x1F) == 0) delay(1);
+    }
+
+    snprintf(line, sizeof(line), "  octets %u-%u  (%02X %02X %02X) : %lu trame(s)%s",
+             (unsigned)off, (unsigned)(off + 2), kCalPattern[off], kCalPattern[off + 1],
+             kCalPattern[off + 2], (unsigned long)got, got ? "   <<< ACCROCHE" : "");
+    out.println(line);
+    Serial.flush();
+    if (got) hits++;
+  }
+
+  out.println();
+  if (hits) {
+    out.println("  Le correlateur SAIT se caler au milieu d'une trame.");
+    out.println("  Le procede de 'find' est donc valide, et le relancer contre la");
+    out.println("  lampe au bon debit a un sens.");
+  } else {
+    out.println("  Aucune fenetre n'accroche, alors qu'on connaissait la reponse,");
+    out.println("  que l'emetteur est confirme et le recepteur valide.");
+    out.println("  Le correlateur ne se cale donc QU'APRES un preambule valide :");
+    out.println("  'find' etait condamnee des le depart, comme l'accrochage sur");
+    out.println("  le preambule. Ne plus y revenir.");
   }
   out.println();
 }

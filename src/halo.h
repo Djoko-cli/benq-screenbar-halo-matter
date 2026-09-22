@@ -188,6 +188,12 @@ class BenqHalo {
   void calibrationBeacon(Print &out, uint32_t seconds = 120, uint8_t preambleBytes = 2);
   void calibrationListen(Print &out, uint32_t seconds = 15);
 
+  // Verifie si le correlateur sait se caler au MILIEU d'une trame, sur trois
+  // octets de payload servant de pseudo-adresse. C'est le principe de la
+  // commande 'find', jamais valide : on le teste ici contre une balise dont
+  // le payload est connu, donc avec la reponse d'avance.
+  void validatePayloadSync(Print &out, uint32_t dwellMs = 3000);
+
   // Auto-test d'une seule carte, sans partenaire radio : chaque maillon est
   // verifie par une RELECTURE, du bus SPI jusqu'au remplissage de la FIFO
   // d'emission. Repond a la question 'est-ce mon cablage ou mon code ?'.
