@@ -679,3 +679,68 @@ débit, sur aucun canal**, préambule de un comme de deux octets.
 
 La puce n'accroche donc jamais le préambule de la télécommande, alors que sa
 carte porte elle aussi un `BC5602`. Ce constat est solide et reste inexpliqué.
+
+## Le débit, tranché par le rapport FCC
+
+Le rapport de laboratoire de la télécommande (`scratchpad/ctr_test_report.txt`)
+donne, pour les trois canaux 2405 / 2446 / 2475 MHz :
+
+| Fréquence | Largeur à 20 dB | Largeur occupée à 99 % |
+|---|---|---|
+| 2405 MHz | 0,504 MHz | **0,430 MHz** |
+| 2446 MHz | 0,508 MHz | **0,434 MHz** |
+| 2475 MHz | 0,508 MHz | **0,447 MHz** |
+
+Le datasheet donne les excursions appliquées par la puce (`ds.txt:198-200`) :
+160 kHz à 125 et 250 kbps, 250 kHz à 500 kbps. Pour du GFSK, la largeur occupée
+vaut approximativement `2 × fDEV + débit` :
+
+| Débit | Largeur attendue | Verdict |
+|---|---|---|
+| **125 kbps** | **445 kHz** | **compatible** |
+| 250 kbps | 570 kHz | exclu |
+| 500 kbps | 1000 kHz | exclu |
+
+**La télécommande émet à 125 kbps.** Cela contredit l'estimation par durée de
+rafale, qui annonçait 250 kbps en supposant une trame de 19 octets.
+
+### Conséquence : la trame du Halo 1 est courte
+
+À 125 kbps, la durée de rafale corrigée (~708 µs) correspond à environ
+**11 octets**, non 19. Préambule, adresse, PCF et CRC en consomment 8 ou 9 : il
+ne reste que **2 à 4 octets de payload**, là où le Halo 2 en a dix.
+
+**La structure de trame du Halo 1 n'est donc pas celle du Halo 2** — hypothèse
+qui soutenait toutes les chasses par fenêtre de payload, et qui explique leur
+échec.
+
+## La contradiction ouverte
+
+Deux blocs de faits qui ne peuvent pas être vrais ensemble si les deux puces
+sont réglées de la même manière :
+
+- la télécommande **émet** (la lampe lui répond) et porte un `BC5602` ;
+- notre `BC5602` **ne détecte jamais son préambule**, après avoir balayé
+  84 canaux × 3 débits × 2 longueurs de préambule × 3 largeurs d'adresse ×
+  2 séquences d'initialisation, instrument validé sur la balise à chaque fois.
+
+**Réserve** : ces balayages n'accordent que 0,7 à 3 s par canal, et le témoin
+RSSI ne voyait jamais le canal 5 ressortir pendant ces runs — alors que la
+mesure `presence` l'y voyait bondir d'un facteur sept le matin même. Une source
+à ~1 % de rapport cyclique peut être ratée par un balayage.
+
+**À faire en priorité à la reprise** : camper une minute entière sur le canal 5
+plutôt que balayer.
+
+```
+debit 125
+canalgio 60000 5 5
+```
+
+Cela tranche entre « la puce ne sait pas démoduler cette source » et « on n'y
+était jamais au bon moment ». Les quarante balayages précédents ne pouvaient pas
+séparer ces deux lectures.
+
+Variables encore non testées si ce campement ne donne rien : l'**excursion de
+fréquence** et les réglages de **modem** non documentés. Seul le firmware de la
+télécommande, lisible par `SWD` sur `J5`, peut les livrer.
