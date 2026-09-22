@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "halo.h"
+#include "swd.h"
 
 // Definie dans main.cpp.
 extern const char *resetReasonText();
@@ -88,6 +89,7 @@ static void cmdHelp() {
   Serial.println("  etalon rx [s]         ETALONNAGE a deux cartes : cette carte ECOUTE");
   Serial.println("  autotest              verifie la carte maillon par maillon, sans partenaire");
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
+  Serial.println("  swd                   cherche SWDIO et interroge le microcontroleur");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
   Serial.println("  debit [125|250|500]   debit radio, persiste ; sans argument, affiche");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
@@ -312,6 +314,23 @@ static void handleLine(char *line) {
     if (v >= 3 && v <= 120) secs = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.tapTest(Serial, secs);
+  } else if (!strcmp(line, "swd")) {
+    halo.setMode(HaloMode::Normal);
+    Serial.println();
+    Serial.println("=== Interrogation du microcontroleur par SWD ===");
+    Serial.println("  Cablage sur le connecteur J5 de la telecommande :");
+    Serial.printf("    trou 1 (masse)  -> GND\n");
+    Serial.printf("    trou 3 (SWCLK)  -> IO%u\n", (unsigned)PIN_SWD_CLK);
+    Serial.println("    trous 2, 4, 5, 6 -> IO19, IO20, IO14, IO10");
+    Serial.println("  Le firmware cherche lui-meme lequel est SWDIO : aucun");
+    Serial.println("  recablage entre les essais.");
+    Serial.println("  La telecommande doit etre ALIMENTEE, piles branchees.");
+    Serial.println();
+    halo.releaseSpiBus();
+    static const uint8_t candidates[] = {19, 20, 14, 10};
+    swd::probeCandidates(Serial, PIN_SWD_CLK, candidates, sizeof(candidates));
+    halo.restoreSpiBus();
+    Serial.println();
   } else if (!strcmp(line, "sniffspi")) {
     uint32_t secs = 60;
     const long v = strtol(arg, nullptr, 10);

@@ -530,3 +530,47 @@ internes, donc **une broche débranchée se lit à 100 % haut**. Trois lignes à
 la volée, état des trois lignes et compteurs affichés une fois par seconde,
 restitution complète sur 32 octets. **Il ne manque qu'un contact mécanique
 fiable** — trois pastilles d'un millimètre ne se tiennent pas à la main.
+
+## `J5` : le connecteur de programmation du microcontrôleur
+
+Six trous traversants plaqués, repère `J5`, entre le contrôleur tactile `U2` et
+la découpe. Ils acceptent une broche Dupont par simple friction — c'est le seul
+point de la carte où le contact mécanique ne pose aucun problème.
+
+Relevés au multimètre, télécommande alimentée, masse sur le trou 1 :
+
+| Trou | Mesure | Interprétation |
+|---:|---|---|
+| 1 | continuité avec la masse | `GND` |
+| 2, 4, 5, 6 | 2,49 V | tirés haut |
+| **3** | **0,001 V** | **`SWCLK`** — tiré bas par sa résistance interne |
+
+Aucun des cinq ne porte `CSN`, `SCK` ni `SDIO` : ce n'est pas un connecteur de
+test radio. La signature — un seul trou bas pendant que les autres sont hauts —
+est celle d'un port `SWD` : `SWDIO` et le reset se tiennent hauts, `SWCLK` bas.
+
+**Conséquence sur les niveaux logiques** : la logique de la télécommande tourne
+à **2,5 V**, pas 3,3 V, ce qui est cohérent avec des piles montées en parallèle
+et remontées par un convertisseur. Le seuil de niveau haut de l'ESP32-C6 est
+d'environ 2,48 V : les signaux arrivent donc dix millivolts au-dessus du seuil.
+Ça fonctionne, mais sans marge — à garder en tête devant toute capture bruitée.
+
+Une sonde `ST-Link V2` travaillant à 3,3 V devra passer par deux résistances
+série de quelques centaines d'ohms sur `SWDIO` et `SWCLK`, pour ne pas faire
+conduire les diodes de protection de la cible.
+
+### Implémentation `SWD` en bit-banging
+
+`src/swd.cpp` génère le protocole sans matériel dédié : reset de ligne, bascule
+JTAG vers SWD, puis échanges de 8 bits de requête, 3 bits d'acquittement et
+32 bits de donnée avec leurs cycles de retournement.
+
+La commande `swd` **cherche elle-même quel trou est `SWDIO`** parmi plusieurs
+broches de l'ESP32 reliées d'un coup aux trous inconnus — pas de recâblage entre
+les essais. Elle ne s'arrête pas à l'`IDCODE` : elle demande ensuite la mise sous
+tension du domaine de debug et vérifie l'acquittement matériel, ce qui distingue
+une vraie liaison d'une lecture heureuse.
+
+Réserve connue : Artery livre souvent ses microcontrôleurs avec la lecture de la
+flash verrouillée. La liaison peut donc s'établir sans que le contenu soit
+accessible.
