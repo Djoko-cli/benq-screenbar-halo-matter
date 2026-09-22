@@ -109,6 +109,9 @@ static void cmdHelp() {
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
   Serial.println("  ccdiag                diagnostic electrique du module CC2500");
   Serial.println("  ccraw                 le bus SPI du CC2500 transporte-t-il quelque chose ?");
+  Serial.println("  ccrx [ms]             CC2500 en ecoute brute sur 2405 MHz");
+  Serial.println("  cccap [motif] [bits]  capture le flux brut et y cherche un motif de 32 bits");
+  Serial.println("  ccfind [bits] [run] [n]  trouve une adresse SANS la connaitre, n captures cumulees");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -430,6 +433,35 @@ static void handleLine(char *line) {
     ccDiagnose(Serial);
   } else if (!strcmp(line, "ccraw")) {
     ccRawProbe(Serial);
+  } else if (!strcmp(line, "ccfind")) {
+    char *end = nullptr;
+    uint32_t nb = 32768;
+    const long v = strtol(arg, &end, 10);
+    if (v >= 1024 && v <= 32768) nb = (uint32_t)v;
+    long run = 12;
+    if (end && *end) run = strtol(end, &end, 10);
+    if (run < 6 || run > 40) run = 12;
+    long rep = 1;
+    if (end && *end) rep = strtol(end, nullptr, 10);
+    if (rep < 1 || rep > 120) rep = 1;
+    ccFindAddress(Serial, nb, (uint8_t)run, (uint8_t)rep);
+  } else if (!strcmp(line, "cccap")) {
+    // cccap [motif hex 8 chiffres] [nbits] -- par defaut l'adresse sur l'air
+    // de la balise, E1 22 33 44.
+    uint32_t pat = 0xE1223344UL;
+    char *end = arg;
+    if (*arg && strlen(arg) >= 8) pat = (uint32_t)strtoul(arg, &end, 16);
+    uint32_t nb = 32768;
+    if (end && *end) {
+      const long v = strtol(end, nullptr, 10);
+      if (v >= 1024 && v <= 32768) nb = (uint32_t)v;
+    }
+    ccCapture(Serial, pat, nb);
+  } else if (!strcmp(line, "ccrx")) {
+    uint32_t dwell = 2000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
+    ccListen(Serial, dwell);
   } else if (!strcmp(line, "amont")) {
     // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
     // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
@@ -882,6 +914,399 @@ void ccRawProbe(Print &out) {
   }
 
   SPI.begin(sck, miso, mosi, -1);
+}
+
+// ---------------------------------------------------------------------------
+//  Configuration du CC2500 pour ECOUTER la telecommande BenQ en brut.
+//
+//  Porteuse 2405,000 MHz, GFSK, 125 kbps, excursion 165 kHz, filtre de canal
+//  812,5 kHz. Quartz de 26 MHz (marquage T260 sur le module).
+//
+//  Les deux registres qui font tout le travail :
+//    PKTCTRL0.PKT_FORMAT = 01 -> mode serie SYNCHRONE : le moteur de paquets
+//      est debranche, GDO0 sort les bits demodules et GDO2 l'horloge de bit
+//      recuperee par la puce elle-meme.
+//    MDMCFG2.SYNC_MODE = 000 -> ni preambule ni mot de synchro exiges. Le
+//      datasheet prevoit explicitement ce cas : "The MCU must then handle
+//      preamble and sync word insertion and detection in software."
+//  C'est exactement ce que le BC5602 refuse, et donc le seul chemin vers
+//  l'adresse de la telecommande sans la connaitre d'avance.
+//
+//  Calculs verifies a la main depuis les formules du datasheet :
+//    FREQ  = 2405e6 x 2^16 / 26e6 = 6 062 080 = 0x5C8000
+//    debit = (256+59) x 2^12 x 26e6 / 2^28 = 124 969,5 Bd, soit -0,02 %
+//    f_dev = 26e6/2^17 x (8+5) x 2^6 = 165 037 Hz
+//    BW    = 26e6 / (8 x 4 x 1) = 812 500 Hz
+// ---------------------------------------------------------------------------
+static const uint8_t kCcRxConfig[][2] = {
+    {cc2500::REG_IOCFG2, 0x0B},    // GDO2 = horloge serie
+    {cc2500::REG_IOCFG0, 0x0C},    // GDO0 = donnee serie synchrone
+    {cc2500::REG_FIFOTHR, 0x07},
+    {cc2500::REG_PKTLEN, 0xFF},
+    {cc2500::REG_PKTCTRL1, 0x00},  // aucun filtrage d'adresse, aucun seuil PQT
+    {cc2500::REG_PKTCTRL0, 0x12},  // mode serie synchrone, CRC coupe
+    {cc2500::REG_ADDR, 0x00},
+    {cc2500::REG_CHANNR, 0x00},    // canal 0 : la porteuse est dans FREQ
+    {cc2500::REG_FSCTRL1, 0x10},   // f_IF = 406,25 kHz, accordee au filtre
+    {cc2500::REG_FSCTRL0, 0x00},
+    {cc2500::REG_FREQ2, 0x5C},
+    {cc2500::REG_FREQ1, 0x80},
+    {cc2500::REG_FREQ0, 0x00},
+    {cc2500::REG_MDMCFG4, 0x0C},
+    {cc2500::REG_MDMCFG3, 0x3B},
+    {cc2500::REG_MDMCFG2, 0x10},   // GFSK, NI preambule NI mot de synchro
+    {cc2500::REG_MDMCFG1, 0x22},
+    {cc2500::REG_MDMCFG0, 0xF8},
+    {cc2500::REG_DEVIATN, 0x65},
+    {cc2500::REG_MCSM2, 0x07},
+    {cc2500::REG_MCSM1, 0x3C},     // rester en RX apres reception
+    {cc2500::REG_MCSM0, 0x18},     // autocalibration a l'entree en RX
+    {cc2500::REG_FOCCFG, 0x1E},
+    {cc2500::REG_BSCFG, 0x1F},     // synchronisation de bit (0x1A, pas 0x1C)
+    {cc2500::REG_AGCCTRL2, 0xC7},
+    {cc2500::REG_AGCCTRL1, 0x00},
+    {cc2500::REG_AGCCTRL0, 0xB2},
+    {cc2500::REG_FREND1, 0xB6},
+    {cc2500::REG_FREND0, 0x10},
+    {cc2500::REG_FSCAL3, 0xEA},
+    {cc2500::REG_FSCAL2, 0x0A},
+    {cc2500::REG_FSCAL1, 0x00},
+    {cc2500::REG_FSCAL0, 0x11},
+    {cc2500::REG_TEST2, 0x88},
+    {cc2500::REG_TEST1, 0x31},
+    {cc2500::REG_TEST0, 0x0B},
+};
+
+void ccListen(Print &out, uint32_t dwellMs) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  out.println();
+  out.println("=== CC2500 en ecoute brute sur 2405 MHz ===");
+  out.println("  Mode serie synchrone, ni preambule ni mot de synchro exiges.");
+  out.println("  GDO2 doit alors battre a 125 kHz en continu : c'est l'horloge");
+  out.println("  de bit recuperee par la puce, et son premier temoin de vie.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+
+  // Relecture : une ecriture muette se voit ici, pas trois heures plus tard.
+  uint8_t bad = 0;
+  for (const auto &r : kCcRxConfig)
+    if (radio2.readRegister(r[0]) != r[1]) bad++;
+  out.printf("  Registres relus : %u ecart(s) sur %u.\n", bad,
+             (unsigned)(sizeof(kCcRxConfig) / sizeof(kCcRxConfig[0])));
+
+  // Etage d'entree RFX2402E : amplificateur faible bruit seul, jamais le PA.
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(5);
+  const uint8_t marc = radio2.marcState();
+  out.printf("  MARCSTATE 0x%02X (%s)\n", marc, cc2500::marcStateName(marc));
+  if (marc != cc2500::MARC_RX) out.println("  ATTENTION : la puce n'est PAS en reception.");
+
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  uint32_t e0 = 0, e2 = 0, samples = 0;
+  uint32_t last = REG_READ(GPIO_IN_REG);
+  const uint32_t until = millis() + dwellMs;
+  while ((int32_t)(millis() - until) < 0) {
+    for (uint16_t b = 0; b < 1024; b++) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      if ((now ^ last) & m2) e2++;
+      if ((now ^ last) & m0) e0++;
+      last = now;
+      samples++;
+    }
+  }
+
+  const int8_t rssiRaw = (int8_t)radio2.readStatus(cc2500::STA_RSSI);
+  const int rssiDbm = (rssiRaw >= 0) ? (rssiRaw / 2 - 72) : (rssiRaw / 2 - 72);
+  out.printf("  GDO2 (horloge) : %lu fronts.  GDO0 (donnees) : %lu fronts.\n",
+             (unsigned long)e2, (unsigned long)e0);
+  out.printf("  %lu echantillons en %lu ms, RSSI %d dBm.\n", (unsigned long)samples,
+             (unsigned long)dwellMs, rssiDbm);
+  out.println();
+  if (e2 < 1000) {
+    out.println("  L'horloge de bit ne bat pas. Soit GDO2 n'est pas sur la");
+    out.println("  broche declaree, soit la puce n'est pas reellement en RX.");
+  } else {
+    out.println("  L'horloge bat : la chaine de demodulation tourne. Les fronts");
+    out.println("  sur GDO0 sont des bits demodules -- du bruit tant qu'aucune");
+    out.println("  source n'emet, une trame des qu'il y en a une.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Capture du flux binaire brut sorti par le CC2500, et recherche d'un motif.
+//
+//  Le CC2500 pose la donnee sur le front DESCENDANT de son horloge serie : on
+//  echantillonne donc GDO0 sur le front MONTANT de GDO2. Aucune adresse n'est
+//  connue de la puce a ce stade -- c'est tout l'interet.
+//
+//  La validation se fait contre la balise, dont on connait l'adresse sur l'air
+//  (E1 22 33 44) et la charge utile (DE AD 55 0F A0 3C 01 02 03 04). Trouver ce
+//  motif dans le flux prouve la chaine entiere : radio, demodulation, horloge,
+//  echantillonnage. Tant qu'on ne l'a pas trouve, chercher l'adresse de la
+//  telecommande serait chercher a l'aveugle avec un instrument non etalonne --
+//  l'erreur que ce projet a deja payee plusieurs fois.
+// ---------------------------------------------------------------------------
+static uint8_t ccBits[4096];  // 32768 bits, soit ~0,26 s a 125 kbit/s
+
+static inline bool ccBitAt(const uint8_t *buf, uint32_t i) {
+  return (buf[i >> 3] >> (7 - (i & 7))) & 1;
+}
+
+// Compte les bits identiques entre le motif et le flux a partir d'un offset.
+static uint8_t ccMatchBits(const uint8_t *buf, uint32_t at, uint32_t pattern, bool invert) {
+  uint8_t same = 0;
+  for (int8_t k = 31; k >= 0; k--) {
+    const bool want = ((pattern >> k) & 1) ^ (invert ? 1 : 0);
+    if (ccBitAt(buf, at + (uint32_t)(31 - k)) == want) same++;
+  }
+  return same;
+}
+
+void ccCapture(Print &out, uint32_t pattern, uint32_t nbits) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  if (nbits > sizeof(ccBits) * 8) nbits = sizeof(ccBits) * 8;
+
+  out.println();
+  out.println("=== Capture du flux brut et recherche de motif ===");
+  out.printf("  %lu bits echantillonnes sur le front montant de GDO2.\n", (unsigned long)nbits);
+  out.printf("  Motif cherche : %08lX, dans les deux polarites.\n", (unsigned long)pattern);
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(5);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : capture annulee.");
+    return;
+  }
+
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+  memset(ccBits, 0, sizeof(ccBits));
+
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  uint32_t got = 0;
+  uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+  // Garde-fou : si l'horloge s'arretait, la boucle tournerait sans fin.
+  const uint32_t deadline = millis() + 2000;
+
+  noInterrupts();
+  while (got < nbits) {
+    const uint32_t now = REG_READ(GPIO_IN_REG);
+    const uint32_t clk = now & m2;
+    if (clk && !prev) {
+      if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+      got++;
+    }
+    prev = clk;
+    if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+  }
+  interrupts();
+
+  out.printf("  %lu bits captures.\n", (unsigned long)got);
+  if (got < nbits) out.println("  (interrompu : l'horloge s'est arretee)");
+
+  // Recherche du motif, tolerante : on rapporte les meilleures correspondances
+  // plutot qu'une egalite stricte, parce qu'un seul bit faux masquerait tout.
+  uint8_t best = 0;
+  uint32_t bestAt = 0;
+  bool bestInv = false;
+  uint16_t exact = 0;
+  for (uint32_t i = 0; i + 32 <= got; i++) {
+    for (uint8_t inv = 0; inv < 2; inv++) {
+      const uint8_t m = ccMatchBits(ccBits, i, pattern, inv != 0);
+      if (m == 32) exact++;
+      if (m > best) {
+        best = m;
+        bestAt = i;
+        bestInv = (inv != 0);
+      }
+    }
+  }
+  out.printf("  Meilleure correspondance : %u bits sur 32 a l'offset %lu%s.\n", best,
+             (unsigned long)bestAt, bestInv ? " (polarite inversee)" : "");
+  out.printf("  Correspondances exactes : %u.\n", exact);
+
+  // Vidage autour du meilleur point : c'est la que doit se lire l'adresse
+  // suivie du PCF et de la charge utile.
+  const uint32_t from = (bestAt >= 32) ? (bestAt - 32) : 0;
+  char lineBuf[160];
+  out.println("  Flux autour de ce point (24 octets) :");
+  size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "   ");
+  for (uint8_t b = 0; b < 24 && from + (uint32_t)b * 8 + 8 <= got; b++) {
+    uint8_t v = 0;
+    for (uint8_t k = 0; k < 8; k++)
+      v = (uint8_t)((v << 1) | (ccBitAt(ccBits, from + (uint32_t)b * 8 + k) ? 1 : 0));
+    w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, " %02X", v);
+  }
+  out.println(lineBuf);
+
+  // Densite de transitions : un flux fige trahit un demodulateur sans signal.
+  uint32_t flips = 0;
+  for (uint32_t i = 1; i < got; i++)
+    if (ccBitAt(ccBits, i) != ccBitAt(ccBits, i - 1)) flips++;
+  out.printf("  Transitions dans le flux : %lu sur %lu bits (%lu %%).\n", (unsigned long)flips,
+             (unsigned long)got, (unsigned long)(got ? flips * 100 / got : 0));
+}
+
+// ---------------------------------------------------------------------------
+//  Trouver une adresse SANS la connaitre.
+//
+//  Le preambule est le seul element universel d'une trame : une alternance de
+//  bits, identique sur tous les exemplaires. On le cherche donc dans le flux
+//  brut, et on lit les 32 bits qui le suivent -- c'est l'adresse.
+//
+//  Le bruit produit lui aussi des alternances courtes. Le juge est la
+//  REPETITION : la vraie adresse revient a chaque trame, une coincidence non.
+//  On compte donc les occurrences de chaque candidat et on classe.
+//
+//  Valide sur la balise : la capture a rendu
+//    FF C0 2A AA | E1 22 33 44 | DE AD 55 0F A0 3C 01 02 03 04 | C2 BA
+//  soit preambule, adresse, charge utile et CRC, sans qu'aucune adresse n'ait
+//  ete donnee a la puce.
+// ---------------------------------------------------------------------------
+struct CcCand {
+  uint32_t addr;
+  uint16_t seen;
+};
+
+// Une capture ne dure que 0,26 s, soit environ cinq trames d'une telecommande
+// qui en emet une vingtaine par seconde. On en enchaine donc plusieurs et on
+// CUMULE les candidats : la repetition, seul juge fiable, devient d'autant plus
+// severe que les captures sont nombreuses.
+void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) {
+  if (nbits > sizeof(ccBits) * 8) nbits = sizeof(ccBits) * 8;
+  if (repeats < 1) repeats = 1;
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+
+  out.println();
+  out.println("=== Recherche d'adresse dans le flux brut ===");
+  out.printf("  %u capture(s) de %lu bits, alternance d'au moins %u bits.\n", repeats,
+             (unsigned long)nbits, minRun);
+  out.println("  Le juge est la REPETITION : la vraie adresse revient a chaque");
+  out.println("  trame, une coincidence de bruit non. Attention, un 0x55 dans la");
+  out.println("  charge utile est lui-meme une alternance, donc un faux ancrage.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(5);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : mesure annulee.");
+    return;
+  }
+
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+
+  static CcCand cands[192];
+  uint8_t nCand = 0;
+  uint32_t anchors = 0, totalBits = 0;
+
+  for (uint8_t pass = 0; pass < repeats; pass++) {
+    memset(ccBits, 0, sizeof(ccBits));
+    uint32_t got = 0;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+    const uint32_t deadline = millis() + 2000;
+    noInterrupts();
+    while (got < nbits) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+    }
+    interrupts();
+    totalBits += got;
+
+    uint32_t i = 1, runStart = 0;
+    while (i < got) {
+      if (ccBitAt(ccBits, i) != ccBitAt(ccBits, i - 1)) {
+        i++;
+        continue;
+      }
+      const uint32_t runLen = i - runStart;
+      if (runLen >= minRun && i + 32 <= got) {
+        anchors++;
+        // L'alternance deborde d'un bit dans l'adresse quand le premier bit de
+        // celle-ci prolonge le motif : on teste donc les alignements voisins.
+        for (int8_t d = -2; d <= 0; d++) {
+          const int32_t s = (int32_t)i + d;
+          if (s < 0 || (uint32_t)s + 32 > got) continue;
+          uint32_t a = 0;
+          for (uint8_t k = 0; k < 32; k++)
+            a = (a << 1) | (ccBitAt(ccBits, (uint32_t)s + k) ? 1 : 0);
+          bool found = false;
+          for (uint8_t j = 0; j < nCand; j++)
+            if (cands[j].addr == a) {
+              cands[j].seen++;
+              found = true;
+              break;
+            }
+          if (!found && nCand < 192) cands[nCand++] = {a, 1};
+        }
+      }
+      runStart = i;
+      i++;
+    }
+    delay(2);
+  }
+
+  out.printf("  %lu bits au total, %lu ancrage(s), %u candidat(s) distinct(s).\n",
+             (unsigned long)totalBits, (unsigned long)anchors, nCand);
+  if (!nCand) {
+    out.println("  Aucun preambule dans le flux : soit la source n'a pas emis,");
+    out.println("  soit elle n'est pas sur ce canal.");
+    return;
+  }
+
+  out.println("  Candidats les plus repetes (ordre SUR L'AIR) :");
+  char lineBuf[132];
+  for (uint8_t rank = 0; rank < 8; rank++) {
+    uint8_t bi = 0xFF;
+    uint16_t bs = 0;
+    for (uint8_t j = 0; j < nCand; j++)
+      if (cands[j].seen > bs) {
+        bs = cands[j].seen;
+        bi = j;
+      }
+    if (bi == 0xFF || bs == 0) break;
+    const uint32_t a = cands[bi].addr;
+    snprintf(lineBuf, sizeof(lineBuf), "    %02X %02X %02X %02X  vu %3u fois%s",
+             (unsigned)(a >> 24), (unsigned)((a >> 16) & 0xFF), (unsigned)((a >> 8) & 0xFF),
+             (unsigned)(a & 0xFF), bs, bs >= 5 ? "   <<< candidat serieux" : "");
+    out.println(lineBuf);
+    cands[bi].seen = 0;
+  }
+  out.println();
+  out.println("  Pour l'ecrire dans le BM5602, inverser l'ordre : le dernier");
+  out.println("  octet affiche part en premier sur l'air.");
 }
 
 void cliBegin() {
