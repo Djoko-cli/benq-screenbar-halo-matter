@@ -217,7 +217,7 @@ class BenqHalo {
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
   // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
-  void listenHalo1(Print &out, uint32_t dwellMs);
+  void listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen = 32);
 
   // Ecart au-dela duquel deux trames appartiennent a des rafales distinctes.
   static constexpr uint32_t kBurstGapMs = 40;
