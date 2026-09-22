@@ -53,10 +53,10 @@
 #define PIN_CC_GDO2 15
 #endif
 #ifndef PIN_CC_PA_EN
-#define PIN_CC_PA_EN 2
+#define PIN_CC_PA_EN 7
 #endif
 #ifndef PIN_CC_RX_EN
-#define PIN_CC_RX_EN 1
+#define PIN_CC_RX_EN 6
 #endif
 
 #ifndef PIN_SWD_CLK

@@ -8,6 +8,9 @@
 
 using namespace bc5602;
 
+// Defini plus bas, pres de configForLoopback ; utilise des sharedRadioConfig.
+static void applyXoTrim(BC5602 &r);
+
 BenqHalo halo;
 
 // Les trois canaux declares dans le dossier FCC. Le Halo 2 n'a ete observe que
@@ -113,6 +116,7 @@ void BenqHalo::sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_
   // filtre de canal, LNA, PLL -- donc exactement ce qui decide si un signal
   // se demodule.
   if (applyHoltekTuning_) radio.registerConfigure(nullptr);
+  applyXoTrim(radio);
 
   // AGC_EN : reapplique ici, car tout reset logiciel remet CFG1 a 0x00. Mesure
   // a l'appui (commande 'rxdirect') : avec AGC_EN=0 le plus fort signal recu
@@ -2422,6 +2426,27 @@ static const uint8_t kCalPattern[10] = {0xDE, 0xAD, 0x55, 0x0F, 0xA0, 0x3C, 0x01
 // qu'on utilise ne prouverait rien.
 static bool gApplyHoltekTuning = true;
 
+// Trim du quartz (XO1, banque 0, bits 4-0), reapplique apres chaque reset
+// logiciel -- sans quoi le reset le ramene a 0x10 et la mesure porte sur autre
+// chose que ce qu'on croit regler. -1 = ne pas toucher.
+static int16_t gXoTrim = -1;
+
+static void applyXoTrim(BC5602 &r) {
+  if (gXoTrim < 0) return;
+  const uint8_t saved = r.bank();
+  r.setBank(0);
+  const uint8_t xo = r.readRegister(B0_XO1 | CMD_READ_REGISTER);
+  r.writeRegister(B0_XO1 | CMD_WRITE_REGISTER, (uint8_t)((xo & 0xE0) | (gXoTrim & 0x1F)));
+  r.setBank(saved);
+}
+
+void BenqHalo::setXoTrim(int16_t trim) {
+  gXoTrim = (trim >= 0 && trim <= 31) ? trim : -1;
+  applyXoTrim(radio);
+}
+
+
+
 static void configForLoopback(BC5602 &r, uint8_t channel, const uint8_t addr[4], bool receiver,
                               uint8_t rate) {
   r.softwareReset();
@@ -2430,6 +2455,7 @@ static void configForLoopback(BC5602 &r, uint8_t channel, const uint8_t addr[4],
   // Le reset vient d'effacer les reglages analogiques : les remettre ici, sans
   // quoi toute la mesure tourne sur les valeurs d'usine.
   if (gApplyHoltekTuning) r.registerConfigure(nullptr);
+  applyXoTrim(r);
   r.setBank(0);
   r.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
   r.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel);
@@ -3463,6 +3489,7 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen) {
   // Chemin sans reset logiciel : le reset efface 15 des 19 valeurs recommandees.
   radio.command(CMD_LIGHT_SLEEP);
   radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+  applyXoTrim(radio);
   radio.setBank(0);
   radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);
   radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | dataRate_));

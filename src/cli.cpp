@@ -109,6 +109,7 @@ static void cmdHelp() {
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
   Serial.println("  benq [ms] [octets]    reception Halo 1, lecture de 8 a 32 octets");
+  Serial.println("  xo [0..31]            trim du quartz du BM5602 : reglage fin de la porteuse");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -567,6 +568,30 @@ static void handleLine(char *line) {
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
     ccListen(Serial, dwell);
+  } else if (!strcmp(line, "xo")) {
+    // xo [0..31] : trim du quartz du BM5602, donc reglage fin de sa porteuse.
+    // Mesure a l'appui : les erreurs binaires sur les trames de la telecommande
+    // sont a 100 %% des 1 lus comme 0, toujours sur le dernier 1 avant une
+    // transition -- la signature d'un seuil de decision decale, donc d'un
+    // ecart de frequence porteuse. Le projet amont regle ce registre a 0x15.
+    if (!halo.radio.present()) {
+      Serial.println("BM5602 absent.");
+    } else {
+      const uint8_t saved = halo.radio.bank();
+      halo.radio.setBank(0);
+      uint8_t xo = halo.radio.readRegister(bc5602::B0_XO1 | bc5602::CMD_READ_REGISTER);
+      if (*arg) {
+        const long v = strtol(arg, nullptr, 10);
+        if (v >= 0 && v <= 31) {
+          // Memorise pour etre reapplique apres chaque reset logiciel.
+          halo.setXoTrim((int16_t)v);
+          halo.radio.setBank(0);
+          xo = halo.radio.readRegister(bc5602::B0_XO1 | bc5602::CMD_READ_REGISTER);
+        }
+      }
+      halo.radio.setBank(saved);
+      Serial.printf("XO1 = 0x%02X, XO_TRIM = %u\n", xo, (unsigned)(xo & 0x1F));
+    }
   } else if (!strcmp(line, "benq")) {
     // benq [ms] [octets lus, 8 a 32]
     char *end = nullptr;

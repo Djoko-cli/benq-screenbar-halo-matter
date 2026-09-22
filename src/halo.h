@@ -219,6 +219,9 @@ class BenqHalo {
   // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
   void listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen = 32);
 
+  // Trim du quartz reapplique apres chaque reset logiciel ; -1 = ne pas toucher.
+  void setXoTrim(int16_t trim);
+
   // Ecart au-dela duquel deux trames appartiennent a des rafales distinctes.
   static constexpr uint32_t kBurstGapMs = 40;
   uint16_t halo1Crc(const uint8_t payload[6]) const;
