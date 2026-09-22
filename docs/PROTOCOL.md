@@ -1126,3 +1126,57 @@ Reprendre avec `RXPW0 = 8`, la valeur qui a produit la seule trame valide.
 bits a 125 kbit/s font 260 ms d'interruptions masquees pour un seuil de 300.
 Toutes les captures passent desormais par `ccSampleBits`, qui masque par
 tranches de 8192 bits.
+
+## Deux familles de trames : commandes et accuses de reception (2026-09-23)
+
+Le premier octet de la charge utile se range en deux familles, et dans chacune
+les bits 3-2 forment un **compteur de sequence sur deux bits** :
+
+```
+famille A : 02 06 0A 0E          = 0000 PP 10
+famille B : 21 25 29 2D, puis 89 = 0010 PP 01
+```
+
+Dans les captures de 32 octets, une trame B est **toujours** suivie, 72 bits
+plus loin, d'une trame A portant **le meme compteur** : 21->02, 25->06, 29->0A,
+2D->0E. Ce sont des paires question-reponse, dans l'ordre B puis A.
+
+Interpretation retenue, par trois indices concordants :
+
+- **l'ordre** : B precede A ;
+- **le contenu** : dans les trames A, les octets 2-3 ne dependent que du
+  compteur (`06` -> `B9 21`, `0A` -> `78 AC`, `02` -> `F9 A5`, `0E` -> `38 28`),
+  comme un accuse ; dans les trames B, l'octet 2 vaut toujours `89` et l'octet
+  3 varie a chaque capture, comme une valeur de molette ;
+- **la qualite de reception** : les trames A se recoivent nettement mieux --
+  la seule trame au CRC valide de la soiree est une A -- ce qui designe deux
+  emetteurs differents.
+
+Donc **B = commande de la telecommande, A = accuse de la lampe**. C'est
+l'INVERSE de la convention du Halo 2 (« odd PID frames are lamp replies »).
+
+**Consequence mesuree.** La trame rejouee `06 B9 21 BB 98 FF` (verifiee bit
+pour bit par le CC2500, CRC `7A FF`) n'a produit aucune reaction de la lampe,
+mise au minimum pour l'occasion : c'etait un accuse de reception, pas une
+commande.
+
+**Reparation par le biais : sans resultat.** Les erreurs etant a 100 % des 1
+lus comme 0, on a tente de reparer 49 captures en remettant a 1 jusqu'a trois
+zeros. Trois trames passent le CRC, mais chacune au maximum de corrections, sans
+repetition, et le hasard en predit environ quatre sur ce volume : faux
+positifs.
+
+**Correction d'une conclusion anterieure.** Le rejet de toutes les trames par
+le CRC materiel ne tenait pas a un modele different : pendant cette seance,
+aucune trame ne passait non plus le CRC logiciel. Sur la balise, le CRC
+materiel produit exactement notre modele, et on l'utilise desormais en
+emission.
+
+**Hypotheses de reception eliminees par la mesure** (trame A de reference ou
+comptage de trames, en alternance quand c'etait possible) : longueur de
+lecture, distance et saturation, trim du quartz (calibre : environ 3 kHz par
+cran, 87 kHz de plage), valeurs analogiques par defaut contre recommandees.
+
+**Ce qui bloque maintenant** : obtenir une trame B exacte. Nos radios decodent
+proprement nos propres emissions et assez bien celles de la lampe ; c'est le
+signal de la telecommande qu'elles digerent mal.
