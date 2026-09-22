@@ -3381,6 +3381,208 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 //  moins une des deux tractions. Ce test ne peut pas etre trompe par l'absence
 //  de signal radio, contrairement a un comptage de fronts.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  Ce qu'on entend sur le canal 5, est-ce la telecommande ou le Wi-Fi ?
+//  Le canal 5 (2405 MHz) tombe dans le Wi-Fi 1, large de 20 MHz (2401-2423).
+//  Un emetteur Wi-Fi depose donc autant d'energie a 2420 qu'a 2405. La
+//  telecommande, elle, ne fait que 0,43 MHz de large (dossier FCC) : elle ne
+//  peut etre qu'a UN de ces deux endroits.
+//    canal  5 = 2405 MHz : cible presumee, dans le Wi-Fi 1
+//    canal 20 = 2420 MHz : dans le Wi-Fi 1, hors de la cible
+//    canal 78 = 2478 MHz : hors de tout canal Wi-Fi, bruit de fond
+//  On alterne les trois toutes les quelques millisecondes : une rafale Wi-Fi
+//  ne peut pas favoriser l'un plutot que l'autre a cette echelle de temps.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  Polarite et longueur du preambule : les deux dimensions que les sondes GIO3
+//  n'avaient jamais balayees. configForLoopback ecrit une adresse fixe et ne
+//  touche pas a CFO1, or le BC5602 deduit la POLARITE du preambule du premier
+//  bit d'adresse emis (ds.txt:1414) : un 0 donne 01010101, un 1 donne 10101010.
+//  L'adresse est ecrite a l'envers de l'ordre sur l'air, donc c'est le DERNIER
+//  octet du tableau qui part en premier. Toutes nos chasses ont donc tourne
+//  avec une seule des deux polarites, et une seule des deux longueurs.
+//  L'adresse elle-meme n'importe pas ici : GIO3S=14 s'anime des la detection du
+//  preambule, avant toute comparaison d'adresse.
+// ---------------------------------------------------------------------------
+void BenqHalo::probePreambleShape(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  // Dernier octet a 1 en poids fort -> preambule 10101010 ; a 0 -> 01010101.
+  static const uint8_t addrAA[4] = {0x44, 0x33, 0x22, 0xE1};
+  static const uint8_t addr55[4] = {0x44, 0x33, 0x22, 0x61};
+  const uint8_t *addrs[2] = {addrAA, addr55};
+  const char *polName[2] = {"10101010", "01010101"};
+  const uint8_t rates[3] = {DATARATE_125K, DATARATE_250K, DATARATE_500K};
+
+  out.println();
+  out.println("=== Forme du preambule : polarite et longueur ===");
+  out.println("  Le BC5602 deduit la polarite du preambule du premier bit");
+  out.println("  d'adresse emis. Nos sondes n'ont jamais teste qu'une des deux,");
+  out.println("  ni qu'une des deux longueurs. Douze configurations.");
+  snprintf(line, sizeof(line), "  Canal %u, %lu ms chacune. Reference : 10101010 / 1 octet /",
+           (unsigned)channel_, (unsigned long)dwellMs);
+  out.println(line);
+  out.println("  125 kbps a donne 482 transitions sur la balise.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+  uint32_t best = 0;
+  char bestName[48] = "aucune";
+
+  for (uint8_t pol = 0; pol < 2; pol++) {
+    for (uint8_t two = 0; two < 2; two++) {
+      for (uint8_t r = 0; r < 3; r++) {
+        configForLoopback(radio, channel_, addrs[pol], true, rates[r]);
+        uint8_t cfo1 = radio.readRegister(B0_CFO1 | CMD_READ_REGISTER);
+        cfo1 = two ? (uint8_t)(cfo1 | 0x40) : (uint8_t)(cfo1 & (uint8_t)~0x40);
+        radio.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER, cfo1);
+        radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | 14));
+        radio.enterRxMode();
+        pinMode(PIN_GIO3_TAP, INPUT);
+
+        uint32_t edges = 0, strong = 0, checks = 0;
+        uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+        const uint32_t until = millis() + dwellMs;
+        while ((int32_t)(millis() - until) < 0) {
+          for (uint16_t burst = 0; burst < 512; burst++) {
+            const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+            if (now != last) {
+              edges++;
+              last = now;
+            }
+          }
+          if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+          if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+          checks++;
+        }
+
+        snprintf(line, sizeof(line), "  %s  %u octet%s  %-8s : %lu transitions, signal fort %lu/%lu",
+                 polName[pol], (unsigned)(two + 1), two ? "s" : " ", dataRateName(rates[r]),
+                 (unsigned long)edges, (unsigned long)strong, (unsigned long)checks);
+        out.println(line);
+        Serial.flush();
+
+        if (edges > best) {
+          best = edges;
+          snprintf(bestName, sizeof(bestName), "%s / %u octet(s) / %s", polName[pol],
+                   (unsigned)(two + 1), dataRateName(rates[r]));
+        }
+        delay(1);
+      }
+    }
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+  out.println();
+  if (best > 50) {
+    snprintf(line, sizeof(line), "  La source s'accroche en %s (%lu transitions).", bestName,
+             (unsigned long)best);
+    out.println(line);
+  } else {
+    out.println("  Aucune des douze formes ne fait sortir de transitions. La");
+    out.println("  polarite et la longueur du preambule sont donc epuisees :");
+    out.println("  ce n'est pas la mise en forme du preambule qui bloque.");
+  }
+}
+
+
+void BenqHalo::discriminateWifi(Print &out, uint32_t phaseMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  const uint8_t chans[3] = {5, 20, 78};
+  const char *what[3] = {"cible, dans le Wi-Fi 1", "temoin Wi-Fi 1", "hors Wi-Fi"};
+
+  out.println();
+  out.println("=== Canal 5 : la telecommande, ou ton Wi-Fi ? ===");
+  out.println("  Le Wi-Fi 1 est large de 20 MHz : il depose autant d'energie a");
+  out.println("  2420 MHz qu'a 2405. La telecommande ne fait que 0,43 MHz : elle");
+  out.println("  ne peut etre qu'a UN des deux endroits. On alterne les canaux");
+  out.println("  toutes les quelques millisecondes, trop vite pour qu'une rafale");
+  out.println("  Wi-Fi en favorise un.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t savedChannel = channel_;
+  uint32_t strong[2][3] = {{0, 0, 0}, {0, 0, 0}};
+  uint32_t checks[2][3] = {{0, 0, 0}, {0, 0, 0}};
+
+  for (uint8_t phase = 0; phase < 2; phase++) {
+    if (phase == 0) out.println("  Phase 1 sur 2 -- NE TOUCHE A RIEN, lache la telecommande :");
+    else out.println("  Phase 2 sur 2 -- TOURNE LA MOLETTE SANS T'ARRETER :");
+    for (uint8_t k = 3; k >= 1; k--) {
+      snprintf(line, sizeof(line), "    %u...", (unsigned)k);
+      out.println(line);
+      Serial.flush();
+      delay(1000);
+    }
+
+    const uint32_t until = millis() + phaseMs;
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint8_t c = 0; c < 3; c++) {
+        // Reconfiguration COMPLETE a chaque visite. Mesure a l'appui : ecrire
+        // seulement RFCH et attendre 1,5 ms ne retune pas la PLL -- avec la
+        // balise sur le seul canal 5, les trois canaux lisaient 992 pour mille,
+        // y compris un canal a 73 MHz de distance. Le RSSI ne suivait pas.
+        configForLoopback(radio, chans[c], kCalRegAddr, true, dataRate_);
+        radio.enterRxMode();
+
+        // Visites de 200 ms : assez long pour amortir les 20 ms de
+        // reconfiguration, assez court pour qu'une rafale Wi-Fi ne puisse pas
+        // favoriser un canal plutot qu'un autre.
+        const uint32_t leave = millis() + 200;
+        while ((int32_t)(millis() - leave) < 0) {
+          if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+          if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong[phase][c]++;
+          checks[phase][c]++;
+        }
+        delay(1);
+      }
+    }
+    out.println();
+  }
+
+  channel_ = savedChannel;
+
+  out.println("  canal            role                     repos      molette   rapport");
+  float ratio[3] = {0, 0, 0};
+  for (uint8_t c = 0; c < 3; c++) {
+    const float r0 = checks[0][c] ? (1000.0f * strong[0][c] / checks[0][c]) : 0.0f;
+    const float r1 = checks[1][c] ? (1000.0f * strong[1][c] / checks[1][c]) : 0.0f;
+    ratio[c] = (r0 > 0.05f) ? (r1 / r0) : (r1 > 0.05f ? 999.0f : 1.0f);
+    snprintf(line, sizeof(line), "  %-2u = %u MHz  %-22s  %7.2f0/00 %7.2f0/00   x%.2f",
+             (unsigned)chans[c], (unsigned)(2400 + chans[c]), what[c], (double)r0, (double)r1,
+             (double)ratio[c]);
+    out.println(line);
+  }
+
+  out.println();
+  if (ratio[0] > 1.6f && ratio[0] > 2.0f * ratio[1]) {
+    out.println("  Le canal 5 monte et le canal 20 ne suit PAS : la source est");
+    out.println("  etroite et centree sur 2405 MHz. C'est bien la telecommande.");
+  } else if (ratio[0] > 1.6f && ratio[1] > 1.6f) {
+    out.println("  Les canaux 5 ET 20 montent ensemble : c'est une source LARGE,");
+    out.println("  donc du Wi-Fi, pas la telecommande. Le canal 5 est une");
+    out.println("  fausse piste depuis le debut -- il faut rechercher la");
+    out.println("  telecommande ailleurs dans la bande.");
+  } else if (ratio[0] <= 1.6f) {
+    out.println("  Le canal 5 ne monte pas quand tu tournes la molette. Soit la");
+    out.println("  telecommande n'a pas emis pendant la phase 2, soit elle");
+    out.println("  n'est pas sur ce canal.");
+  } else {
+    out.println("  Resultat ambigu : relance avec une phase plus longue.");
+  }
+}
+
+
 void BenqHalo::checkGio3Wire(Print &out) {
   char line[168];
   out.println();

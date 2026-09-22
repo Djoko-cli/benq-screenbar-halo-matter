@@ -216,6 +216,12 @@ class BenqHalo {
   // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
+  // Polarite et longueur du preambule : douze formes.
+  void probePreambleShape(Print &out, uint32_t dwellMs);
+
+  // Le canal 5 porte-t-il la telecommande, ou le Wi-Fi 1 ?
+  void discriminateWifi(Print &out, uint32_t phaseMs);
+
   // Test electrique du fil GIO3, sans la radio.
   void checkGio3Wire(Print &out);
   void sweepGio3(Print &out, uint32_t dwellMs = 1500);

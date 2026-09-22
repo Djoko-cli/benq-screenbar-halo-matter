@@ -101,6 +101,8 @@ static void cmdHelp() {
   Serial.println("  survie                les valeurs recommandees survivent-elles au reset ?");
   Serial.println("  holtek [0|1]          reappliquer les reglages analogiques apres chaque reset");
   Serial.println("  fil                   le fil GIO3 fait-il contact ? (test electrique)");
+  Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
+  Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -393,9 +395,21 @@ static void handleLine(char *line) {
   } else if (!strcmp(line, "debitgio")) {
     uint32_t dwell = 3000;
     const long v = strtol(arg, nullptr, 10);
-    if (v >= 500 && v <= 15000) dwell = (uint32_t)v;
+    if (v >= 500 && v <= 120000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.probeRateByGio3(Serial, dwell);
+  } else if (!strcmp(line, "forme")) {
+    uint32_t dwell = 20000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 1000 && v <= 120000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.probePreambleShape(Serial, dwell);
+  } else if (!strcmp(line, "discrimine")) {
+    uint32_t ph = 20000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 3000 && v <= 120000) ph = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.discriminateWifi(Serial, ph);
   } else if (!strcmp(line, "fil")) {
     halo.setMode(HaloMode::Normal);
     halo.checkGio3Wire(Serial);
