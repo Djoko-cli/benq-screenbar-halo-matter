@@ -18,7 +18,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <SPI.h>
 
 namespace cc2500 {
 
@@ -100,8 +99,12 @@ const char *marcStateName(uint8_t state);
 
 class CC2500 {
  public:
-  // Le module a son propre bus : aucune cohabitation avec le BM5602, donc
-  // aucun risque de se marcher dessus sur CSN.
+  // SPI bit-bange, volontairement. L'ESP32-C6 n'a qu'un controleur SPI
+  // generaliste, deja pris par le pilote du BM5602 au demarrage, et il ne se
+  // re-route pas proprement ensuite : mesure a l'appui, le peripherique rendait
+  // un octet d'etat 0x00 la ou le bit-bang rendait 0x0F sur les MEMES broches.
+  // Le debit importe peu ici -- la puce ne sert qu'a se configurer, et les
+  // donnees brutes arrivent par GDO0 et GDO2, echantillonnees directement.
   bool begin(uint8_t sck, uint8_t miso, uint8_t mosi, uint8_t csn, uint8_t paEn, uint8_t rxEn);
 
   void strobe(uint8_t cmd);
@@ -126,8 +129,8 @@ class CC2500 {
   void setFrontEnd(bool paEnable, bool rxEnable);
 
  private:
-  SPIClass spi_{FSPI};
-  uint8_t csn_ = 0, paEn_ = 0, rxEn_ = 0, miso_ = 0;
+  uint8_t sck_ = 0, miso_ = 0, mosi_ = 0, csn_ = 0, paEn_ = 0, rxEn_ = 0;
+  uint8_t transferByte(uint8_t v);
   bool present_ = false;
 
   void select();

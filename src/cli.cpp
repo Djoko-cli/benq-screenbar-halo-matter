@@ -107,6 +107,8 @@ static void cmdHelp() {
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
+  Serial.println("  ccdiag                diagnostic electrique du module CC2500");
+  Serial.println("  ccraw                 le bus SPI du CC2500 transporte-t-il quelque chose ?");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -424,6 +426,10 @@ static void handleLine(char *line) {
                   ccPins[7]);
   } else if (!strcmp(line, "cc")) {
     ccIdentify(Serial);
+  } else if (!strcmp(line, "ccdiag")) {
+    ccDiagnose(Serial);
+  } else if (!strcmp(line, "ccraw")) {
+    ccRawProbe(Serial);
   } else if (!strcmp(line, "amont")) {
     // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
     // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
@@ -717,6 +723,165 @@ void ccIdentify(Print &out) {
   }
   out.printf("  MARCSTATE 0x%02X (%s)\n", radio2.marcState(),
              cc2500::marcStateName(radio2.marcState()));
+}
+
+// Diagnostic electrique du CC2500, avant d'accuser le cablage au juge.
+// Le datasheet dit que SO passe en haute impedance quand CSN est haut, et
+// qu'il est PILOTE (bas quand la puce est prete) quand CSN est bas. On teste
+// donc la broche contre les resistances internes de l'ESP32 dans les deux
+// situations : c'est la seule mesure qui distingue un fil debranche d'une
+// puce qui refuse de parler.
+static void ccPinLevels(Print &out, const char *what, uint8_t pin) {
+  pinMode(pin, INPUT_PULLUP);
+  delay(3);
+  uint8_t up = 0;
+  for (uint8_t i = 0; i < 20; i++) { up += digitalRead(pin) ? 1 : 0; delayMicroseconds(200); }
+  pinMode(pin, INPUT_PULLDOWN);
+  delay(3);
+  uint8_t dn = 0;
+  for (uint8_t i = 0; i < 20; i++) { dn += digitalRead(pin) ? 1 : 0; delayMicroseconds(200); }
+  pinMode(pin, INPUT);
+  const char *verdict = (dn >= 18) ? "PILOTEE a 1" : (up <= 2 ? "PILOTEE a 0" : "libre (rien ne la pilote)");
+  out.printf("    %-28s tirage haut %2u/20  tirage bas %2u/20  -> %s\n", what, up, dn, verdict);
+}
+
+void ccDiagnose(Print &out) {
+  const uint8_t sck = ccPins[0], miso = ccPins[1], mosi = ccPins[2], csn = ccPins[3];
+  out.println();
+  out.println("=== Diagnostic electrique du module CC2500 ===");
+  out.println("  SO est en haute impedance quand CSN est haut, et pilote quand");
+  out.println("  CSN est bas. Si SO reste libre dans les DEUX cas, le fil ou");
+  out.println("  l'alimentation sont en cause, pas le logiciel.");
+  out.println();
+
+  pinMode(csn, OUTPUT);
+  digitalWrite(csn, HIGH);
+  delay(5);
+  out.println("  CSN haut (la puce doit lacher le bus) :");
+  ccPinLevels(out, "SO / MISO", miso);
+
+  digitalWrite(csn, LOW);
+  delay(5);
+  out.println("  CSN bas (la puce doit piloter SO) :");
+  ccPinLevels(out, "SO / MISO", miso);
+  digitalWrite(csn, HIGH);
+
+  out.println();
+  out.println("  Les broches que NOUS pilotons, pour verifier qu'elles sortent :");
+  pinMode(sck, OUTPUT);
+  pinMode(mosi, OUTPUT);
+  digitalWrite(sck, HIGH);
+  digitalWrite(mosi, HIGH);
+  delay(2);
+  out.printf("    SCK relu %d, MOSI relu %d  (doivent valoir 1)\n", digitalRead(sck),
+             digitalRead(mosi));
+  digitalWrite(sck, LOW);
+  digitalWrite(mosi, LOW);
+  delay(2);
+  out.printf("    SCK relu %d, MOSI relu %d  (doivent valoir 0)\n", digitalRead(sck),
+             digitalRead(mosi));
+
+  out.println();
+  out.println("  Vidage brut des registres 0x00 a 0x0F :");
+  radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7]);
+  char lineBuf[120];
+  size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "   ");
+  uint8_t nonZero = 0;
+  for (uint8_t r = 0; r <= 0x0F; r++) {
+    const uint8_t v = radio2.readRegister(r);
+    if (v) nonZero++;
+    w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, " %02X", v);
+  }
+  out.println(lineBuf);
+  if (!nonZero) {
+    out.println("  Tous a zero : le bus ne rapporte rien. Apres un reset, un");
+    out.println("  CC2500 doit montrer des valeurs par defaut non nulles");
+    out.println("  (par exemple IOCFG2=0x29, PKTLEN=0xFF, MDMCFG4=0x8C).");
+  }
+}
+
+// SPI bit-bange a la main. Il ne depend ni de la matrice de broches, ni de
+// l'objet SPIClass partage, ni d'un reglage de mode : si celui-ci parle alors
+// que le peripherique se tait, le fautif est la configuration et non le fil.
+// Mode 0 : la puce echantillonne MOSI sur le front montant de SCK et presente
+// son bit sur le front descendant.
+static uint8_t ccBitBang(uint8_t sck, uint8_t miso, uint8_t mosi, uint8_t v) {
+  uint8_t in = 0;
+  for (int8_t b = 7; b >= 0; b--) {
+    digitalWrite(mosi, (v >> b) & 1);
+    delayMicroseconds(2);
+    digitalWrite(sck, HIGH);
+    delayMicroseconds(2);
+    in = (uint8_t)((in << 1) | (digitalRead(miso) ? 1 : 0));
+    digitalWrite(sck, LOW);
+    delayMicroseconds(2);
+  }
+  return in;
+}
+
+void ccRawProbe(Print &out) {
+  const uint8_t sck = ccPins[0], miso = ccPins[1], mosi = ccPins[2], csn = ccPins[3];
+  out.println();
+  out.println("=== Le bus SPI transporte-t-il quelque chose ? ===");
+  out.println("  Le CC2500 renvoie un OCTET D'ETAT pendant le premier octet de");
+  out.println("  chaque transaction : bit 7 = pas pret, bits 6-4 = etat, bits");
+  out.println("  3-0 = octets libres dans la FIFO. En veille il vaut 0x0F.");
+  out.println("  Un 0x00 franc signifie que rien ne revient.");
+  out.println();
+
+  // 1. Par le peripherique SPI.
+  radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7]);
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(csn, LOW);
+  delayMicroseconds(50);
+  const uint8_t st1 = SPI.transfer(0x3D);  // SNOP : ne fait rien, rend l'etat
+  digitalWrite(csn, HIGH);
+  SPI.endTransaction();
+  out.printf("  peripherique SPI, strobe SNOP -> etat 0x%02X\n", st1);
+
+  // 2. En bit-bang pur.
+  SPI.end();
+  pinMode(sck, OUTPUT);
+  pinMode(mosi, OUTPUT);
+  pinMode(miso, INPUT);
+  digitalWrite(sck, LOW);
+  digitalWrite(mosi, LOW);
+  pinMode(csn, OUTPUT);
+  digitalWrite(csn, HIGH);
+  delay(2);
+
+  digitalWrite(csn, LOW);
+  delayMicroseconds(100);
+  const uint8_t st2 = ccBitBang(sck, miso, mosi, 0x3D);
+  digitalWrite(csn, HIGH);
+  out.printf("  bit-bang, strobe SNOP         -> etat 0x%02X\n", st2);
+
+  // 3. Lecture de PARTNUM et VERSION en bit-bang (bit de rafale obligatoire).
+  digitalWrite(csn, LOW);
+  delayMicroseconds(100);
+  const uint8_t st3 = ccBitBang(sck, miso, mosi, 0xF0);  // lecture rafale 0x30
+  const uint8_t part = ccBitBang(sck, miso, mosi, 0x00);
+  digitalWrite(csn, HIGH);
+  delayMicroseconds(50);
+  digitalWrite(csn, LOW);
+  delayMicroseconds(100);
+  ccBitBang(sck, miso, mosi, 0xF1);
+  const uint8_t ver = ccBitBang(sck, miso, mosi, 0x00);
+  digitalWrite(csn, HIGH);
+  out.printf("  bit-bang, PARTNUM 0x%02X (etat 0x%02X), VERSION 0x%02X\n", part, st3, ver);
+
+  out.println();
+  if (st1 == 0x00 && st2 == 0x00) {
+    out.println("  Rien ne revient par aucune des deux voies : SCK ou SI n'atteint");
+    out.println("  pas le module. Verifie ces deux fils en priorite.");
+  } else if (st2 && !st1) {
+    out.println("  Le bit-bang parle et pas le peripherique : le fautif est la");
+    out.println("  configuration SPI, pas le cablage.");
+  } else {
+    out.println("  Le bus repond.");
+  }
+
+  SPI.begin(sck, miso, mosi, -1);
 }
 
 void cliBegin() {

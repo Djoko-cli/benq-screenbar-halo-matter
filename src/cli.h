@@ -9,5 +9,7 @@ void cliBegin();
 
 // Identification du module CC2500 et de son etage d'entree.
 void ccIdentify(Print &out);
+void ccDiagnose(Print &out);
+void ccRawProbe(Print &out);
 extern uint8_t ccPins[8];
 void cliPoll();
