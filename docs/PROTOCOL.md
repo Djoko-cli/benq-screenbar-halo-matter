@@ -575,31 +575,59 @@ Réserve connue : Artery livre souvent ses microcontrôleurs avec la lecture de 
 flash verrouillée. La liaison peut donc s'établir sans que le contenu soit
 accessible.
 
-## L'accrochage en milieu de trame est impossible — démontré
+## L'accrochage en milieu de trame EST possible — à condition d'une ancre
 
-La commande `find` reposait sur un procédé jamais validé : donner au corrélateur
-trois octets pris dans le **payload** comme pseudo-adresse, en espérant qu'il s'y
-cale et livre la suite de la trame.
+**Correction d'une conclusion erronée.** Une version précédente de cette section
+affirmait l'inverse, « démontré » à l'appui. La démonstration ne valait rien.
 
-**Testé le 2026-09-22 contre la balise d'étalonnage**, dont le payload est connu
-(`DE AD BE EF 01 02 03 04 05 06`), pendant qu'elle confirmait **2895 émissions
-par `TX_DS`** et avec un récepteur validé le même jour :
+Le détecteur de préambule s'arme sur une **suite alternée**. Une fenêtre de trois
+octets prise dans le payload n'est donc accrochable que si l'octet qui la
+**précède** ressemble à un préambule, c'est-à-dire vaut `0x55` ou `0xAA`.
 
-| Fenêtre | Octets | Trames reçues |
-|---|---|---:|
-| 0-2 | `DE AD BE` | 0 |
-| 1-3 | `AD BE EF` | 0 |
-| … | … | 0 |
-| 7-9 | `04 05 06` | 0 |
+Le script `find_addr.py` de kuzmin, dont l'intégration Home Assistant fonctionne,
+le dit explicitement :
 
-**Aucune des huit fenêtres n'accroche, alors qu'on connaissait la réponse.** Le
-corrélateur ne se cale qu'après un **préambule valide** : il ne peut pas
-s'accrocher en milieu de trame.
+```python
+HALO2_ADDRESS = [0x55, 0x0f, 0x0a]
+# 0x55, 0x0f -> Color temperature 3925K
+#               (reverse byte order; used as preambule and part of the sync word)
+```
 
-`find` était donc structurellement condamnée depuis le début, au même titre que
-l'accrochage sur le préambule. Les deux procédés sont clos.
+D'où sa consigne de régler la lampe sur **3925 K** exactement : c'est la valeur
+dont l'octet de poids faible vaut `0x55`, et cet octet **sert de préambule**.
 
-**Conséquence** : il n'existe plus aucune voie purement RF vers l'adresse. Le
-corrélateur l'exige, et aucune ruse ne le contourne. Elle doit être lue là où
-elle est écrite en clair — sur le bus SPI de la télécommande, ou dans la flash de
-son microcontrôleur via `SWD`.
+Le premier test de contrôle utilisait le payload de balise
+`DE AD BE EF 01 02 03 04 05 06`, dont la plus longue suite alternée fait sept
+bits — trop court pour armer le détecteur. **Aucune de ses huit fenêtres n'était
+ancrée : l'expérience ne pouvait pas accrocher, quelle que soit la capacité réelle
+de la puce.**
+
+Refaite avec un payload portant une ancre, `DE AD 55 0F A0 3C 01 02 03 04` :
+
+| Fenêtre | Octets | Ancrée | Trames |
+|---|---|---|---:|
+| 0-2 | `DE AD 55` | non | 0 |
+| 1-3 | `AD 55 0F` | non | 0 |
+| 2-4 | `55 0F A0` | non | 0 |
+| **3-5** | **`0F A0 3C`** | **oui** | **158** |
+| 4-6 | `A0 3C 01` | non | 0 |
+| 5-7 | `3C 01 02` | non | 0 |
+| 6-8 | `01 02 03` | non | 0 |
+| 7-9 | `02 03 04` | non | 0 |
+
+Un positif, sept négatifs — y compris pour les fenêtres qui **contiennent** le
+`0x55` sans être précédées par lui. Et la FIFO rend `01 02 03 04 …`, exactement
+les octets suivant la fenêtre accrochée.
+
+**Le procédé de `find` est donc valide.** Ses échecs s'expliquent par deux causes
+identifiées depuis : le **débit** — toutes les chasses tournaient à 125 kbps alors
+que la mesure de durée de rafale exclut ce débit pour le Halo 1 — et l'**ancre**,
+qui impose de régler la lampe sur une valeur dont un octet vaut `0x55` ou `0xAA`.
+
+Valeurs d'ancrage utilisables : une température dont l'octet bas vaut `0x55`
+(2645, 2901, 3157, 3413, 3669, **3925**, 4181, 4437 … K) ou `0xAA` (2730, 2986,
+3242, 3498, 3754, 4010 … K) ; ou une **luminosité de 85 %**, qui vaut `0x55`.
+
+À noter : l'accrochage sur le **préambule lui-même** reste impossible, et pour une
+raison qui découle du même mécanisme — rien ne précède le préambule, il ne peut
+donc pas être ancré.
