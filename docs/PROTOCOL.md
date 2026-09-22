@@ -813,3 +813,54 @@ transitions ne sait pas faire.
 Reste a valider fonctionnellement : qu'un selecteur BOUGE quand une trame
 arrive. Cela demande la balise sur la deuxieme carte, actuellement debranchee.
 Les selecteurs 2, 4, 9 et 14 avaient ete vus actifs -- avec la balise allumee.
+
+## Trois controles qui verrouillent la contradiction (2026-09-22 au soir)
+
+**1. Le canal 5 porte bien la telecommande, pas le Wi-Fi.** Le canal 5 (2405 MHz)
+tombe dans le Wi-Fi 1, large de 20 MHz (2401-2423). Un emetteur Wi-Fi depose
+donc autant d'energie a 2420 qu'a 2405 ; la telecommande, large de 0,43 MHz
+(dossier FCC), ne peut etre qu'a un des deux endroits. Commande `discrimine`,
+canaux 5 / 20 / 78 echantillonnes en alternance, phases repos puis molette :
+
+| canal | role | repos | molette | rapport |
+|---|---|---|---|---|
+| 5 = 2405 MHz | cible, dans le Wi-Fi 1 | 3,92 0/00 | 16,66 0/00 | **x4,25** |
+| 20 = 2420 MHz | temoin Wi-Fi 1 | 0,96 0/00 | 0,97 0/00 | x1,01 |
+| 78 = 2478 MHz | hors Wi-Fi | 1,68 0/00 | 1,84 0/00 | x1,09 |
+
+Instrument valide d'abord contre la balise (source etroite connue sur le canal
+5) : x21,68 sur le canal 5, x1,36 et x0,85 sur les deux autres.
+
+**Premiere version de cette mesure : fausse.** Elle changeait de canal en
+ecrivant seulement `RFCH` puis attendait 1,5 ms. Avec la balise sur le seul
+canal 5, les trois canaux lisaient 992 pour mille -- y compris un canal a 73 MHz
+de distance. La PLL ne retune pas en 1,5 ms : il faut une reconfiguration
+complete a chaque visite.
+
+**2. GIO3S=14 est en amont du correlateur.** Refait avec une adresse fausse d'un
+octet, balise allumee : 624 fronts avec la bonne adresse, **624 fronts avec la
+mauvaise**, pendant que les trames acceptees tombent de 210 a 13. La sortie
+reflete donc la detection de preambule seule. Un zero de transitions signifie
+« aucun preambule reconnu », et non « adresse inconnue ».
+
+Rendement mesure : **3 fronts par trame reconnue** (624 fronts / 210 trames).
+Une telecommande a ~20 trames/s devrait donc donner ~1200 fronts en 20 s.
+
+**3. La forme du preambule est epuisee.** Le BC5602 deduit la polarite du
+preambule du premier bit d'adresse emis, et l'adresse part a l'envers de l'ordre
+du tableau : c'est le DERNIER octet du tableau qui sort en premier. Nos sondes
+n'avaient donc jamais teste qu'une polarite. Commande `forme` : 2 polarites x 2
+longueurs x 3 debits = 12 configurations, 20 s chacune, molette tournee,
+reglages Holtek actifs. **Zero transition sur les douze**, temoin de trafic a
+~20 pour mille contre 3,9 au repos.
+
+**L'excursion de frequence n'est pas reglable** et elle est deja la bonne. Le
+datasheet la fixe par le debit : fDEV=160 kHz a 125 et 250 kbps, 250 kHz a 500
+kbps. Regle de Carson a 125 kbps : 2x160 + 125 = **445 kHz**, contre **430, 434
+et 447 kHz** mesures dans le dossier FCC de la telecommande. C'est la meme
+modulation au kilohertz pres. Les six bits bas de `CFO1`, malgre le nom du
+registre, sont marques « reserved, must be kept unchanged ».
+
+Etat de la contradiction : canal confirme, debit confirme par deux voies
+independantes, excursion confirmee, preambule epuise, detecteur etalonne,
+reglages analogiques actifs -- et toujours aucun preambule reconnu.
