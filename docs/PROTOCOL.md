@@ -1,0 +1,379 @@
+# Protocole radio BenQ ScreenBar Halo
+
+## Statut des informations
+
+Tout ce document vient de la rétro-ingénierie du **ScreenBar Halo 2** par
+[kuzmin-no](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration),
+recoupée avec les dossiers FCC et le fil
+[Benq Screenbar support](https://community.home-assistant.io/t/benq-screenbar-support/490864)
+de la communauté Home Assistant.
+
+| Élément | Halo 2 | Halo 1 (ce projet) |
+|---|---|---|
+| Transceiver RF | BC5602 | **BC5602 — confirmé** (FCC + teardown PCB) |
+| Bande | 2405–2475 MHz | **2405–2475 MHz — confirmé** (FCC `JVPCR20CCTR`) |
+| Modulation / débit | GFSK 125 kbps | Très probable (même puce, même bande) |
+| Format de trame | ESB : préambule + adresse 4 o + PCF 9 bits + payload + CRC | Très probable (imposé par le BC5602) |
+| Structure du payload | 10 octets, documentée ci-dessous | **À confirmer** |
+| Octets de queue | `01 02` | **À confirmer** (`tail` pour les changer) |
+| Bit « capteur » | ultrason | **À confirmer** (le Halo 1 n'a pas de capteur de présence) |
+
+Autrement dit : la couche radio est acquise, la couche applicative est à
+vérifier. Les commandes CLI `sniff`, `pair` et `send` sont là pour ça.
+
+Le PCB du Halo 1 (relevé par `b4shful` sur le fil HA) : PSoC Cypress
+**CY8C4125LQI-483** + transceiver **BC5602** + expandeur I²C **TCA9539PWR**.
+
+## Couche radio
+
+- Canal 1 : **2405 MHz** (`RFCH = 5`) — le seul observé en pratique
+- Canal 2 : 2446 MHz (`RFCH = 46`)
+- Canal 3 : 2475 MHz (`RFCH = 75`)
+- Modulation GFSK, **125 kbps** (`DM1 = 0b10`)
+- Adresse de 4 octets, **écrite dans l'ordre inverse** de l'ordre sur l'air
+  (section *Bit ordering* du datasheet BC5602)
+
+Format de trame, hérité de l'Enhanced ShockBurst :
+
+```
+préambule 0xAA │ adresse 4 octets │ PCF 9 bits │ payload 10 octets │ CRC
+```
+
+Le PCF (Packet Control Field) contient : longueur sur 5 bits (décalée de 3),
+PID sur 2 bits, drapeau NO_ACK sur 1 bit.
+
+**La lampe n'émet jamais spontanément.** Elle ne répond que dans le slot ACK
+matériel qui suit une trame reçue. D'où la stratégie du firmware : interrogation
+toutes les 5 s, et écoute passive de la télécommande entre deux interrogations.
+
+### Auto-ACK et écoute
+
+Le BC5602 gère l'auto-ACK en matériel. Deux conséquences :
+
+- pour **piloter** la lampe, on active l'auto-ACK : la réponse de la lampe
+  arrive dans la FIFO RX juste après l'émission ;
+- pour **écouter** la télécommande, il faut le **désactiver** — sinon notre
+  module acquitterait les trames en même temps que la lampe, et la
+  télécommande cesserait de fonctionner.
+
+Désactiver l'auto-ACK désactive aussi le CRC matériel et la longueur de payload
+dynamique. Le PCF de 9 bits n'est alors plus retiré du flux, ce qui décale tous
+les octets d'un bit : le firmware recale à la lecture
+(`BC5602::shiftLeftOneBit`).
+
+## Payload (10 octets)
+
+| Octet | Contenu |
+|---|---|
+| 0 | Commande |
+| 1 | Registre de contrôle (bits, voir plus bas) |
+| 2 | Luminosité lampe avant, `0x01`–`0x64` (1–100 %) |
+| 3 | Température de couleur, poids fort |
+| 4 | Température de couleur, poids faible |
+| 5 | Luminosité lampe arrière, `0x01`–`0x64` |
+| 6 | Température de couleur arrière, poids fort (identique à l'avant) |
+| 7 | Température de couleur arrière, poids faible |
+| 8 | Octet de queue 0 — `0x01` sur le Halo 2 observé |
+| 9 | Octet de queue 1 — `0x02` sur le Halo 2 observé |
+
+La température de couleur est transmise **en Kelvin, en clair** :
+2700 K = `0x0A8C`, 4000 K = `0x0FA0`, 6500 K = `0x1964`.
+
+La lampe arrière n'a pas de température propre : les deux partagent la valeur.
+
+### Registre de contrôle (octet 1)
+
+| Bit | Rôle |
+|---|---|
+| 0 | Marche / arrêt général |
+| 1 | Mode Auto |
+| 2 | Favori |
+| 3 | ┐ `0` = avant seule, `1` = arrière seule, `2` = les deux |
+| 4 | ┘ |
+| 5 | Capteur (ultrason sur le Halo 2) |
+| 6–7 | Non utilisés |
+
+### Commandes (octet 0)
+
+| Valeur | Signification |
+|---|---|
+| `0x00` | La télécommande se réveille et contacte la lampe |
+| `0x02` | Allumage / extinction général |
+| `0x03` | Réglage luminosité + température de couleur |
+| `0x04` | Demande de synchronisation d'état |
+| `0x05` | La télécommande s'endort et en informe la lampe |
+| `0x0A` | Mode appairage |
+
+La lampe applique les changements **en fondu progressif**. Une trame `0x03`
+n'est donc pas immédiatement reflétée : le firmware réinterroge avec `0x04`
+toutes les 400 ms jusqu'à convergence (12 essais max, ~5 s).
+
+## Appairage
+
+Pendant l'appairage, télécommande et lampe communiquent sur une adresse fixe :
+**`E2 08 00 B0`** sur l'air (soit `B0 00 08 E2` en ordre d'écriture registre).
+La commande est toujours `0x0A`.
+
+L'adresse de communication définitive semble transmise pendant cet échange sous
+forme encodée — elle n'a pas été décodée. C'est pour cela qu'il faut la
+retrouver par capture (voir ci-dessous).
+
+La commande CLI `pair` met le module en écoute sur cette adresse : c'est le
+meilleur moyen d'obtenir des trames Halo 1 exploitables **sans connaître
+l'adresse de communication**, et donc de vérifier en premier lieu si la
+structure de payload ci-dessus tient.
+
+## Retrouver l'adresse de communication
+
+### Méthode 1 — l'astuce du mot de synchro (commande `find`)
+
+C'est la méthode du script `find_halo2_address.py`, généralisée.
+
+On règle le récepteur sur une pseudo-adresse de 3 octets correspondant à une
+séquence du **payload** dont on connaît la valeur, parce qu'on vient de la
+régler à la télécommande. Les octets 5-6-7 conviennent : luminosité arrière +
+température de couleur.
+
+Exemple avec 10 % et 3925 K :
+
+```
+sur l'air        : 0A 0F 55
+ordre d'écriture : 55 0F 0A
+```
+
+Le récepteur se verrouille donc **au milieu** d'une trame, puis continue
+d'échantillonner. Les retransmissions automatiques font apparaître le début de
+la trame suivante dans la même fenêtre de capture : préambule `0xAA` suivi de la
+vraie adresse.
+
+Le script d'origine lisait l'adresse à un offset fixe, calé sur le timing
+inter-trames du Halo 2. Ici le firmware **balaie les 8 alignements de bits et
+toute la fenêtre capturée**, puis compte les occurrences de chaque candidat : le
+bon ressort par répétition, le bruit non. C'est ce qui rend la méthode
+transposable au Halo 1, dont le timing n'a aucune raison d'être identique.
+
+```
+find            # 10 % arrière + 3925 K (valeurs par défaut)
+find 25 4000    # autres valeurs : luminosité %, Kelvin
+find x550f0a    # mot de synchro brut de 3 octets
+```
+
+### Méthode 2 — sniffer le bus SPI de la télécommande
+
+La méthode qui ne peut pas échouer, suggérée par `b4shful` sur le fil HA.
+Ouvre la télécommande, branche un analyseur logique sur `CSN` / `SCK` / `SDIO`
+du BC5602 et capture. La commande `0x10` (`WRITE_PTX_ADDRESS`) est suivie des
+4 octets d'adresse, en clair.
+
+Bonus non négligeable : la même capture donne aussi les payloads réels du
+Halo 1, donc la structure exacte de la trame — ce qui répond d'un coup à toutes
+les cases « à confirmer » du tableau en haut de page.
+
+### Méthode 3 — HackRF One + Universal Radio Hacker
+
+Capture à 2405 MHz, démodulation GFSK à 125 kbps, décodage manuel de la trame.
+C'est la méthode qui a servi à établir le tableau du payload sur le Halo 2.
+Plus lourde à mettre en œuvre, mais elle ne demande pas d'ouvrir le matériel.
+
+## Références
+
+- [BC5602 datasheet v1.20](https://www.holtek.com/webapi/116711/BC5602v120.pdf)
+- [Module BM5602-60-1](https://www.holtek.com/page/vg/BM5602-60-1)
+- [kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration)
+- [Fil Home Assistant « Benq Screenbar support »](https://community.home-assistant.io/t/benq-screenbar-support/490864)
+- FCC : [`JVPCR20CCTR`](https://fccid.io/JVPCR20CCTR) (télécommande Halo 1),
+  [`JVPCR20C`](https://fccid.io/JVPCR20C) (lampe Halo 1)
+
+---
+
+# Ce que la campagne de mesure du 21/09/2026 a établi
+
+## Trame réelle (Halo 2, publiée par Termina1)
+
+```
+54  04 10 0C 0F 55 5B 0F 55 01 02  20 B9
+↑   └──────── payload 10 octets ────┘  └CRC┘
+PCF
+```
+
+La structure de payload documentée plus haut est donc **confirmée sur une trame
+réelle** : commande `04`, contrôle `10`, luminosité avant `0C`, température
+`0F 55` (3925 K), luminosité arrière `5B`, température répétée, queue `01 02`.
+
+La trame fait **13 octets** en réception : `PCF(1) + payload(10) + CRC(2)`.
+Le PCF occupe **un octet plein** — il n'y a **pas** de décalage d'un bit à la
+lecture, contrairement à ce que supposait le portage initial.
+
+## CRC — modèle vérifié
+
+```
+algorithme    : CRC-CCITT
+polynôme      : 0x1021
+état initial  : 0xEFDF avant les 4 octets d'adresse EN ORDRE SUR L'AIR
+couverture    : adresse + PCF + payload (10 octets)
+```
+
+Validé sur trois vecteurs, état intermédiaire compris :
+
+| PCF | Payload | CRC attendu |
+|---|---|---|
+| `54` | `04 10 0C 0F 55 5B 0F 55 01 02` | `20B9` |
+| `50` | `02 11 0C 0F 55 5B 0F 55 01 02` | `E962` |
+| `50` | `02 10 0C 0F 55 5B 0F 55 01 02` | `0241` |
+
+Après les 4 octets d'adresse `86 BB EA 9C`, l'état vaut `0x5042`.
+
+Implémenté dans `BenqHalo::frameCrc()` et `frameCrcFor()`.
+
+## Contrainte sur l'adresse
+
+Datasheet BC5602 v1.20 p.25, sous le diagramme de format de paquet :
+
+> `Note: * MSB high 4-bit must be 0001xxxx or 1110xxxx`
+
+Le premier octet de l'adresse **sur l'air** doit être de la forme `0x1X` ou
+`0xEX`. L'adresse d'appairage `E2 08 00 B0` s'y conforme. À noter que l'adresse
+`86 BB EA 9C` de Termina1 ne s'y conforme pas tout en fonctionnant : la portée
+exacte de la règle reste incertaine.
+
+## Configuration de réception correcte
+
+Alignée sur l'implémentation ESPHome de Termina1, qui reçoit réellement :
+
+```
+DPL1 = 0x00, DPL2 = 0x00     payload statique
+RXPW0 = 13                   PCF + payload + CRC
+PKT1 = 0x00                  CRC matériel désactivé
+ENAA = 0x00                  auto-ACK désactivé
+IRQ1 = 0x40                  acquitter RX_DR — INDISPENSABLE
+puis commande 0x8E           RX Mode Trigger
+```
+
+`RX_DR` se latche et **doit** être acquitté en y écrivant 1, sinon la puce
+cesse de délivrer des trames.
+
+## Variables éliminées par la mesure
+
+Débit (les 3 valeurs existantes), canal (les 3 du dossier FCC), ordre des octets
+d'adresse (les deux), longueur de préambule (1 et 2 octets), longueur d'adresse
+(3 et 4 octets), et l'existence d'une sortie de bits démodulés sur `GIO2`
+(8 sélecteurs balayés, aucune activité).
+
+## Ce qui bloque
+
+L'**adresse de communication** de la paire lampe/télécommande reste inconnue, et
+le corrélateur du BC5602 ne peut rien capter sans elle. La méthode consistant à
+se caler sur une séquence du payload comme pseudo-adresse n'a jamais accroché,
+malgré un récepteur dont le fonctionnement est mesuré (mode RX confirmé par
+`OMST`, RSSI avec 17 dB de dynamique, environnement RF propre).
+
+Les deux seules voies restantes demandent du matériel :
+
+1. **Analyseur logique** sur `CSN`/`SCK`/`SDIO` du BC5602 de la télécommande :
+   la commande `0x10` y transporte l'adresse en clair, et la même capture donne
+   la structure réelle du payload du Halo 1.
+2. **Second MCU** pour monter le récepteur indépendant que Termina1 mentionne
+   dans ses notes d'implémentation.
+
+## Comportement de la télécommande (mesure)
+
+Les commandes sont **tactiles** : un toucher émet **une impulsion**, maintenir le
+doigt n'émet rien de plus. Seule la **molette** produit un flux continu tant qu'on
+la tourne — c'est donc la seule source de trafic exploitable pour une capture à
+fenêtre fixe.
+
+## Mode direct du BC5602 — sélecteurs non documentés
+
+Le bit `DIR_EN` (`CFG1` 0x00, bit 4) commute la puce en mode direct :
+*« TX/RX data from/to external MCU directly »*. Le datasheet le mentionne **une
+seule fois** et ne dit ni quelle broche porte les données, ni comment engager le
+mode. Le guide d'application Holtek ne le mentionne pas du tout.
+
+Le portage ESPHome de Termina1, qui fonctionne, révèle deux valeurs de sélecteur
+que le datasheet range pourtant dans « Others: No function, input » :
+
+| Registre | Valeur | Fonction réelle |
+|---|---|---|
+| `IO1` (0x06), `GIO2S` | `3` | `DIRECT_TXD` — donnée, MCU vers puce |
+| `IO2` (0x07), `GIO3S` | `8` | `TBCLK_OUTPUT` — horloge bit, puce vers MCU |
+
+Sa séquence d'armement : `IO2=0x08`, `IO1=0x58`, `CFG1=0x50` (**`AGC_EN` +
+`DIR_EN`**), puis `OM=0x03`, 50 µs, `OM=0x07`. Les bits 2~0 d'`OM` sont déclarés
+« Reserved, must be kept unchanged after power on » : ce sont en fait des bits de
+commande cachés.
+
+`GIO3` est la **broche 8** du module BM5602 — le « septième fil » de son montage.
+
+Deux conséquences pour ce projet :
+
+1. Notre configuration tournait avec **`AGC_EN` à 0** (`CFG1` relu à `0x00`).
+2. Il n'a **jamais tenté la réception en mode direct** : son chemin RX remet
+   `GIO2S=1` et repasse par le moteur de paquets. Le sélecteur `DIRECT_RXD`, s'il
+   existe, est à chercher parmi les valeurs `GIO2S` restantes (2, 4, 6, 7).
+
+Entrée en réception sans commande strobe, documentée celle-là (`ds.txt:717`) :
+
+> If the device is set as a PRX device, it will enter the RX mode when the CE bit
+> is set high by using register or using Strobe RX command.
+
+## Paramètres radio confirmés
+
+Relevés dans le portage ESPHome qui pilote réellement une lampe :
+
+```
+RADIO_CHANNEL = 5        ->  2405 MHz
+write_reg(0x11, 0x82)    ->  DM1 : AW=10 (4 octets) + 010 (125 kbps)
+```
+
+Débit **125 kbps**, adresse de **4 octets**, canal **5**. Ce sont déjà les valeurs
+par défaut de `sharedRadioConfig()`.
+
+Défaut corrigé le 2026-09-21 : `AGC_EN` (`CFG1` bit 6) n'était jamais activé. Le
+portage tiers écrit `CFG1 = 0x50` (`AGC_EN` + `DIR_EN`). Mesuré sur notre carte,
+molette en rotation : plus fort signal reçu **85 dB sans AGC, 41 dB avec**. Comme
+tout reset logiciel remet `CFG1` à `0x00`, le bit est réappliqué dans
+`sharedRadioConfig()`, au même titre que le bit de préambule.
+
+## L'émission exige `CE`
+
+Mesuré le 2026-09-22 sur un banc à deux cartes : 2553 trames écrites dans la FIFO
+d'émission, **zéro** `TX_DS`, `OMST` bloqué à `2` (Light Sleep), mode TX jamais
+observé. La commande strobe `0x0E` ne suffit pas.
+
+Le datasheet l'explique (`ds.txt:711`) :
+
+> If the device is set as a PTX device and the CE bit is set high, it will stay in
+> the Light Sleep mode when the TX FIFO is empty. **The PTX device will enter the
+> TX mode automatically once the TX FIFO is not empty.**
+
+L'émission n'est donc pas déclenchée par une commande mais par le **remplissage de
+la FIFO**, à condition que `CE` (registre `0x15`, bit 0) soit à `1`. Sans lui, la
+puce attend indéfiniment, FIFO pleine.
+
+`CE` est désormais posé dans `configForLoopback()` et dans `prepareToTransfer()`.
+Rappel : `CE` est **effacé par le matériel** à chaque fin de réception, donc il
+doit être reposé à chaque tentative d'entrée en RX.
+
+## `EN_DYN_ACK` : l'écriture FIFO refusée en silence
+
+Le datasheet (`ds.txt:869`), dans la description de `DPL2` (registre `0x2B`) :
+
+> Bit 0 **`EN_DYN_ACK`**: PTX "write TX FIFO with No-Auto-ACK" command enable
+
+Tant que ce bit vaut `0`, la commande d'écriture FIFO **sans** auto-ACK est
+**ignorée sans aucun signal d'erreur** : la FIFO reste vide, la puce n'a rien à
+émettre et demeure en Light Sleep.
+
+Mesuré par la commande `autotest`, quatre combinaisons sur silicium :
+
+| `EN_DYN_ACK` | commande d'écriture | FIFO remplie ? |
+|---|---|---|
+| 0 | sans auto-ACK | **non** |
+| 1 | sans auto-ACK | oui, et `TX_DS` tombe |
+| 0 | avec auto-ACK | oui |
+| 1 | avec auto-ACK | oui |
+
+C'est ce défaut qui expliquait 2553 trames « émises » sans une seule transmission
+réelle. La séquence d'émission correcte est donc : `DPL2` bit 0 à `1`, écriture de
+la FIFO, `CE` à `1` — après quoi la puce part en TX **d'elle-même**, sans commande
+strobe.
