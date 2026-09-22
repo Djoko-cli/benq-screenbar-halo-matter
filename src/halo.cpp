@@ -3758,6 +3758,167 @@ void BenqHalo::txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t cou
 }
 
 
+// ---------------------------------------------------------------------------
+//  Emission et reception au FORMAT BC5602 STANDARD, accuse automatique.
+//
+//  Audit du 23/09 : la telecommande et la lampe Halo 1 utilisent le format
+//  standard de la puce -- preambule, adresse, PCF de 9 bits (longueur, PID,
+//  NO_ACK), charge dynamique, CRC-16/CCITT init 0xFFFF -- avec accuse
+//  automatique. La puce genere elle-meme PCF et CRC ; avec l'accuse demande,
+//  elle dit d'elle-meme si le destinataire a repondu : TX_DS = accuse recu,
+//  MAX_RT = echec apres les retransmissions. C'est une preuve radio objective,
+//  independante du sens de la charge.
+//
+//  Toute la configuration est rejouee apres le reset logiciel, qui efface les
+//  reglages analogiques et CFG1 (dont l'AGC, indispensable pour recevoir
+//  l'accuse).
+// ---------------------------------------------------------------------------
+static void configStdAutoAck(BC5602 &r, const uint8_t addrReg[4], uint8_t channel, uint8_t rate,
+                             bool receiver) {
+  r.softwareReset();
+  delay(20);
+  r.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
+  r.registerConfigure(nullptr);
+  applyXoTrim(r);
+  r.setBank(0);
+  r.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
+  r.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel);
+  r.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | rate));
+  r.writeCommandData(CMD_WRITE_PTX_ADDRESS, addrReg, 4);
+  // Preambule d'un octet, comme la telecommande.
+  const uint8_t cfo1 = r.readRegister(B0_CFO1 | CMD_READ_REGISTER);
+  r.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER, (uint8_t)(cfo1 & (uint8_t)~0x40));
+  uint8_t mask = r.readRegister(REG_MASK | CMD_READ_REGISTER);
+  mask = receiver ? (uint8_t)(mask | MASK_PRM_RX) : (uint8_t)(mask & (uint8_t)~MASK_PRM_RX);
+  r.writeRegister(REG_MASK | CMD_WRITE_REGISTER, mask);
+  r.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, PKT1_CRC_ENABLE);  // CRC16 init FFFF
+  // Pas de blanchiment : le CRC des trames reelles se verifie sans.
+  r.writeRegister(REG_PKT2 | CMD_WRITE_REGISTER,
+                  (uint8_t)(r.readRegister(REG_PKT2 | CMD_READ_REGISTER) & 0x7F));
+  r.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x01);   // DPL_P0
+  r.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x04);   // EN_DPL seul (ds.txt:853-869)
+  r.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x01);   // accuse automatique, pipe 0
+  // ARD 2000 us, ARC 3 (ds.txt:667-683). La valeur de reset, 250 us, est plus
+  // courte que le silence mesure avant l'accuse de la lampe (~200 us) suivi de
+  // l'accuse lui-meme : elle donnerait de faux MAX_RT.
+  r.writeRegister(REG_RT1 | CMD_WRITE_REGISTER, 0x73);
+  r.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
+  r.command(CMD_FLUSH_TX_FIFO);
+  r.command(CMD_FLUSH_RX_FIFO);
+  r.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+}
+
+void BenqHalo::txAck(Print &out, const uint8_t addrReg[4], uint8_t channel, const uint8_t *payload,
+                     uint8_t len, uint8_t trials, uint16_t gapMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  size_t w = (size_t)snprintf(line, sizeof(line),
+                              "  Emission avec accuse : adresse %02X %02X %02X %02X (sur l'air "
+                              "%02X %02X %02X %02X), canal %u, charge",
+                              addrReg[0], addrReg[1], addrReg[2], addrReg[3], addrReg[3], addrReg[2],
+                              addrReg[1], addrReg[0], (unsigned)channel);
+  for (uint8_t i = 0; i < len && w + 4 < sizeof(line); i++)
+    w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", payload[i]);
+  out.println(line);
+  Serial.flush();
+
+  configStdAutoAck(radio, addrReg, channel, dataRate_, false);
+  uint8_t acked = 0, maxrt = 0;
+  for (uint8_t i = 0; i < trials; i++) {
+    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
+    radio.command(CMD_FLUSH_TX_FIFO);
+    radio.writeCommandData(CMD_WRITE_TX_FIFO_WITH_ACK, payload, len);  // 0x11 : AVEC accuse
+    uint8_t status = radio.readRegister(REG_STATUS | CMD_READ_REGISTER);
+    const char *verdict = "DELAI";
+    uint8_t irq = 0;
+    uint32_t us = 0;
+    if (status & STATUS_TX_FIFO_EMPTY) {
+      verdict = "FIFO REFUSEE";
+    } else {
+      const uint32_t t0 = micros();
+      radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, CE_ENABLE);
+      while ((uint32_t)(micros() - t0) < 30000) {
+        irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
+        if (irq & (IRQ_TX_DS | IRQ_MAX_RT)) break;
+        delayMicroseconds(20);
+      }
+      us = micros() - t0;
+      if (irq & IRQ_TX_DS) {
+        verdict = "TX_DS (accuse recu)";
+        acked++;
+      } else if (irq & IRQ_MAX_RT) {
+        verdict = "MAX_RT (pas d'accuse)";
+        maxrt++;
+      }
+    }
+    const uint8_t rt2 = radio.readRegister(REG_RT2 | CMD_READ_REGISTER);
+    status = radio.readRegister(REG_STATUS | CMD_READ_REGISTER);
+    // Remise a zero : CE=0, sinon la puce repart seule tant que la FIFO n'est
+    // pas vide ; drapeaux acquittes en ecrivant 1 ; FIFO videes.
+    radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
+    radio.command(CMD_FLUSH_TX_FIFO);
+    radio.command(CMD_FLUSH_RX_FIFO);
+    snprintf(line, sizeof(line), "  essai %2u : %-22s IRQ1 %02X  RT2 %02X  STATUS %02X  %5lu us", i + 1,
+             verdict, irq, rt2, status, (unsigned long)us);
+    out.println(line);
+    Serial.flush();
+    if (gapMs) delay(gapMs);
+  }
+  radio.command(CMD_LIGHT_SLEEP);
+  snprintf(line, sizeof(line), "  Bilan : %u accuse(s) recu(s), %u echec(s), sur %u essai(s).", acked,
+           maxrt, trials);
+  out.println(line);
+}
+
+// Recepteur de banc : accuse automatiquement tout ce qui arrive a son adresse,
+// et affiche la charge avec la longueur lue dans le PCF par la puce.
+void BenqHalo::prxAck(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  snprintf(line, sizeof(line),
+           "  Recepteur avec accuse : adresse %02X %02X %02X %02X, canal %u, pendant %lu ms.",
+           addrReg[0], addrReg[1], addrReg[2], addrReg[3], (unsigned)channel, (unsigned long)ms);
+  out.println(line);
+  Serial.flush();
+  configStdAutoAck(radio, addrReg, channel, dataRate_, true);
+  radio.enterRxMode();
+  uint32_t got = 0;
+  const uint32_t until = millis() + ms;
+  uint32_t spin = 0;
+  while ((int32_t)(millis() - until) < 0) {
+    const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
+    if (irq & IRQ_RX_DR) {
+      uint8_t len = radio.readRegister(REG_PKT4 | CMD_READ_REGISTER);
+      uint8_t buf[32];
+      if (len > 32) len = 32;
+      if (len) radio.readFifo(buf, len, false);
+      got++;
+      size_t w = (size_t)snprintf(line, sizeof(line), "  RECU %3lu : longueur %u :", (unsigned long)got,
+                                  len);
+      for (uint8_t i = 0; i < len && w + 4 < sizeof(line); i++)
+        w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", buf[i]);
+      out.println(line);
+      Serial.flush();
+      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+      radio.command(CMD_FLUSH_RX_FIFO);
+    }
+    if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+    if ((spin++ & 0x3FF) == 0) delay(1);
+  }
+  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+  radio.command(CMD_LIGHT_SLEEP);
+  snprintf(line, sizeof(line), "  %lu trame(s) recue(s) et accusee(s).", (unsigned long)got);
+  out.println(line);
+}
+
+
 uint16_t BenqHalo::halo1Crc(const uint8_t payload[6]) const {
   uint16_t crc = 0xFFFF;
   for (uint8_t i = 0; i < 10; i++) {
