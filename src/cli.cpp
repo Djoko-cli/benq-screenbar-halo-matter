@@ -1,6 +1,10 @@
 #include "cli.h"
 #include "cc2500.h"
 
+// Salves capturees : 24 x 256 bits, soit 2 ms de flux chacune a 125 kbit/s.
+#define CC_BURSTS 24
+#define CC_BURST_BITS 256
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -116,6 +120,11 @@ static void cmdHelp() {
   Serial.println("  ccpres [ms]           le CC2500 entend-il la source ? distribution du RSSI");
   Serial.println("  cccrc [bits] [n] [lo] [hi]  trouve les trames par leur CRC, sans hypothese");
   Serial.println("  ccbit [seuil] [n]     duree reelle d'un bit, mesuree en mode asynchrone");
+  Serial.println("  cccommun [seuil]      ce que deux salves ont en commun : aucune hypothese");
+  Serial.println("  ccdump [seuil] [n]    vidage brut des salves, pour analyse sur l'ordinateur");
+  Serial.println("  ccflux [bits] [n]     capture CONTINUE videe telle quelle (pas de declenchement)");
+  Serial.println("  ccfreq [span] [pas] [ms]  sur quelle frequence la source est-elle centree ?");
+  Serial.println("  ccoff [seuil] [ms]    ecart de porteuse mesure par la puce (FREQEST)");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -437,6 +446,53 @@ static void handleLine(char *line) {
     ccDiagnose(Serial);
   } else if (!strcmp(line, "ccraw")) {
     ccRawProbe(Serial);
+  } else if (!strcmp(line, "ccoff")) {
+    char *end = nullptr;
+    long thr = -55;
+    uint32_t d = 20000;
+    if (*arg) thr = strtol(arg, &end, 10);
+    if (thr < -90 || thr > -20) thr = -55;
+    if (end && *end) {
+      const long v = strtol(end, nullptr, 10);
+      if (v >= 1000 && v <= 120000) d = (uint32_t)v;
+    }
+    ccFreqOffset(Serial, (int)thr, d);
+  } else if (!strcmp(line, "ccfreq")) {
+    char *end = nullptr;
+    long span = 600, step = 50;
+    uint32_t d = 1500;
+    if (*arg) span = strtol(arg, &end, 10);
+    if (span < 50 || span > 2000) span = 600;
+    if (end && *end) step = strtol(end, &end, 10);
+    if (step < 10 || step > 400) step = 50;
+    if (end && *end) {
+      const long v = strtol(end, nullptr, 10);
+      if (v >= 200 && v <= 20000) d = (uint32_t)v;
+    }
+    ccFreqSweep(Serial, span, step, d);
+  } else if (!strcmp(line, "ccflux")) {
+    char *end = nullptr;
+    uint32_t nb = 32768;
+    long p = 4;
+    const long v = strtol(arg, &end, 10);
+    if (v >= 1024 && v <= 32768) nb = (uint32_t)v;
+    if (end && *end) p = strtol(end, nullptr, 10);
+    if (p < 1 || p > 40) p = 4;
+    ccStream(Serial, nb, (uint8_t)p);
+  } else if (!strcmp(line, "ccdump")) {
+    char *end = nullptr;
+    long thr = -50;
+    long n = 24;
+    if (*arg) thr = strtol(arg, &end, 10);
+    if (thr < -90 || thr > -10) thr = -50;
+    if (end && *end) n = strtol(end, nullptr, 10);
+    if (n < 1 || n > CC_BURSTS) n = CC_BURSTS;
+    ccDumpBursts(Serial, (int)thr, (uint8_t)n);
+  } else if (!strcmp(line, "cccommun")) {
+    long thr = -55;
+    if (*arg) thr = strtol(arg, nullptr, 10);
+    if (thr < -90 || thr > -20) thr = -55;
+    ccCommonRuns(Serial, (int)thr);
   } else if (!strcmp(line, "ccbit")) {
     char *end = nullptr;
     long thr = -60;
@@ -1759,6 +1815,522 @@ void ccPulseWidths(Print &out, int trigDbm, uint16_t tries) {
   out.println();
   out.println("  Le palier le plus COURT qui revient souvent est la periode");
   out.println("  d'un bit. 8 us = 125 kbit/s, 4 us = 250, 2 us = 500.");
+}
+
+// ---------------------------------------------------------------------------
+//  Ce que deux salves ont en commun.
+//
+//  Toutes les autres methodes supposaient quelque chose : un preambule d'une
+//  certaine longueur, un CRC d'un certain modele, une trame d'une certaine
+//  taille. Celle-ci ne suppose rien. Deux trames emises par la MEME
+//  telecommande partagent forcement leur preambule et leur adresse, et ne
+//  different que par la charge utile. Il suffit donc de capturer plusieurs
+//  salves, de les glisser l'une contre l'autre, et de relever la plus longue
+//  suite de bits identiques : c'est le preambule suivi de l'adresse.
+//
+//  Cette mesure dit aussi, gratuitement, si les trames arrivent lisibles : une
+//  correspondance longue signifie une demodulation propre, une correspondance
+//  courte signifie que les erreurs binaires hachent tout -- ce qui expliquerait
+//  qu'aucun CRC ne tombe juste.
+// ---------------------------------------------------------------------------
+static uint8_t ccBurst[CC_BURSTS][CC_BURST_BITS / 8];
+
+static inline bool ccBurstBit(uint8_t b, uint16_t i) {
+  return (ccBurst[b][i >> 3] >> (7 - (i & 7))) & 1;
+}
+
+void ccCommonRuns(Print &out, int trigDbm) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  out.println();
+  out.println("=== Ce que deux salves ont en commun ===");
+  out.printf("  %u salves de %u bits, declenchees au-dessus de %d dBm.\n", CC_BURSTS,
+             CC_BURST_BITS, trigDbm);
+  out.println("  Aucune hypothese : ni preambule, ni CRC, ni longueur de trame.");
+  out.println("  Deux trames de la meme source partagent preambule et adresse.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : mesure annulee.");
+    return;
+  }
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  uint8_t caught = 0;
+  memset(ccBurst, 0, sizeof(ccBurst));
+
+  for (uint8_t b = 0; b < CC_BURSTS; b++) {
+    bool armed = false;
+    const uint32_t giveUp = millis() + 3000;
+    while ((int32_t)(millis() - giveUp) < 0) {
+      const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+      if (dbm >= trigDbm) {
+        armed = true;
+        break;
+      }
+    }
+    if (!armed) break;
+
+    uint16_t got = 0;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+    uint32_t guard = 0;
+    while (got < CC_BURST_BITS && guard < 4000000UL) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) ccBurst[b][got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      guard++;
+    }
+    if (got == CC_BURST_BITS) caught++;
+  }
+
+  out.printf("  %u salve(s) capturee(s).\n", caught);
+  if (caught < 2) {
+    out.println("  Moins de deux salves : rien a comparer. Baisse le seuil.");
+    return;
+  }
+
+  // Glisser chaque paire l'une contre l'autre et relever la plus longue suite
+  // de bits identiques.
+  uint16_t bestLen = 0;
+  uint8_t bestA = 0, bestB = 0;
+  int16_t bestShift = 0;
+  uint16_t bestPos = 0;
+  uint16_t lenHist[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+  for (uint8_t a = 0; a + 1 < caught; a++) {
+    for (uint8_t b = (uint8_t)(a + 1); b < caught; b++) {
+      uint16_t pairBest = 0;
+      for (int16_t sh = -(CC_BURST_BITS - 48); sh <= (CC_BURST_BITS - 48); sh++) {
+        uint16_t run = 0;
+        for (uint16_t i = 0; i < CC_BURST_BITS; i++) {
+          const int32_t j = (int32_t)i + sh;
+          if (j < 0 || j >= CC_BURST_BITS) {
+            run = 0;
+            continue;
+          }
+          if (ccBurstBit(a, i) == ccBurstBit(b, (uint16_t)j)) {
+            run++;
+            if (run > pairBest) pairBest = run;
+            // N'accepter comme meilleure suite qu'une plage RICHE en
+            // transitions. Sans ce garde-fou, la plus longue correspondance est
+            // toujours le repos entre deux trames -- une plage de uns, qui
+            // coincide evidemment d'une salve a l'autre et masque la vraie.
+            if (run > bestLen && run >= 24) {
+              const uint16_t st = (uint16_t)(i + 1 - run);
+              uint16_t tr = 0;
+              for (uint16_t q = 1; q < run; q++)
+                if (ccBurstBit(a, (uint16_t)(st + q)) != ccBurstBit(a, (uint16_t)(st + q - 1))) tr++;
+              if (tr * 5 >= run) {
+                bestLen = run;
+                bestA = a;
+                bestB = b;
+                bestShift = sh;
+                bestPos = st;
+              }
+            }
+          } else {
+            run = 0;
+          }
+        }
+      }
+      const uint8_t bucket = pairBest >= 64 ? 8 : (uint8_t)(pairBest / 8);
+      lenHist[bucket]++;
+    }
+  }
+
+  out.printf("  Plus longue suite commune RICHE : %u bits (salves %u et %u, decalage %d).\n",
+             bestLen, bestA, bestB, bestShift);
+  out.println("  Distribution sur toutes les paires :");
+  char lineBuf[120];
+  for (uint8_t k = 0; k <= 8; k++) {
+    if (!lenHist[k]) continue;
+    snprintf(lineBuf, sizeof(lineBuf), "    %2u-%2u bits communs : %u paire(s)%s", k * 8,
+             k == 8 ? 255 : (k * 8 + 7), lenHist[k], k >= 5 ? "   <<< une adresse tient la-dedans" : "");
+    out.println(lineBuf);
+  }
+
+  if (bestLen >= 24) {
+    out.println("  Contenu de cette suite commune :");
+    size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "   ");
+    for (uint16_t k = 0; k + 8 <= bestLen && k < 96; k += 8) {
+      uint8_t v = 0;
+      for (uint8_t q = 0; q < 8; q++)
+        v = (uint8_t)((v << 1) | (ccBurstBit(bestA, (uint16_t)(bestPos + k + q)) ? 1 : 0));
+      w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, " %02X", v);
+    }
+    out.println(lineBuf);
+    out.println("  Le preambule alterne ouvre la suite ; l'adresse vient juste");
+    out.println("  apres, sur quatre octets.");
+    // Meme chose decalee d'un bit : le debut de la suite commune ne tombe pas
+    // forcement sur une frontiere d'octet.
+    for (uint8_t d = 1; d <= 7; d++) {
+      size_t w2 = (size_t)snprintf(lineBuf, sizeof(lineBuf), "    +%u bit :", d);
+      for (uint16_t k = 0; k + 8 + d <= bestLen && k < 88; k += 8) {
+        uint8_t v = 0;
+        for (uint8_t q = 0; q < 8; q++)
+          v = (uint8_t)((v << 1) | (ccBurstBit(bestA, (uint16_t)(bestPos + k + q + d)) ? 1 : 0));
+        w2 += (size_t)snprintf(lineBuf + w2, sizeof(lineBuf) - w2, " %02X", v);
+      }
+      out.println(lineBuf);
+    }
+  } else {
+    out.println("  Aucune suite commune assez longue pour porter une adresse.");
+    out.println("  Soit les salves ne sont pas des trames, soit les erreurs");
+    out.println("  binaires hachent la demodulation.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  A quelle frequence la source est-elle reellement centree ?
+//
+//  Mesure a l'appui : les salves de la telecommande arrivent fortes mais le
+//  flux demodule ne contient que des uns. C'est la signature d'un
+//  discriminateur SATURE -- un signal dont la porteuse est decalee par rapport
+//  au centre du recepteur. Le filtre de canal fait 812 kHz, donc le RSSI voit
+//  tres bien un signal decale de quelques centaines de kilohertz ; le
+//  discriminateur, lui, part contre sa butee et n'en tire plus rien.
+//
+//  On balaie donc le registre FREQ de part et d'autre de 2405,000 MHz et on
+//  retient l'offset qui EQUILIBRE le flux : une demodulation correcte donne
+//  autant de uns que de zeros et beaucoup de transitions, une demodulation
+//  saturee donne un flux fige.
+//
+//  Pas de reglage : 26 MHz / 2^16 = 396,7 Hz par unite de FREQ.
+// ---------------------------------------------------------------------------
+void ccFreqSweep(Print &out, int32_t spanKhz, int32_t stepKhz, uint32_t dwellMs) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  out.println();
+  out.println("=== Sur quelle frequence la source est-elle centree ? ===");
+  out.printf("  Balayage de %+ld a %+ld kHz autour de 2405,000 MHz, pas de %ld kHz.\n",
+             (long)-spanKhz, (long)spanKhz, (long)stepKhz);
+  out.println("  On mesure l'EQUILIBRE du flux demodule : une demodulation");
+  out.println("  correcte donne autant de uns que de zeros, une demodulation");
+  out.println("  saturee donne un flux fige. Le taux de uns doit approcher 50 %.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  out.println();
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  const int32_t base = 0x5C8000L;  // 2405,000 MHz avec un quartz de 26 MHz
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  char lineBuf[140];
+  int32_t bestOff = 0;
+  uint32_t bestScore = 0;
+
+  for (int32_t kHz = -spanKhz; kHz <= spanKhz; kHz += stepKhz) {
+    // 1 unite de FREQ = 26e6 / 2^16 = 396,7 Hz.
+    const int32_t units = (int32_t)((float)kHz * 1000.0f / 396.7f);
+    const uint32_t f = (uint32_t)(base + units);
+    radio2.strobe(cc2500::STROBE_SIDLE);
+    radio2.writeRegister(cc2500::REG_FREQ2, (uint8_t)((f >> 16) & 0xFF));
+    radio2.writeRegister(cc2500::REG_FREQ1, (uint8_t)((f >> 8) & 0xFF));
+    radio2.writeRegister(cc2500::REG_FREQ0, (uint8_t)(f & 0xFF));
+    radio2.strobe(cc2500::STROBE_SCAL);
+    delay(3);
+    radio2.strobe(cc2500::STROBE_SRX);
+    delay(3);
+
+    uint32_t ones = 0, bits = 0, flips = 0;
+    int peak = -128;
+    bool prevBit = false;
+    uint32_t prevClk = REG_READ(GPIO_IN_REG) & m2;
+    const uint32_t until = millis() + dwellMs;
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint16_t n = 0; n < 2048; n++) {
+        const uint32_t now = REG_READ(GPIO_IN_REG);
+        const uint32_t clk = now & m2;
+        if (clk && !prevClk) {
+          const bool b = (now & m0) != 0;
+          if (b) ones++;
+          if (bits && b != prevBit) flips++;
+          prevBit = b;
+          bits++;
+        }
+        prevClk = clk;
+      }
+      const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+      if (dbm > peak) peak = dbm;
+    }
+
+    const uint32_t pctOnes = bits ? (ones * 100 / bits) : 0;
+    const uint32_t pctFlips = bits ? (flips * 1000 / bits) : 0;
+    // Un flux equilibre ET riche en transitions : c'est la signature d'une
+    // demodulation reussie. On note l'equilibre par sa distance a 50 %.
+    const uint32_t balance = (pctOnes > 50) ? (100 - pctOnes) : pctOnes;
+    const uint32_t score = balance * pctFlips;
+    if (score > bestScore) {
+      bestScore = score;
+      bestOff = kHz;
+    }
+    snprintf(lineBuf, sizeof(lineBuf),
+             "  %+5ld kHz : %3lu %% de uns, %4lu transitions pour mille, pic %d dBm", (long)kHz,
+             (unsigned long)pctOnes, (unsigned long)pctFlips, peak);
+    out.println(lineBuf);
+    Serial.flush();
+  }
+
+  // Remettre la frequence nominale.
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  radio2.writeRegister(cc2500::REG_FREQ2, 0x5C);
+  radio2.writeRegister(cc2500::REG_FREQ1, 0x80);
+  radio2.writeRegister(cc2500::REG_FREQ0, 0x00);
+
+  out.println();
+  snprintf(lineBuf, sizeof(lineBuf), "  Meilleur equilibre a %+ld kHz.", (long)bestOff);
+  out.println(lineBuf);
+  out.println("  Un flux proche de 100 %% de uns signale un discriminateur");
+  out.println("  sature : la porteuse est ailleurs.");
+}
+
+// ---------------------------------------------------------------------------
+//  De combien la porteuse de la source est-elle decalee ?
+//
+//  Le CC2500 estime lui-meme l'ecart de frequence du signal recu et le publie
+//  dans FREQEST (0x32), en complement a deux, par pas de fXOSC/2^14 = 1,587
+//  kHz. La boucle de compensation est active (FOCCFG=0x1E, limite a BW/4, soit
+//  environ 203 kHz).
+//
+//  On ne lit ce registre que lorsque le RSSI atteste d'un signal : lu au
+//  repos, il ne rapporterait que la derive du bruit. Le resultat se compare
+//  directement entre la balise, dont on connait le quartz, et la telecommande.
+//  Un ecart important expliquerait qu'un signal fort ne se demodule pas.
+// ---------------------------------------------------------------------------
+void ccFreqOffset(Print &out, int trigDbm, uint32_t dwellMs) {
+  out.println();
+  out.println("=== De combien la porteuse est-elle decalee ? ===");
+  out.printf("  FREQEST lu seulement quand le RSSI depasse %d dBm.\n", trigDbm);
+  out.println("  Un pas vaut 1,587 kHz ; la plage utile va de -203 a +203 kHz.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+
+  // Histogramme par tranches de 16 kHz, de -208 a +208.
+  static uint32_t hist[27];
+  memset(hist, 0, sizeof(hist));
+  uint32_t hits = 0, looks = 0;
+  long sum = 0;
+  int peak = -128;
+
+  const uint32_t until = millis() + dwellMs;
+  while ((int32_t)(millis() - until) < 0) {
+    const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+    looks++;
+    if (dbm > peak) peak = dbm;
+    if (dbm < trigDbm) continue;
+    const int8_t fe = (int8_t)radio2.readStatus(cc2500::STA_FREQEST);
+    const int khz = (int)((float)fe * 1.5869f);
+    sum += khz;
+    hits++;
+    int idx = (khz + 208) / 16;
+    if (idx < 0) idx = 0;
+    if (idx > 26) idx = 26;
+    hist[idx]++;
+    if (radio2.marcState() != cc2500::MARC_RX) radio2.strobe(cc2500::STROBE_SRX);
+  }
+
+  out.printf("  %lu lecture(s), %lu au-dessus du seuil, pic %d dBm.\n", (unsigned long)looks,
+             (unsigned long)hits, peak);
+  if (!hits) {
+    out.println("  Rien au-dessus du seuil : baisse-le ou fais emettre la source.");
+    return;
+  }
+  out.printf("  Ecart moyen : %+ld kHz.\n", sum / (long)hits);
+  out.println("  Distribution :");
+
+  uint32_t top = 0;
+  for (uint8_t k = 0; k < 27; k++)
+    if (hist[k] > top) top = hist[k];
+  char lineBuf[132];
+  for (uint8_t k = 0; k < 27; k++) {
+    if (!hist[k]) continue;
+    const int lo = (int)k * 16 - 208;
+    const uint8_t bar = top ? (uint8_t)((uint64_t)hist[k] * 36 / top) : 0;
+    char bars[37];
+    for (uint8_t b = 0; b < bar && b < 36; b++) bars[b] = '#';
+    bars[bar > 36 ? 36 : bar] = 0;
+    snprintf(lineBuf, sizeof(lineBuf), "    %+4d a %+4d kHz : %6lu %s", lo, lo + 15,
+             (unsigned long)hist[k], bars);
+    out.println(lineBuf);
+  }
+  out.println();
+  out.println("  Si la masse est loin de zero, il suffit de deplacer FREQ");
+  out.println("  d'autant ; si elle est plaquee contre un bord, l'ecart");
+  out.println("  depasse la plage de mesure et il faut balayer plus large.");
+}
+
+// ---------------------------------------------------------------------------
+//  Vidage brut des salves, pour analyse sur l'ordinateur.
+//
+//  L'analyse embarquee accumulait les rustines : filtres de richesse, seuils
+//  d'alternance, tolerances. Chacune ajoutait une hypothese, et la derniere en
+//  date se perdait dans des coincidences. La carte fait ce qu'elle fait bien --
+//  echantillonner au front d'horloge -- et l'ordinateur fait le reste, ou l'on
+//  peut essayer dix alignements sans reflasher.
+// ---------------------------------------------------------------------------
+void ccDumpBursts(Print &out, int trigDbm, uint8_t count) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  if (count > CC_BURSTS) count = CC_BURSTS;
+  out.println();
+  out.printf("=== Vidage brut de %u salves (seuil %d dBm) ===\n", count, trigDbm);
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  memset(ccBurst, 0, sizeof(ccBurst));
+  uint8_t caught = 0;
+
+  for (uint8_t b = 0; b < count; b++) {
+    bool armed = false;
+    int dbmAt = -128;
+    const uint32_t giveUp = millis() + 3000;
+    while ((int32_t)(millis() - giveUp) < 0) {
+      const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+      if (dbm >= trigDbm) {
+        armed = true;
+        dbmAt = dbm;
+        break;
+      }
+    }
+    if (!armed) break;
+
+    uint16_t got = 0;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+    uint32_t guard = 0;
+    while (got < CC_BURST_BITS && guard < 4000000UL) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) ccBurst[b][got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      guard++;
+    }
+    if (got < CC_BURST_BITS) break;
+    caught++;
+
+    char lineBuf[110];
+    size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "SALVE %2u %4d ", b, dbmAt);
+    for (uint8_t k = 0; k < CC_BURST_BITS / 8; k++)
+      w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, "%02X", ccBurst[b][k]);
+    out.println(lineBuf);
+    Serial.flush();
+  }
+  out.printf("=== %u salve(s) ===\n", caught);
+}
+
+// ---------------------------------------------------------------------------
+//  Capture CONTINUE, vidée telle quelle vers l'ordinateur.
+//
+//  Mesure a l'appui : toute capture DECLENCHEE sur le RSSI rate l'adresse.
+//  Lire le RSSI par SPI bit-bange coute environ 190 us, quand preambule et
+//  adresse ne durent ensemble que 384 us -- le temps de detecter, elles sont
+//  passees. Les salves ainsi capturees contenaient bien la charge utile de la
+//  balise, et jamais son adresse, pas une fois sur vingt-quatre.
+//
+//  On capture donc en continu, sans declenchement d'aucune sorte, et on laisse
+//  l'ordinateur chercher dedans -- ou l'on peut essayer dix hypotheses sans
+//  reflasher la carte.
+// ---------------------------------------------------------------------------
+void ccStream(Print &out, uint32_t nbits, uint8_t passes) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  if (nbits > sizeof(ccBits) * 8) nbits = sizeof(ccBits) * 8;
+  out.println();
+  out.printf("=== Flux continu : %u passe(s) de %lu bits ===\n", passes, (unsigned long)nbits);
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception.");
+    return;
+  }
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  for (uint8_t p = 0; p < passes; p++) {
+    memset(ccBits, 0, sizeof(ccBits));
+    uint32_t got = 0;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+    const uint32_t deadline = millis() + 2000;
+    noInterrupts();
+    while (got < nbits) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+    }
+    interrupts();
+
+    // Vidage par lignes de 32 octets, prefixees pour etre retrouvees au grep.
+    const uint32_t bytesGot = got / 8;
+    for (uint32_t k = 0; k < bytesGot; k += 32) {
+      char lineBuf[80];
+      size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "FLUX %u %5lu ", p, (unsigned long)k);
+      for (uint32_t q = k; q < k + 32 && q < bytesGot; q++)
+        w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, "%02X", ccBits[q]);
+      out.println(lineBuf);
+      Serial.flush();
+    }
+    out.printf("FIN %u %lu\n", p, (unsigned long)got);
+    Serial.flush();
+  }
 }
 
 void cliBegin() {
