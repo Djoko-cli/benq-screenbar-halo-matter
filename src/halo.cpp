@@ -3487,6 +3487,20 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen) {
   Serial.flush();
 
   // Chemin sans reset logiciel : le reset efface 15 des 19 valeurs recommandees.
+  // Valeurs analogiques : recommandees Holtek (ecrites par begin()), ou valeurs
+  // par defaut de la puce. Le projet Termina1, le seul qui recoive une vraie
+  // telecommande BenQ, ne fait ni reset ni ecriture de ces valeurs : il tourne
+  // sur les valeurs de mise sous tension. Le reset logiciel est ce qui s'en
+  // approche le plus -- on ne peut pas couper l'alimentation du module.
+  if (!applyHoltekTuning_) {
+    radio.softwareReset();
+    out.println("  Valeurs analogiques PAR DEFAUT (reset logiciel, rien de reecrit).");
+  } else {
+    // Reecrites ICI et non laissees a begin() : une passe precedente en mode
+    // par defaut les a effacees par son reset, et l'alternance serait faussee.
+    radio.registerConfigure(nullptr);
+    out.println("  Valeurs analogiques RECOMMANDEES Holtek (reecrites a l'instant).");
+  }
   radio.command(CMD_LIGHT_SLEEP);
   radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
   applyXoTrim(radio);
@@ -3626,6 +3640,63 @@ void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen) {
 
 // CRC-16/CCITT 0x1021, init 0xFFFF, sur l'adresse SUR L'AIR puis la charge
 // utile. L'adresse est stockee a l'envers de son ordre d'emission.
+// ---------------------------------------------------------------------------
+//  Emettre une trame Halo 1 : adresse enregistree + 6 octets + CRC materiel.
+//
+//  Chemin de la balise d'etalonnage, qui marche : moteur de paquets, charge
+//  utile statique, ecriture FIFO sans acquittement, CRC produit par la puce.
+//  Mesure a l'appui, ce CRC materiel est EXACTEMENT le modele observe sur la
+//  telecommande -- CRC-16/CCITT 0x1021, init 0xFFFF, couvrant adresse et
+//  charge utile : la balise produisait C2BA, et le calcul logiciel aussi.
+//
+//  Seule difference connue avec la telecommande : la polarite du preambule.
+//  Le moteur de paquets la deduit du premier bit d'adresse (1 -> 10101010),
+//  alors que la telecommande emet ...0101 1 juste avant l'adresse.
+// ---------------------------------------------------------------------------
+void BenqHalo::txHalo1(Print &out, const uint8_t payload[6], uint16_t count, uint16_t gapMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  const uint16_t crc = halo1Crc(payload);
+  snprintf(line, sizeof(line),
+           "  Trame attendue sur l'air : %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X | %02X %02X",
+           addr_[3], addr_[2], addr_[1], addr_[0], payload[0], payload[1], payload[2], payload[3],
+           payload[4], payload[5], (unsigned)(crc >> 8), (unsigned)(crc & 0xFF));
+  out.println(line);
+  snprintf(line, sizeof(line), "  Canal %u, %s, %u emission(s), %u ms d'intervalle.",
+           (unsigned)channel_, dataRateName(dataRate_), count, gapMs);
+  out.println(line);
+  Serial.flush();
+
+  configForLoopback(radio, channel_, addr_, false, dataRate_);
+
+  uint16_t sent = 0, confirmed = 0;
+  for (uint16_t i = 0; i < count; i++) {
+    radio.command(CMD_FLUSH_TX_FIFO);
+    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
+    radio.writeCommandData(CMD_WRITE_TX_FIFO_NO_ACK, payload, 6);
+    sent++;
+    // Seul TX_DS atteste que la puce a reellement emis.
+    const uint32_t until = micros() + 5000;
+    while ((int32_t)(micros() - until) < 0) {
+      if (radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER) & IRQ_TX_DS) {
+        confirmed++;
+        break;
+      }
+      delayMicroseconds(10);
+    }
+    if (gapMs) delay(gapMs);
+    if ((i & 0x3F) == 0x3F) delay(1);
+  }
+  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+  radio.command(CMD_LIGHT_SLEEP);
+  snprintf(line, sizeof(line), "  %u emise(s), %u confirmee(s) par TX_DS.", sent, confirmed);
+  out.println(line);
+}
+
+
 uint16_t BenqHalo::halo1Crc(const uint8_t payload[6]) const {
   uint16_t crc = 0xFFFF;
   for (uint8_t i = 0; i < 10; i++) {
