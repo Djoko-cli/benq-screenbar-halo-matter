@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "driver/spi_slave.h"
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 
@@ -2944,4 +2945,96 @@ const char *BenqHalo::dataRateName(uint8_t rate) {
 void BenqHalo::setDataRate(uint8_t rate) {
   dataRate_ = rate;
   saveConfig();
+}
+
+// ---------------------------------------------------------------------------
+//  Ecoute passive d'un bus SPI tiers
+// ---------------------------------------------------------------------------
+
+void BenqHalo::sniffSpiBus(Print &out, uint32_t seconds) {
+  char line[176];
+
+  out.println();
+  out.println("=== Ecoute du bus SPI de la telecommande ===");
+  out.println("  Le peripherique SPI est mis en ESCLAVE : c'est l'horloge de la");
+  out.println("  telecommande qui le cadence, donc les octets sont reconstitues");
+  out.println("  exactement au lieu d'etre echantillonnes.");
+  out.println("  MISO n'est pas assigne : cette carte n'emet RIEN sur le bus");
+  out.println("  observe, elle se contente d'ecouter.");
+  snprintf(line, sizeof(line), "  Branchements : SCK -> IO%u, SDIO -> IO%u, CSN -> IO%u,",
+           (unsigned)PIN_TAP_SCK, (unsigned)PIN_TAP_MOSI, (unsigned)PIN_TAP_CS);
+  out.println(line);
+  out.println("  et une MASSE COMMUNE, indispensable.");
+  out.println("  On guette la commande 0x10 (write PTX address) suivie des");
+  out.println("  octets d'adresse.");
+  snprintf(line, sizeof(line), "  Duree : %lu s. Redemarre la telecommande pendant ce temps.",
+           (unsigned long)seconds);
+  out.println(line);
+  Serial.flush();
+
+  // Liberer le bus maitre : le C6 n'a qu'un seul peripherique SPI utilisable.
+  radio.suspendBus();
+
+  spi_bus_config_t bus = {};
+  bus.mosi_io_num = PIN_TAP_MOSI;
+  bus.miso_io_num = -1;  // jamais pilote
+  bus.sclk_io_num = PIN_TAP_SCK;
+  bus.quadwp_io_num = -1;
+  bus.quadhd_io_num = -1;
+  bus.max_transfer_sz = 64;
+
+  spi_slave_interface_config_t slave = {};
+  slave.spics_io_num = PIN_TAP_CS;
+  slave.flags = 0;
+  slave.queue_size = 4;
+  slave.mode = 0;  // comme le BC5602 : CPOL=0, CPHA=0
+
+  if (spi_slave_initialize(SPI2_HOST, &bus, &slave, SPI_DMA_CH_AUTO) != ESP_OK) {
+    out.println("  Impossible d'initialiser le SPI en esclave.");
+    radio.resumeBus();
+    return;
+  }
+
+  static WORD_ALIGNED_ATTR uint8_t rx[64];
+  uint32_t frames = 0, addressWrites = 0;
+  const uint32_t deadline = millis() + seconds * 1000UL;
+
+  while ((int32_t)(millis() - deadline) < 0) {
+    memset(rx, 0, sizeof(rx));
+    spi_slave_transaction_t t = {};
+    t.length = 8 * 32;  // taille maximale acceptee ; CSN decoupe reellement
+    t.rx_buffer = rx;
+    t.tx_buffer = nullptr;
+
+    if (spi_slave_transmit(SPI2_HOST, &t, pdMS_TO_TICKS(500)) != ESP_OK) continue;
+
+    const uint32_t bits = t.trans_len;
+    if (bits < 8) continue;
+    const uint8_t bytes = (uint8_t)(bits / 8);
+    frames++;
+
+    int n = snprintf(line, sizeof(line), "  %3lu:", (unsigned long)frames);
+    for (uint8_t i = 0; i < bytes && i < 20; i++)
+      n += snprintf(line + n, sizeof(line) - n, " %02X", rx[i]);
+    if (rx[0] == 0x10) {
+      addressWrites++;
+      snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE");
+    }
+    out.println(line);
+    Serial.flush();
+  }
+
+  spi_slave_free(SPI2_HOST);
+  radio.resumeBus();
+
+  out.println();
+  snprintf(line, sizeof(line), "  Termine : %lu transaction(s), dont %lu ecriture(s) d'adresse.",
+           (unsigned long)frames, (unsigned long)addressWrites);
+  out.println(line);
+  if (frames == 0) {
+    out.println("  Rien capte. Verifie la masse commune, puis que SCK et CSN sont");
+    out.println("  bien sur les bonnes pastilles -- CSN doit descendre a chaque");
+    out.println("  echange, c'est lui qui decoupe les transactions.");
+  }
+  out.println();
 }
