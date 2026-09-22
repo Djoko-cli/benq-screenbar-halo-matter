@@ -3274,7 +3274,8 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
   out.println("  Le detecteur de preambule s'arme sur une suite alternee, donc");
   out.println("  seule une fenetre precedee de 0x55 ou 0xAA peut accrocher. Les");
   out.println("  sept autres servent de temoins negatifs.");
-  out.println("  >>> La balise doit tourner sur l'autre carte : 'etalon tx 180 2'.");
+  out.println("  >>> Il faut une source qui emette : la balise sur l'autre carte,");
+  out.println("      ou la molette de la telecommande tournee sans arret.");
   Serial.flush();
 
   uint8_t hits = 0;
@@ -3374,9 +3375,10 @@ void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
            (unsigned)PIN_GIO3_TAP);
   out.println(line);
   out.println("  Contrairement a GIO2, GIO3 ne sert pas au SPI : la liaison avec");
-  out.println("  la puce reste vivante, et on compte les trames pendant la mesure");
-  out.println("  pour prouver qu'il y a bien du trafic.");
-  out.println("  >>> La balise doit tourner sur l'autre carte : 'etalon tx 180 2'.");
+  out.println("  la puce reste vivante. Le trafic est atteste par le RSSI, qui ne");
+  out.println("  depend d'aucune adresse -- donc valable pour la telecommande.");
+  out.println("  >>> Il faut une source qui emette : la balise sur l'autre carte,");
+  out.println("      ou la molette de la telecommande tournee sans arret.");
   Serial.flush();
 
   // Conserve PADDS et GIO4S, ne touche qu'aux quatre bits de GIO3S.
@@ -3406,16 +3408,11 @@ void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
       }
       samples += 256;
 
-      // La liaison SPI reste utilisable : on verifie que des trames arrivent
-      // reellement, sinon une absence d'activite ne prouverait rien.
+      // Temoin de trafic par le RSSI, et non par un compteur de trames : il ne
+      // depend d'aucune adresse, donc il vaut aussi bien pour la balise que pour
+      // la telecommande. Compter les trames n'aurait mesure que la balise.
       if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-      if (!(radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR)) {
-        uint8_t buf[13];
-        radio.readFifo(buf, 13, false);
-        radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
-        radio.command(CMD_FLUSH_RX_FIFO);
-        got++;
-      }
+      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) got++;
     }
 
     trans[sel] = edges;
@@ -3429,7 +3426,8 @@ void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
                         : (sel == 12) ? "EPA_EN"
                         : (sel == 13) ? "ELAN_EN"
                                       : "non documente";
-    snprintf(line, sizeof(line), "  GIO3S=%-2u %-14s : %lu transitions sur %lu ech., %lu trame(s)",
+    snprintf(line, sizeof(line),
+             "  GIO3S=%-2u %-14s : %lu transitions / %lu ech., signal fort %lu",
              (unsigned)sel, known, (unsigned long)edges, (unsigned long)samples,
              (unsigned long)got);
     out.println(line);
@@ -3443,9 +3441,8 @@ void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
 
   out.println();
   if (totalFrames == 0) {
-    out.println("  AUCUNE trame recue de la balise : la mesure ne vaut rien.");
-    out.println("  Verifie que 'etalon tx' tourne sur l'autre carte et que les");
-    out.println("  deux cartes sont au meme debit ('debit' pour l'afficher).");
+    out.println("  AUCUN signal fort pendant toute la mesure : rien n'emettait.");
+    out.println("  Fais tourner la molette, ou lance la balise, avant de conclure.");
     out.println();
     return;
   }
@@ -3610,13 +3607,12 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
   snprintf(line, sizeof(line), "  Selecteur GIO3S=%u, broche IO%u.", (unsigned)selector,
            (unsigned)PIN_GIO3_TAP);
   out.println(line);
-  out.println("  Le recepteur est volontairement cale sur une adresse FAUSSE :");
-  out.println("  si on lit quand meme la trame, c'est bien que cette sortie est");
-  out.println("  en amont du filtrage.");
-  snprintf(line, sizeof(line), "  Adresse reelle de la balise, attendue : %02X %02X %02X %02X",
-           kCalAirAddr[0], kCalAirAddr[1], kCalAirAddr[2], kCalAirAddr[3]);
-  out.println(line);
-  out.println("  >>> La balise doit tourner sur l'autre carte.");
+  out.println("  Le recepteur est cale sur une adresse quelconque : cette sortie");
+  out.println("  etant en amont du filtrage, l'adresse programmee n'a aucune");
+  out.println("  importance. On lit les bits tels qu'ils arrivent.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER : c'est la seule source");
+  out.println("      de trafic.");
+
   Serial.flush();
 
   const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
@@ -3627,7 +3623,10 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
   const uint32_t mask = 1UL << PIN_GIO3_TAP;
   pinMode(PIN_GIO3_TAP, INPUT);
 
-  uint32_t triggers = 0, shortRuns = 0, noPreamble = 0;
+  uint32_t triggers = 0, shortRuns = 0, noPreamble = 0, strong = 0;
+  uint8_t cand[24][4];
+  uint8_t candHits[24] = {0};
+  uint8_t candCount = 0;
 
   for (uint32_t attempt = 0; attempt < attempts; attempt++) {
     // CE est efface par le materiel a chaque fin de reception : sans rearmement
@@ -3650,6 +3649,7 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
         break;
       }
     }
+    if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
     if (!triggered) continue;
     triggers++;
 
@@ -3725,7 +3725,9 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
              (unsigned long)attempt + 1, (unsigned)runs, (unsigned)shortest, (int)start);
     out.println(line);
 
-    // Les six octets qui suivent le preambule : adresse puis PCF.
+    // Les six octets qui suivent le preambule : adresse puis PCF. On ne compare
+    // a rien -- on tient un decompte, car une adresse reelle se repete d'une
+    // capture a l'autre alors que le bruit ne se repete jamais.
     for (uint8_t polarity = 0; polarity < 2; polarity++) {
       uint8_t bytes[6] = {0};
       for (uint8_t b = 0; b < 6; b++)
@@ -3737,8 +3739,22 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
       for (uint8_t b = 0; b < 6; b++)
         n += snprintf(line + n, sizeof(line) - n, " %02X", bytes[b]);
       if (memcmp(bytes, kCalAirAddr, 4) == 0)
-        snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE DE LA BALISE, RETROUVEE");
+        n += snprintf(line + n, sizeof(line) - n, "   <<< ADRESSE DE LA BALISE");
       out.println(line);
+
+      // Decompte des quatre premiers octets.
+      bool seen = false;
+      for (uint8_t c = 0; c < candCount; c++)
+        if (memcmp(cand[c], bytes, 4) == 0) {
+          candHits[c]++;
+          seen = true;
+          break;
+        }
+      if (!seen && candCount < 24) {
+        memcpy(cand[candCount], bytes, 4);
+        candHits[candCount] = 1;
+        candCount++;
+      }
     }
     Serial.flush();
   }
@@ -3750,12 +3766,490 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
            (unsigned long)triggers, (unsigned long)attempts, (unsigned long)shortRuns,
            (unsigned long)noPreamble);
   out.println(line);
-  if (triggers == 0) {
-    out.println("  Aucun front sur GIO3 : la puce n'etait pas en reception, ou ce");
-    out.println("  selecteur ne sort rien. Relance 'gio3' pour verifier.");
+  snprintf(line, sizeof(line), "  Signal fort detecte %lu fois sur %lu tentatives.",
+           (unsigned long)strong, (unsigned long)attempts);
+  out.println(line);
+  if (triggers == 0 && strong == 0) {
+    out.println("  Rien n'emettait : le resultat ne dit rien de ce selecteur.");
+  } else if (triggers == 0) {
+    out.println("  La source emettait bien, mais GIO3 est reste muet. Le");
+    out.println("  demodulateur n'accroche donc pas -- essaie l'autre debit avec");
+    out.println("  'debit 125' ou 'debit 250', puis relance.");
   }
   out.println();
-  out.println("  Si l'adresse de la balise ressort, la methode est validee et on");
-  out.println("  la pointe sur la telecommande.");
+  if (candCount) {
+    out.println("  Candidats, du plus frequent au moins frequent. Une adresse");
+    out.println("  reelle se repete d'une capture a l'autre ; le bruit, jamais.");
+    for (uint8_t rank = 0; rank < 6; rank++) {
+      uint8_t best = 0xFF, bestHits = 0;
+      for (uint8_t c = 0; c < candCount; c++)
+        if (candHits[c] > bestHits) {
+          bestHits = candHits[c];
+          best = c;
+        }
+      if (best == 0xFF || bestHits == 0) break;
+      snprintf(line, sizeof(line), "    %02X %02X %02X %02X  vu %u fois%s", cand[best][0],
+               cand[best][1], cand[best][2], cand[best][3], (unsigned)bestHits,
+               (bestHits >= 3) ? "   <<< SE REPETE" : "");
+      out.println(line);
+      candHits[best] = 0;
+    }
+    out.println();
+    out.println("  Un candidat qui revient trois fois ou plus merite d'etre");
+    out.println("  essaye : 'addr' dans l'ordre inverse, puis 'sniff'.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Chasse a l'adresse par mot de synchro ancre
+// ---------------------------------------------------------------------------
+
+// Examine une capture et tente d'y lire une adresse. Apres un accrochage en
+// plein payload, la FIFO contient la fin de la trame courante, puis le silence,
+// puis le PREAMBULE et l'ADRESSE de la suivante -- qui ne tombent pas sur la
+// grille d'octets. On balaie donc les huit decalages de bit.
+bool BenqHalo::scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len,
+                                     const char *context) {
+  char line[176];
+  bool found = false;
+
+  for (uint8_t shift = 0; shift < 8; shift++) {
+    uint8_t s[32];
+    for (uint8_t i = 0; i < len; i++) {
+      const uint8_t hi = (uint8_t)(buf[i] << shift);
+      const uint8_t lo = (i + 1 < len) ? (uint8_t)(buf[i + 1] >> (8 - shift)) : 0;
+      s[i] = shift ? (uint8_t)(hi | lo) : buf[i];
+    }
+
+    for (uint8_t p = 0; p + 18 <= len; p++) {
+      if (s[p] != 0xAA && s[p] != 0x55) continue;
+
+      const uint8_t *air = &s[p + 1];   // les quatre octets d'adresse, sur l'air
+      const uint8_t pcf = s[p + 5];
+      const uint8_t *payload = &s[p + 6];
+      const uint16_t got = (uint16_t)((s[p + 16] << 8) | s[p + 17]);
+
+      const uint16_t wantA = frameCrcFor(air, pcf, payload);
+      const uint16_t wantB = crcOverFrame(0x5042, pcf, payload);
+      if (got != wantA && got != wantB) continue;
+
+      found = true;
+      snprintf(line, sizeof(line), "  *** ADRESSE CONFIRMEE PAR CRC  (%s)", context);
+      out.println(line);
+      snprintf(line, sizeof(line), "      sur l'air        : %02X %02X %02X %02X", air[0], air[1],
+               air[2], air[3]);
+      out.println(line);
+      snprintf(line, sizeof(line), "      a saisir         : addr %02X%02X%02X%02X", air[3], air[2],
+               air[1], air[0]);
+      out.println(line);
+      int n = snprintf(line, sizeof(line), "      PCF %02X, payload", pcf);
+      for (uint8_t i = 0; i < 10; i++)
+        n += snprintf(line + n, sizeof(line) - n, " %02X", payload[i]);
+      out.println(line);
+      snprintf(line, sizeof(line), "      CRC %04X, modele %s", got,
+               (got == wantA) ? "A (adresse couverte)" : "B (adresse non couverte)");
+      out.println(line);
+      Serial.flush();
+      return true;
+    }
+  }
+  return found;
+}
+
+void BenqHalo::huntAnchored(Print &out, uint32_t seconds, uint8_t group, uint32_t dwellMs,
+                            uint16_t fixedKelvin, int16_t fixedBack) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== Chasse a l'adresse par mot de synchro ancre ===");
+  out.println("  Le detecteur de preambule ne s'arme que sur une suite alternee :");
+  out.println("  la fenetre visee doit etre precedee d'un octet 0x55 ou 0xAA.");
+  out.println("  Payload suppose, repris du Halo 2 :");
+  out.println("    [cmd][ctrl][lum_avant][ct_hi][ct_lo][lum_arriere][ct_hi][ct_lo][01][02]");
+  out.println();
+  if (group == 0) {
+    out.println("  GROUPE 1 -- ancre sur la LUMINOSITE ARRIERE a 85 % (=0x55).");
+    out.println("  Fenetre visee : [ct_hi][ct_lo][01]. Une seule inconnue, la");
+    out.println("  temperature, balayee OCTET PAR OCTET sans presumer d'un pas :");
+    out.println("  4096 candidats couvrant 2560 a 6655 K.");
+    out.println("  >>> Regle la lampe ARRIERE au maximum puis redescends d'un ou");
+    out.println("      deux crans, et tourne lentement la molette de TEMPERATURE.");
+  } else {
+    out.println("  GROUPE 2 -- ancre sur la TEMPERATURE dont l'octet bas vaut");
+    out.println("  0x55 ou 0xAA. Fenetre : [lum_arriere][ct_hi][ct_lo].");
+    if (fixedBack >= 0) {
+      snprintf(line, sizeof(line), "  Luminosite arriere IMPOSEE a %d %% : le balayage tombe a",
+               (int)fixedBack);
+      out.println(line);
+      out.println("  32 candidats, soit un passage complet toutes les 2 secondes.");
+      out.println("  >>> ETEINS LA LAMPE ARRIERE (elle vaut alors 0) et tourne la");
+      out.println("      molette de luminosite AVANT sans t'arreter.");
+    } else {
+      out.println("  32 octets hauts x 2 ancres x 101 luminosites = 3232 candidats.");
+    }
+    out.println();
+    out.println("  >>> ETEINS LA LAMPE ARRIERE et ne garde que l'avant allumee.");
+    out.println("  >>> Puis tourne la molette de LUMINOSITE sans t'arreter.");
+    out.println("  La luminosite AVANT ne figure pas dans la fenetre visee : elle");
+    out.println("  fournit donc du trafic en continu pendant que la temperature et");
+    out.println("  la luminosite arriere, elles, restent FIGEES. C'est ce qui rend");
+    out.println("  le balayage utile : sans cela, la cible bouge en meme temps que");
+    out.println("  les hypotheses et les deux ne se croisent jamais.");
+    out.println("  Si rien ne sort, decale la temperature d'un cran et recommence :");
+    out.println("  une valeur sur cinq environ produit une ancre.");
+  }
+  snprintf(line, sizeof(line), "  Duree : %lu s, %lu ms par candidat, debit %s, canal %u.",
+           (unsigned long)seconds, (unsigned long)dwellMs, dataRateName(dataRate_),
+           (unsigned)channel_);
+  out.println(line);
+  out.println("  La molette doit tourner SANS ARRET : c'est la seule source de");
+  out.println("  trafic, et chaque candidat n'a que quelques dizaines de ms.");
+  Serial.flush();
+
+  const uint32_t deadline = millis() + seconds * 1000UL;
+  uint32_t tried = 0, frames = 0, passes = 0;
+  uint32_t strongSamples = 0, rssiSamples = 0;
+  uint8_t bestRssi = 0xFF;
+  bool solved = false;
+
+  while (!solved && (int32_t)(millis() - deadline) < 0) {
+    passes++;
+
+    // On balaie les OCTETS de temperature, sans presumer d'un pas. Generer les
+    // candidats par pas de 25 K etait une hypothese heritee du Halo 2, et elle
+    // etait ruineuse : sur cette grille, une seule valeur de toute la plage a
+    // un octet bas valant 0x55 ou 0xAA. Le groupe 2 ne testait donc qu'une
+    // temperature sur les trente-et-une possibles.
+    // 2700 a 6500 K couvre 0x0A8C a 0x1964 : l'octet haut va de 0x0A a 0x19.
+    // Une temperature imposee concentre tout le temps de mesure sur une seule
+    // hypothese, au lieu de le diluer sur trente-deux. A utiliser des qu'un
+    // indice designe une valeur precise.
+    const uint16_t hiFrom = fixedKelvin ? (uint16_t)(fixedKelvin >> 8) : 0x0A;
+    const uint16_t hiTo = fixedKelvin ? (uint16_t)(fixedKelvin >> 8) : 0x19;
+
+    for (uint16_t ctHi = hiFrom; ctHi <= hiTo && !solved; ctHi++) {
+      const uint16_t loStep = (group == 0) ? 1 : 85;  // groupe 2 : 0x55 puis 0xAA
+      const uint16_t loFrom = fixedKelvin ? (uint16_t)(fixedKelvin & 0xFF)
+                                          : ((group == 0) ? 0 : 85);
+      const uint16_t loTo = fixedKelvin ? (uint16_t)(fixedKelvin & 0xFF) : 255;
+      for (uint16_t ctLoI = loFrom; ctLoI <= loTo && !solved; ctLoI += loStep) {
+        const uint8_t ctLo = (uint8_t)ctLoI;
+        if (!fixedKelvin && group != 0 && ctLo != 0x55 && ctLo != 0xAA) continue;
+
+      // Figer la luminosite arriere reduit le balayage d'un facteur cent et un.
+      // Eteindre la lampe arriere la met a zero : une valeur connue, sans avoir
+      // a la deviner, et la luminosite AVANT reste libre pour fournir du trafic.
+      const uint8_t backFrom = (group == 0) ? 0 : ((fixedBack >= 0) ? (uint8_t)fixedBack : 0);
+      const uint8_t backMax =
+          (group == 0) ? 0 : ((fixedBack >= 0) ? (uint8_t)fixedBack : 100);
+      for (uint8_t back = backFrom; back <= backMax && !solved; back++) {
+        if ((int32_t)(millis() - deadline) >= 0) break;
+
+        // Sur l'air la fenetre defile dans l'ordre du payload ; le registre se
+        // remplit a l'envers.
+        uint8_t reg3[3];
+        if (group == 0) {
+          reg3[0] = 0x01;
+          reg3[1] = ctLo;
+          reg3[2] = ctHi;
+        } else {
+          reg3[0] = ctLo;
+          reg3[1] = ctHi;
+          reg3[2] = back;
+        }
+
+        sharedRadioConfig(ADDR_LEN_3, reg3, 3);
+        uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+        radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
+        radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+        radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
+        radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
+        radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
+        radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
+        radio.clearInterrupts();
+        radio.command(CMD_FLUSH_RX_FIFO);
+        radio.enterRxMode();
+        tried++;
+
+        const uint32_t until = millis() + dwellMs;
+        while ((int32_t)(millis() - until) < 0) {
+          if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+
+          // Temoin de trafic, independant du correlateur : RSSI2 est une mesure
+          // temps reel. Sans lui, "zero accroche" ne distingue pas une mauvaise
+          // hypothese d'une telecommande muette.
+          const uint8_t rssi = radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER);
+          if (rssi < 70) strongSamples++;
+          rssiSamples++;
+          if (rssi < bestRssi) bestRssi = rssi;
+
+          if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) continue;
+
+          uint8_t buf[32];
+          radio.readFifo(buf, 32, false);
+          radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+          radio.command(CMD_FLUSH_RX_FIFO);
+          frames++;
+
+          snprintf(line, sizeof(line), "  accroche : ct %02X %02X, arriere %u %%",
+                   (unsigned)ctHi, (unsigned)ctLo, (unsigned)back);
+          out.println(line);
+          for (uint8_t half = 0; half < 2; half++) {
+            int n = snprintf(line, sizeof(line), half ? "        " : "    FIFO");
+            for (uint8_t i = half * 16; i < (uint8_t)(half * 16 + 16); i++)
+              n += snprintf(line + n, sizeof(line) - n, " %02X", buf[i]);
+            out.println(line);
+          }
+          Serial.flush();
+
+          snprintf(line, sizeof(line), "ct %02X %02X (%u K), arriere %u %%", (unsigned)ctHi,
+                   (unsigned)ctLo, (unsigned)((ctHi << 8) | ctLo), (unsigned)back);
+          if (scanCaptureForAddress(out, buf, 32, line)) solved = true;
+        }
+        if ((tried & 0x0F) == 0) delay(1);
+      }
+      }
+    }
+  }
+
+  out.println();
+  snprintf(line, sizeof(line), "  Bilan : %lu candidat(s) essaye(s) en %lu passe(s), %lu accroche(s).",
+           (unsigned long)tried, (unsigned long)passes, (unsigned long)frames);
+  out.println(line);
+  const uint32_t strongPerMille = rssiSamples ? (strongSamples * 1000UL / rssiSamples) : 0;
+  snprintf(line, sizeof(line), "  Trafic : signal fort sur %lu pour mille des mesures, pic %u dB.",
+           (unsigned long)strongPerMille, (unsigned)bestRssi);
+  out.println(line);
+  if (strongPerMille < 5) {
+    out.println("  >>> Quasiment aucun signal fort : la telecommande n'emettait");
+    out.println("  pas, ou pas sur ce canal. Le resultat ne dit RIEN sur les");
+    out.println("  hypotheses testees. Verifie la molette avant de recommencer.");
+  }
+  if (solved) {
+    out.println("  ADRESSE TROUVEE. Enregistre-la avec la commande 'addr' affichee");
+    out.println("  ci-dessus, puis 'sniff' pour verifier qu'on suit la lampe.");
+  } else if (frames > 6) {
+    out.println("  Beaucoup d'accroches sans adresse valide : la fenetre mord sur");
+    out.println("  quelque chose de reel mais la lecture echoue. Envoie les vidages.");
+  } else if (frames) {
+    out.println("  Quelques accroches seulement. Un motif de 24 bits se retrouve");
+    out.println("  par hasard environ une fois sur 16 millions de positions, et il");
+    out.println("  en defile des dizaines de millions par minute : une poignee");
+    out.println("  d'accroches sans CRC valide est le bruit attendu, pas un indice.");
+  } else {
+    out.println("  Aucune accroche. Verifie que la molette tournait, puis essaie");
+    out.println("  l'autre groupe et l'autre debit.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Trouver le debit sans connaitre l'adresse
+// ---------------------------------------------------------------------------
+
+void BenqHalo::probeRateByGio3(Print &out, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+
+  out.println();
+  out.println("=== Quel est le debit de la source ? ===");
+  out.println("  GIO3 ne s'anime que si la puce a DETECTE UN PREAMBULE, et cette");
+  out.println("  detection depend du debit. Le debit qui fait sortir des");
+  out.println("  transitions est donc celui de l'emetteur -- et cette mesure ne");
+  out.println("  demande aucune adresse.");
+  out.println("  Verifie par la balise : elle avait donne 14000 transitions.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  const uint8_t rates[3] = {DATARATE_125K, DATARATE_250K, DATARATE_500K};
+  const uint8_t selectors[2] = {9, 14};
+  const uint8_t saved = dataRate_;
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+
+  uint32_t best = 0;
+  uint8_t bestRate = saved;
+
+  for (uint8_t r = 0; r < 3; r++) {
+    dataRate_ = rates[r];
+
+    for (uint8_t i = 0; i < 2; i++) {
+      configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+      radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | selectors[i]));
+      radio.enterRxMode();
+      pinMode(PIN_GIO3_TAP, INPUT);
+
+      uint32_t edges = 0, strong = 0, checks = 0;
+      uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+      const uint32_t until = millis() + dwellMs;
+
+      while ((int32_t)(millis() - until) < 0) {
+        for (uint16_t burst = 0; burst < 512; burst++) {
+          const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+          if (now != last) {
+            edges++;
+            last = now;
+          }
+        }
+        if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+        if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+        checks++;
+      }
+
+      snprintf(line, sizeof(line), "  %-8s  GIO3S=%-2u : %lu transitions, signal fort %lu/%lu",
+               dataRateName(rates[r]), (unsigned)selectors[i], (unsigned long)edges,
+               (unsigned long)strong, (unsigned long)checks);
+      out.println(line);
+      Serial.flush();
+
+      if (edges > best) {
+        best = edges;
+        bestRate = rates[r];
+      }
+    }
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+  dataRate_ = saved;
+
+  out.println();
+  if (best > 100) {
+    snprintf(line, sizeof(line), "  Le debit de la source est %s (%lu transitions).",
+             dataRateName(bestRate), (unsigned long)best);
+    out.println(line);
+    out.println("  Fixe-le avec 'debit', puis relance les chasses : jusqu'ici");
+    out.println("  elles ecoutaient peut-etre au mauvais debit.");
+  } else {
+    out.println("  Aucun debit ne fait sortir de transitions. Si le signal fort");
+    out.println("  etait bien present, alors la puce ne reconnait le preambule de");
+    out.println("  cette source a aucun des trois debits -- ce qui pointerait vers");
+    out.println("  un format de trame different, pas vers un reglage a corriger.");
+  }
+  out.println();
+}
+
+// ---------------------------------------------------------------------------
+//  Trouver le canal sans connaitre l'adresse
+// ---------------------------------------------------------------------------
+
+void BenqHalo::probeChannelByGio3(Print &out, uint8_t from, uint8_t to, uint32_t dwellMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+
+  char line[176];
+  if (to > 83) to = 83;
+  if (from > to) from = 0;
+
+  out.println();
+  out.println("=== Sur quel canal la source est-elle DEMODULABLE ? ===");
+  out.println("  Le RSSI mesure une bande large : il entend un emetteur voisin.");
+  out.println("  Le demodulateur, lui, est etroit. Un signal audible peut donc");
+  out.println("  n'etre demodulable que sur un autre canal -- et GIO3 ne s'anime");
+  out.println("  que si un preambule a ete reconnu, donc que si le canal est le");
+  out.println("  bon. Cette mesure ne demande toujours aucune adresse.");
+  snprintf(line, sizeof(line), "  Canaux %u a %u, debit %s, %lu ms chacun.", (unsigned)from,
+           (unsigned)to, dataRateName(dataRate_), (unsigned long)dwellMs);
+  out.println(line);
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  out.println();
+  Serial.flush();
+
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  const uint8_t savedChannel = channel_;
+  const uint32_t mask = 1UL << PIN_GIO3_TAP;
+
+  uint32_t best = 0, bestStrong = 0, bestStrongChecks = 1, totalStrong = 0, totalChecks = 1;
+  uint8_t bestChannel = 0, bestStrongChannel = 0;
+  uint8_t hits = 0;
+
+  for (uint16_t ch = from; ch <= to; ch++) {
+    channel_ = (uint8_t)ch;
+    configForLoopback(radio, channel_, kCalRegAddr, true, dataRate_);
+    radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | 14));
+    radio.enterRxMode();
+    pinMode(PIN_GIO3_TAP, INPUT);
+
+    uint32_t edges = 0, strong = 0, checks = 0;
+    uint32_t last = REG_READ(GPIO_IN_REG) & mask;
+    const uint32_t until = millis() + dwellMs;
+
+    while ((int32_t)(millis() - until) < 0) {
+      for (uint16_t burst = 0; burst < 512; burst++) {
+        const uint32_t now = REG_READ(GPIO_IN_REG) & mask;
+        if (now != last) {
+          edges++;
+          last = now;
+        }
+      }
+      if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
+      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+      checks++;
+    }
+
+    if (edges > 50) {
+      hits++;
+      snprintf(line, sizeof(line),
+               "  canal %-2u = %u MHz : %lu transitions, signal fort %lu/%lu   <<<",
+               (unsigned)ch, (unsigned)(2400 + ch), (unsigned long)edges, (unsigned long)strong,
+               (unsigned long)checks);
+      out.println(line);
+      Serial.flush();
+    }
+    if (edges > best) {
+      best = edges;
+      bestChannel = (uint8_t)ch;
+    }
+    // Le temoin doit etre rapporte SURTOUT quand le resultat principal est nul :
+    // sans lui, "aucun canal" ne distingue pas une source muette d'une source
+    // que la puce ne sait pas demoduler.
+    if (strong > bestStrong) {
+      bestStrong = strong;
+      bestStrongChannel = (uint8_t)ch;
+      bestStrongChecks = checks;
+    }
+    totalStrong += strong;
+    totalChecks += checks;
+    delay(1);
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+  channel_ = savedChannel;
+
+  out.println();
+  snprintf(line, sizeof(line),
+           "  Canal le plus bruyant : %u (%u MHz), signal fort %lu/%lu.",
+           (unsigned)bestStrongChannel, (unsigned)(2400 + bestStrongChannel),
+           (unsigned long)bestStrong, (unsigned long)bestStrongChecks);
+  out.println(line);
+  snprintf(line, sizeof(line), "  Moyenne sur la bande : %lu pour mille.",
+           (unsigned long)(totalStrong * 1000UL / totalChecks));
+  out.println(line);
+  out.println();
+  if (best > 50) {
+    snprintf(line, sizeof(line), "  Meilleur canal : %u (%u MHz), %lu transitions.",
+             (unsigned)bestChannel, (unsigned)(2400 + bestChannel), (unsigned long)best);
+    out.println(line);
+    snprintf(line, sizeof(line), "  %u canal/canaux au-dessus du seuil. Fixe-le avec 'chan %u'.",
+             (unsigned)hits, (unsigned)bestChannel);
+    out.println(line);
+  } else {
+    out.println("  Aucun canal ne fait sortir de transitions. Si le signal fort");
+    out.println("  etait present, la puce ne reconnait le preambule de cette");
+    out.println("  source nulle part sur la bande, a ce debit. Essaie les deux");
+    out.println("  autres debits avant de conclure.");
+  }
   out.println();
 }
