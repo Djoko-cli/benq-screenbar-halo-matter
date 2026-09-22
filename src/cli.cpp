@@ -91,6 +91,9 @@ static void cmdHelp() {
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
   Serial.println("  swd                   cherche SWDIO et interroge le microcontroleur");
   Serial.println("  syncpayload [ms]      le correlateur sait-il se caler au milieu d'une trame ?");
+  Serial.println("  gio3 [ms]             balaie les 16 valeurs du selecteur GIO3 en reception");
+  Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
+  Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
   Serial.println("  debit [125|250|500]   debit radio, persiste ; sans argument, affiche");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
@@ -315,6 +318,23 @@ static void handleLine(char *line) {
     if (v >= 3 && v <= 120) secs = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.tapTest(Serial, secs);
+  } else if (!strcmp(line, "gio3bits")) {
+    long sel = strtol(arg, nullptr, 10);
+    if (sel < 0 || sel > 15) sel = 14;
+    halo.setMode(HaloMode::Normal);
+    halo.captureGio3Bits(Serial, (uint8_t)sel);
+  } else if (!strcmp(line, "gio3check")) {
+    uint32_t dwell = 2000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 500 && v <= 10000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.checkGio3Correlator(Serial, dwell);
+  } else if (!strcmp(line, "gio3")) {
+    uint32_t dwell = 1500;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 300 && v <= 10000) dwell = (uint32_t)v;
+    halo.setMode(HaloMode::Normal);
+    halo.sweepGio3(Serial, dwell);
   } else if (!strcmp(line, "syncpayload")) {
     uint32_t dwell = 3000;
     const long v = strtol(arg, nullptr, 10);
