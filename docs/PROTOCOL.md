@@ -498,3 +498,35 @@ d'au moins quatre octets non tous nuls.
 
 Il faut des **pointes de test à ressort** pour maintenir les quatre contacts
 pendant qu'on retire et remet la pile.
+
+### Outillage de capture — cinq défauts corrigés
+
+La première version de `sniffspi` ne pouvait pas fonctionner. Cinq défauts, tous
+côté logiciel, trouvés grâce aux observations de terrain :
+
+1. **Sourd entre deux transactions.** Une seule transaction armée, et un
+   `Serial.flush()` de plusieurs millisecondes entre chacune. On attrapait la
+   première d'une rafale et on dormait pendant tout le reste. Symptôme qui a mis
+   sur la piste : « à l'insertion de la pile, le compteur monte de 1 » — alors
+   qu'une initialisation compte des dizaines d'échanges.
+2. **Bruit stocké au lieu d'être jeté.** Le tri ne se faisait qu'à l'affichage :
+   le tampon se remplissait de parasites dans les premières secondes, et la
+   rafale utile était perdue faute de place.
+3. **Libération du périphérique avec des transactions encore armées**, d'où un
+   `Load access fault` qui emportait la capture. Il faut vider la file d'abord —
+   et afficher **avant** de démonter.
+4. **Affichage tronqué à 20 octets** alors que les transactions vont jusqu'à 32 :
+   le contenu discriminant était invisible.
+5. **Test de contact trompeur.** Sans pile, toutes les lignes sont tirées vers la
+   masse et ne suivent plus les résistances internes : elles passaient pour
+   « pilotées ». Le discriminant est `CSN`, que le microcontrôleur maintient
+   **haute** au repos.
+
+À noter pour la suite : le pilote SPI esclave active des résistances de tirage
+internes, donc **une broche débranchée se lit à 100 % haut**. Trois lignes à
+100 % haut ne veulent pas dire « tout va bien » mais « rien ne touche ».
+
+État final de l'outillage : capture à six transactions pré-armées, tri du bruit à
+la volée, état des trois lignes et compteurs affichés une fois par seconde,
+restitution complète sur 32 octets. **Il ne manque qu'un contact mécanique
+fiable** — trois pastilles d'un millimètre ne se tiennent pas à la main.

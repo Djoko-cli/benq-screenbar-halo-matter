@@ -203,7 +203,7 @@ class BenqHalo {
   // par l'appareil observe ignore les resistances internes de l'ESP32 ; une
   // ligne qui flotte les suit docilement. Sans ce controle, une capture de
   // bruit ressemble a une capture ratee pour une toute autre raison.
-  void tapTest(Print &out);
+  void tapTest(Print &out, uint32_t seconds = 20);
   // Trace la machine d'etats de la puce pendant une tentative d'entree en RX,
   // puis en TX pour comparaison. Dit ou exactement la transition echoue.
   void diagnoseRx(Print &out);
