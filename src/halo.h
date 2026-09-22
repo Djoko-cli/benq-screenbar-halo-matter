@@ -199,6 +199,11 @@ class BenqHalo {
   // raterait des bits. MISO reste non assigne : on n'emet rien sur le bus.
   void sniffSpiBus(Print &out, uint32_t seconds = 60);
 
+  // Rend les broches SPI a un autre usage -- le C6 n'a qu'un peripherique
+  // utilisable, et le bit-banging SWD reclame les memes broches.
+  void releaseSpiBus() { radio.suspendBus(); }
+  void restoreSpiBus() { radio.resumeBus(); }
+
   // Dit, ligne par ligne, si le contact tient. Une ligne reellement pilotee
   // par l'appareil observe ignore les resistances internes de l'ESP32 ; une
   // ligne qui flotte les suit docilement. Sans ce controle, une capture de

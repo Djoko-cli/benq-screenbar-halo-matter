@@ -20,6 +20,13 @@
 // Broches d'ecoute du bus SPI d'un appareil tiers (commande 'sniffspi').
 // MISO n'existe pas ici : on n'ecoute que le sens microcontroleur -> puce,
 // et surtout on ne pilote JAMAIS une ligne du bus observe.
+// Dialogue SWD avec un microcontroleur tiers. SWCLK est connu (trou 3 de J5,
+// seul a se tenir pres de 0 V par son tirage interne) ; SWDIO est cherche
+// parmi plusieurs broches, pour ne pas avoir a recabler entre chaque essai.
+#ifndef PIN_SWD_CLK
+#define PIN_SWD_CLK 18
+#endif
+
 #ifndef PIN_TAP_SCK
 #define PIN_TAP_SCK 6
 #endif
