@@ -377,3 +377,28 @@ C'est ce défaut qui expliquait 2553 trames « émises » sans une seule transmi
 réelle. La séquence d'émission correcte est donc : `DPL2` bit 0 à `1`, écriture de
 la FIFO, `CE` à `1` — après quoi la puce part en TX **d'elle-même**, sans commande
 strobe.
+
+## L'accrochage sur le préambule est impossible — démontré
+
+L'idée : puisque le préambule est connu (`AA` répété), donner au corrélateur une
+adresse de 3 octets valant `AA AA X` pour qu'il se cale sur le préambule plus le
+premier octet d'adresse, et livre les trois octets suivants — c'est-à-dire le
+reste de l'adresse.
+
+**Testée sur un émetteur dont l'adresse était connue d'avance**, le 2026-09-22 :
+
+| | |
+|---|---|
+| balise | 4474 trames, **100 % confirmées par `TX_DS`** |
+| préambule émis | 2 octets, vérifié effectif (`CFO1 = 0x4F`) |
+| adresse | `E1 22 33 44` sur l'air, canal 5, 125 kbps |
+| récepteur | validé la même heure : 421 trames reçues sur 421 |
+| **résultat** | **0 accroche sur 512 configurations** |
+
+Le corrélateur **ne peut pas se caler sur un motif contenant le préambule**,
+vraisemblablement parce qu'il ne s'arme qu'après avoir détecté un préambule
+valide. La méthode est close : ne pas la réessayer.
+
+Corollaire méthodologique : ce banc à deux cartes permet de **valider une
+technique de découverte sur une adresse connue** avant de la lancer contre la
+lampe. Toute méthode future doit passer par là d'abord.
