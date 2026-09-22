@@ -864,3 +864,47 @@ registre, sont marques « reserved, must be kept unchanged ».
 Etat de la contradiction : canal confirme, debit confirme par deux voies
 independantes, excursion confirmee, preambule epuise, detecteur etalonne,
 reglages analogiques actifs -- et toujours aucun preambule reconnu.
+
+## La voie RF est close, et on sait pourquoi (2026-09-22, bilan)
+
+Balayage complet des **84 canaux**, 125 kbps, reglages analogiques actifs,
+detecteur etalonne, molette tournee sans arret : **zero transition**. Le canal le
+plus bruyant est le 59 (2459 MHz), en plein Wi-Fi 11 -- pas la telecommande.
+
+**Le mode direct en reception est mort, confirme avec une source forte.** Rejoue
+avec la balise et les reglages actifs :
+
+| configuration | OMST | RSSI |
+|---|---|---|
+| DIR_EN=0, entree par registre CE | 5 (RX) | 123 -> **31 dB** |
+| DIR_EN=0, entree par strobe 0x8E | 5 (RX) | 118 -> **31 dB** |
+| DIR_EN=1, entree par registre CE | 2 (Light Sleep) | 127 -> 120 dB |
+| DIR_EN=1, OM 0x03 puis 0x07 | 4 (TX) | 127 -> 118 dB |
+
+Le recepteur est parfaitement vivant en mode normal ; `DIR_EN=1` le rend sourd
+par toutes les methodes d'entree. Le datasheet annonce pourtant « TX/RX data
+from/to external MCU directly » (ligne 377) : l'implantation ne suit pas.
+
+**Cette puce ne sait pas livrer de bits non decodes.** Les huit selecteurs GIO2
+ne sortent rien, et le rendement de GIO3 le disait deja : **3 fronts par trame**
+(624 fronts pour 210 trames), la ou un flux de bits a 125 kbps en donnerait un
+demi-million. GIO3 est une impulsion d'evenement, pas un train de donnees.
+
+**Consequence.** Il n'existe aucun moyen d'ecouter l'air sans connaitre
+l'adresse a l'avance : le moteur de paquets est le seul chemin vers les donnees,
+et il refuse d'ouvrir. La methode 1 (verrouillage en milieu de trame sur une
+pseudo-adresse tiree du payload) ne peut pas davantage fonctionner, puisque le
+detecteur de preambule ne s'arme jamais sur ce signal, meme en debut de trame.
+
+Ce qui reste etabli et n'est plus a refaire :
+
+- la telecommande emet une source **etroite sur 2405 MHz** (controle Wi-Fi) ;
+- a **125 kbps, fDEV 160 kHz** (Carson vs dossier FCC, au kilohertz pres) ;
+- notre recepteur **fonctionne** (31 dB sur la balise, 210 trames decodees) ;
+- le detecteur est **en amont du correlateur** (624 fronts avec adresse fausse) ;
+- canal, debit, excursion, polarite et longueur de preambule sont **epuises**.
+
+**Suite : la lecture du firmware AT32F421 par SWD.** Elle donne l'adresse ET la
+structure reelle des trames, c'est-a-dire tout ce qui manque. Brochage J5 : trou
+1 = masse, trou 3 = 0,001 V (candidat SWCLK), les autres a 2,49 V. Resistances
+serie de 220 a 470 ohms sur SWDIO/SWCLK, la cible tournant a 2,5 V.

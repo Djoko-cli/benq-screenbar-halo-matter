@@ -1668,7 +1668,7 @@ void BenqHalo::probeDirectRx(Print &out, uint32_t windowMs) {
   }
   if (!found) {
     out.println("  aucun selecteur ne fait sortir de donnees sur GIO2.");
-    out.println("  Il reste GIO3, broche 8 du module, non cablee ici : c'est la");
+    out.println("  Il reste GIO3, broche 8 du module, desormais cablee sur IO3 : c'est la");
     out.println("  que le driver tiers recupere TBCLK, l'horloge bit du mode");
     out.println("  direct. Un fil de plus permettrait de la tester.");
   }
