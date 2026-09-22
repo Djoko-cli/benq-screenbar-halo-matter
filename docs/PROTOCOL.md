@@ -1,5 +1,62 @@
 # Protocole radio BenQ ScreenBar Halo
 
+## ETAT AU 23/09/2026 -- A LIRE AVANT TOUT LE RESTE
+
+Le reste de ce document est un journal chronologique : il contient des
+conclusions depuis REFUTEES. En cas de desaccord, ce bloc fait foi. Detail et
+preuves : [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md), scripts dans
+`tools/audit/` (modele unifie : `indep_pll/t3.py`, trames attendues :
+`synthese/chk.py`).
+
+**Format de trame Halo 1 -- format BC5602 standard (type ShockBurst).**
+Valide sur environ 66 trames sur 68, par trois decodeurs independants et deux
+chaines de reception (CC2500 asynchrone, FIFO du BM5602) :
+
+```
+preambule 01010101 | adresse 63 FD F0 4F | PCF 9 bits | charge | CRC-16
+```
+
+- **Adresse sur l'air : `63 FD F0 4F`**, a ecrire **`4F F0 FD 63`** dans le
+  BM5602. Le motif `8F F7 C1 3C` utilise jusqu'au 22/09 n'est que cette
+  adresse vue avec deux bits de decalage : bon pour CORRELER en reception, faux
+  pour emettre. La regle du preambule le confirme sans passer par le CRC : une
+  adresse qui commence par 0 appelle le preambule 01010101, celui qu'emet la
+  telecommande.
+- **PCF de 9 bits** : longueur de charge (6 bits), PID (2 bits), NO_ACK (1 bit).
+- **CRC-16/CCITT 0x1021, etat initial 0xFFFF**, sur adresse + PCF + charge --
+  exactement le CRC materiel du BC5602. Les etats initiaux 0xDFBE et 0xF55A
+  trouves dans la nuit ne sont que 0xFFFF avance de un ou deux bits : des
+  artefacts du decalage. Le 0xEFDF du projet Halo 2 est le meme artefact, avec
+  un bit de decalage.
+- **Commande (telecommande -> lampe)** : longueur 2, NO_ACK=0, charge de deux
+  octets, le plus souvent `C4 xx` (vus aussi : C5, 44, 85, C3 en tete). Sens des
+  octets : INCONNU.
+- **Accuse (lampe -> telecommande)** : longueur 0, meme PID que la commande
+  (9 paires sur 9), NO_ACK=1. **L'accuse du Halo 1 est vide** : contrairement au
+  Halo 2, on ne peut pas lire l'etat de la lampe en l'interrogeant.
+- Canal 5 (2405 MHz), 125 kbps.
+
+**Emission : rien n'a encore fonctionne, et on comprend pourquoi.** Les essais
+`tx6` (un accuse mal forme) puis `txraw` (bonne trame bit pour bit, mais avec
+l'adresse decalee, donc le mauvais preambule, et 1800 copies de meme PID que
+la lampe ecarte comme doublons) ne pouvaient pas marcher. Prochain essai :
+emission en mode materiel standard, charge dynamique et accuse automatique,
+adresse `4F F0 FD 63` ; la puce indique alors d'elle-meme si la lampe a accuse
+reception (TX_DS) ou non (MAX_RT). Plan detaille : section 4 de l'audit.
+
+**Passages de ce document INFIRMES par l'audit** (a ne plus citer) :
+
+| Passage | Ce qui est faux |
+|---|---|
+| « Structure de trame Halo 1, confirmee sans le CRC » (6 octets, 72 = 48+16+8) | La commande porte 2 octets, l'accuse aucun ; la deuxieme adresse est l'accuse de la lampe, pas une retransmission ; `7A FF` etait un faux positif. |
+| « Deux familles de trames : commandes et accuses » (en-tete [longueur 4][compteur 2][type 2], etats 0xDFBE / 0xF55A, « 19 commandes exactes ») | En-tete a cheval sur le PCF et la charge ; un seul etat initial 0xFFFF ; environ 31 commandes sur 32 sont exactes avec le bon modele. |
+| « Le verrou : obtenir une trame B exacte » | Faux : les trames etaient exactes, c'est notre decoupage qui etait decale. Le verrou est l'emission. |
+| « Biais d'erreur : 100 % des 1 lus comme 0 » | Observe sur 7 cas, contre une reference elle-meme decalee. Non etabli. |
+| Trim du quartz, valeurs analogiques, distance « elimines » | Chaque condition ne comptait que 7 a 9 trames, jugees avec un modele de CRC faux, et le bras « holtek 0 » tournait sans AGC (bogue B5). Seul un effet d'un facteur 3 ou plus est exclu. |
+| Tout passage sur le PCF « d'un octet plein » | Le PCF fait 9 bits ; l'« octet plein » venait de l'adresse decalee. |
+| GIO3 « en amont du correlateur », « voie RF close », « contradiction etablie » | Deja infirme plus bas dans ce document ; explique par l'adresse. |
+
+
 ## Statut des informations
 
 Tout ce document vient de la rétro-ingénierie du **ScreenBar Halo 2** par
