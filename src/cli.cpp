@@ -414,8 +414,13 @@ static void handleLine(char *line) {
         a[i] = (uint8_t)strtol(pair, nullptr, 16);
       }
     }
+    uint8_t plen = 13;
+    if (end && strlen(end) > 8) {
+      const long pl = strtol(end + 8, nullptr, 10);
+      if (pl >= 1 && pl <= 32) plen = (uint8_t)pl;
+    }
     halo.setMode(HaloMode::Normal);
-    halo.listenLikeUpstream(Serial, dwell, a);
+    halo.listenLikeUpstream(Serial, dwell, a, plen);
   } else if (!strcmp(line, "forme")) {
     uint32_t dwell = 20000;
     const long v = strtol(arg, nullptr, 10);

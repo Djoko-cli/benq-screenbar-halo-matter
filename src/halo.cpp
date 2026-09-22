@@ -3421,7 +3421,8 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 //
 //  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
 // ---------------------------------------------------------------------------
-void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4]) {
+void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
+                                  uint8_t payloadLen) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
     return;
@@ -3434,8 +3435,9 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
   out.println("  logiciel, CRC et auto-ACK desactives, payload statique de");
   out.println("  13 octets. Les valeurs Holtek ecrites au demarrage survivent,");
   out.println("  puisque rien ne les efface.");
-  snprintf(line, sizeof(line), "  Canal %u, 125 kbps, adresse %02X %02X %02X %02X.",
-           (unsigned)channel_, addr[0], addr[1], addr[2], addr[3]);
+  snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X, %u octets.",
+           (unsigned)channel_, dataRateName(dataRate_), addr[0], addr[1], addr[2], addr[3],
+           (unsigned)payloadLen);
   out.println(line);
   out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
   out.println();
@@ -3446,7 +3448,10 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
   radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);  // 0x06 <- 0x48
   radio.setBank(0);
   radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);      // 0x10
-  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, 0x82);           // 125 kbps, adresse 4 octets
+  // Debit pilotable : a 500 kbps on sur-echantillonne x4 un signal a 125
+  // kbps, ce qui permet de viser le PREAMBULE sur-echantillonne au lieu de
+  // l'adresse. C'est la ruse du nRF52840, tentee ici a x4 faute de 1 Mbps.
+  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | dataRate_));
   radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr, 4);
 
   uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
@@ -3454,7 +3459,7 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
 
   radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 13);
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, payloadLen);
   radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);   // CRC desactive
   radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);    // auto-ACK desactive
   radio.command(CMD_FLUSH_RX_FIFO);                           // 0x89
@@ -3497,14 +3502,14 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
     // Reception reelle : une trame qui arrive est lue, CRC ou pas.
     const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     if (irq & IRQ_RX_DR) {
-      uint8_t buf[13];
-      radio.readFifo(buf, 13, false);
+      uint8_t buf[32];
+      const uint8_t n = payloadLen > 32 ? 32 : payloadLen;
+      radio.readFifo(buf, n, false);
       frames++;
       if (dumped < 12) {
-        snprintf(line, sizeof(line),
-                 "    trame %2u : %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-                 (unsigned)frames, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-                 buf[8], buf[9], buf[10], buf[11], buf[12]);
+        size_t w = (size_t)snprintf(line, sizeof(line), "    trame %2u :", (unsigned)frames);
+        for (uint8_t i = 0; i < n && w + 4 < sizeof(line); i++)
+          w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", buf[i]);
         out.println(line);
         Serial.flush();
         dumped++;
