@@ -3404,6 +3404,136 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 //  L'adresse elle-meme n'importe pas ici : GIO3S=14 s'anime des la detection du
 //  preambule, avant toute comparaison d'adresse.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  La sequence de reception du projet amont, reproduite a l'identique.
+//  Termina1/benq-screenbar-halo2-esphome, fonction prepare_halo_receive().
+//  Deux differences de fond avec tout ce qu'on a essaye jusqu'ici :
+//
+//   1. AUCUN RESET LOGICIEL. Son commentaire est explicite : "Literal Pico
+//      lifecycle: no software reset during normal initialization. Hidden
+//      packet/PID/RF state is allowed to continue from hardware POR." Nos deux
+//      chemins de configuration commencent au contraire par un reset -- et on a
+//      mesure ce matin (commande 'survie') qu'il efface 15 des 19 valeurs
+//      recommandees Holtek. Sans reset, celles ecrites par begin() survivent.
+//   2. Reception PASSIVE : CRC desactive, auto-ACK desactive, payload
+//      dynamique desactive, longueur statique de 13 octets. Une trame entre
+//      dans la FIFO meme si son CRC est faux.
+//
+//  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
+// ---------------------------------------------------------------------------
+void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4]) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+
+  out.println();
+  out.println("=== Ecoute a la maniere du projet amont (sans reset) ===");
+  out.println("  Reproduction de prepare_halo_receive() : pas de reset");
+  out.println("  logiciel, CRC et auto-ACK desactives, payload statique de");
+  out.println("  13 octets. Les valeurs Holtek ecrites au demarrage survivent,");
+  out.println("  puisque rien ne les efface.");
+  snprintf(line, sizeof(line), "  Canal %u, 125 kbps, adresse %02X %02X %02X %02X.",
+           (unsigned)channel_, addr[0], addr[1], addr[2], addr[3]);
+  out.println(line);
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  out.println();
+  Serial.flush();
+
+  // --- prepare_halo_receive(), pas a pas, sans reset ---
+  radio.command(CMD_LIGHT_SLEEP);
+  radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);  // 0x06 <- 0x48
+  radio.setBank(0);
+  radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);      // 0x10
+  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, 0x82);           // 125 kbps, adresse 4 octets
+  radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr, 4);
+
+  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
+  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));  // PRX
+
+  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 13);
+  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);   // CRC desactive
+  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);    // auto-ACK desactive
+  radio.command(CMD_FLUSH_RX_FIFO);                           // 0x89
+  radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);   // acquitter RX_DR
+  radio.command(CMD_RX_MODE);                                 // 0x8E
+
+  // Temoin de reglage : sans reset, les valeurs de begin() doivent etre la.
+  uint8_t total = 0;
+  const uint8_t ok = radio.registerVerify(&total);
+  snprintf(line, sizeof(line), "  Reglages analogiques en place : %u sur %u.", (unsigned)ok,
+           (unsigned)total);
+  out.println(line);
+  radio.setBank(0);
+
+  const uint8_t omst = radio.operationMode();
+  snprintf(line, sizeof(line), "  Mode apres armement : OMST %u (%s).", (unsigned)omst,
+           omst == OMST_RX ? "EN RECEPTION" : "PAS en reception");
+  out.println(line);
+  Serial.flush();
+
+  // GIO3S=14 : temoin de detection de preambule, en amont du correlateur.
+  const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | 14));
+  pinMode(PIN_GIO3_TAP, INPUT);
+
+  const uint32_t mask3 = 1UL << PIN_GIO3_TAP;
+  uint32_t edges = 0, strong = 0, checks = 0, frames = 0;
+  uint32_t last = REG_READ(GPIO_IN_REG) & mask3;
+  const uint32_t until = millis() + dwellMs;
+  uint8_t dumped = 0;
+
+  while ((int32_t)(millis() - until) < 0) {
+    for (uint16_t burst = 0; burst < 512; burst++) {
+      const uint32_t now = REG_READ(GPIO_IN_REG) & mask3;
+      if (now != last) {
+        edges++;
+        last = now;
+      }
+    }
+    // Reception reelle : une trame qui arrive est lue, CRC ou pas.
+    const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
+    if (irq & IRQ_RX_DR) {
+      uint8_t buf[13];
+      radio.readFifo(buf, 13, false);
+      frames++;
+      if (dumped < 12) {
+        snprintf(line, sizeof(line),
+                 "    trame %2u : %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                 (unsigned)frames, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+                 buf[8], buf[9], buf[10], buf[11], buf[12]);
+        out.println(line);
+        Serial.flush();
+        dumped++;
+      }
+      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
+      radio.command(CMD_FLUSH_RX_FIFO);
+    }
+    // Rearmement, sans reset : c'est tout l'interet de cette voie.
+    if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
+    if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
+    checks++;
+    delay(1);
+  }
+
+  radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, io2Base);
+
+  out.println();
+  snprintf(line, sizeof(line), "  %lu transitions GIO3, %lu trame(s), signal fort %lu/%lu.",
+           (unsigned long)edges, (unsigned long)frames, (unsigned long)strong,
+           (unsigned long)checks);
+  out.println(line);
+  if (edges > 50)
+    out.println("  DES PREAMBULES SONT RECONNUS. La voie sans reset change tout.");
+  else if (strong * 200 > checks)
+    out.println("  Toujours aucun preambule, alors que la source est bien la.");
+  else out.println("  Aucun preambule, mais le temoin de trafic est faible : refaire.");
+}
+
+
 void BenqHalo::probePreambleShape(Print &out, uint32_t dwellMs) {
   if (!radio.present()) {
     out.println("BM5602 absent.");

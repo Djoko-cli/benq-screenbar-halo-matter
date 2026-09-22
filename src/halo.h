@@ -216,6 +216,9 @@ class BenqHalo {
   // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
   // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
   // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
+  // La sequence de reception du projet amont, sans reset logiciel.
+  void listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4]);
+
   // Polarite et longueur du preambule : douze formes.
   void probePreambleShape(Print &out, uint32_t dwellMs);
 
