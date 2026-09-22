@@ -17,6 +17,19 @@
 #ifndef PIN_RF_CSN
 #define PIN_RF_CSN 5
 #endif
+// Broches d'ecoute du bus SPI d'un appareil tiers (commande 'sniffspi').
+// MISO n'existe pas ici : on n'ecoute que le sens microcontroleur -> puce,
+// et surtout on ne pilote JAMAIS une ligne du bus observe.
+#ifndef PIN_TAP_SCK
+#define PIN_TAP_SCK 6
+#endif
+#ifndef PIN_TAP_MOSI
+#define PIN_TAP_MOSI 7
+#endif
+#ifndef PIN_TAP_CS
+#define PIN_TAP_CS 11
+#endif
+
 #ifndef PIN_STATUS_LED
 #define PIN_STATUS_LED 2
 #endif

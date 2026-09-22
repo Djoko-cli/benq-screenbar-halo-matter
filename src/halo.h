@@ -192,6 +192,12 @@ class BenqHalo {
   // verifie par une RELECTURE, du bus SPI jusqu'au remplissage de la FIFO
   // d'emission. Repond a la question 'est-ce mon cablage ou mon code ?'.
   void selfTest(Print &out);
+
+  // Ecoute passive du bus SPI d'un appareil tiers. Le peripherique SPI de
+  // l'ESP32 est mis en ESCLAVE : il est cadence par l'horloge observee et
+  // reconstitue les octets exactement, la ou un echantillonnage par boucle
+  // raterait des bits. MISO reste non assigne : on n'emet rien sur le bus.
+  void sniffSpiBus(Print &out, uint32_t seconds = 60);
   // Trace la machine d'etats de la puce pendant une tentative d'entree en RX,
   // puis en TX pour comparaison. Dit ou exactement la transition echoue.
   void diagnoseRx(Print &out);
