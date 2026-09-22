@@ -960,3 +960,51 @@ adresse `9C EA BB 86` (4 octets, **codee en dur**, c'est une Halo 2), canal 5,
 Il ecrit aussi `XO1` (banque 0, registre `0x38`) a `0x15` avant la calibration du
 VCO, dans son chemin d'emission en mode direct -- le **trim du quartz**, que nous
 n'avons jamais touche. Valeur par defaut apres reset : `0x10`.
+
+## Pourquoi il faut un nRF52840, et pas seulement un ESP32 (2026-09-22)
+
+**La methode qui a reellement trouve l'adresse du Halo 2**, c'est un **HackRF
+One + Universal Radio Hacker**, le 2026-04-14, par kuzmin-no (SK2024 sur le
+forum HA). Son README initial le dit, et deux captures d'ecran du depot montrent
+la session : 2,405 GHz, 2 MSps, FSK, 16 echantillons par symbole. Le script
+`find_halo2_address.py` n'arrive que 2,5 mois plus tard, presente comme un moyen
+de se passer du SDR, et **aucun log n'a jamais ete publie prouvant qu'il marche**.
+
+Le projet `Termina1/benq-screenbar-halo2-esphome` ne resout pas la decouverte
+d'adresse : `RADIO_ADDRESS{0x9C,0xEA,0xBB,0x86}` est codee en dur et le README
+renvoie l'utilisateur a « capturer son propre trafic ». **L'adresse est propre a
+chaque paire lampe/telecommande** ; seule celle d'appairage (`E2 08 00 B0`) est
+universelle. Verifie : les trois adresses connues donnent 0 trame sur notre
+Halo 1, sur un chemin qui en decode pourtant 789 de la balise.
+
+**La voie nRF52840** (`xf_bc5602.py`) : ecouter a **1 Mbps** un signal emis a
+125 kbps sur-echantillonne chaque bit par **8**. On pointe alors le mot de
+synchro sur le **preambule sur-echantillonne** -- `0xAA` a 125 kbps devient
+`FF 00 FF 00` a 1 Mbps, motif universel, identique sur tous les exemplaires --
+au lieu de l'adresse qu'on ignore. Le decodeur decime par 8, cherche la position
+ou le CRC tombe juste, et lit l'adresse dans le flux :
+
+```
+Frame: address(32) + PCF(9) + payload(80) + CRC-16(16)
+CRC-16/CCITT (poly 0x1021, init 0xFFFF) over address + PCF + payload
+"address": bytes(_byte(bits, o - 41 + 8 * i) for i in range(4))
+```
+
+**Le BC5602 ne peut pas faire cela, c'est mesure.** Son detecteur de preambule
+doit s'armer sur une alternance AU DEBIT CONFIGURE, avant le correlateur
+d'adresse. Balise a 125 kbps, recepteur sur-echantillonnant, payload de 32
+octets, CRC coupe :
+
+| debit RX | facteur | mot de synchro | trames | temoin |
+|---|---|---|---|---|
+| 500 kbps | x4 | `F0 F0 F0 F0` | **0** | 1293/11999 |
+| 500 kbps | x4 | `0F 0F 0F 0F` | **0** | 1186/12000 |
+| 250 kbps | x2 | `CC CC CC CC` | **0** | 695/12000 |
+| 250 kbps | x2 | `33 33 33 33` | **0** | 692/12000 |
+
+Et le BC5602 plafonne a 500 kbps, soit x4 au mieux. L'ESP32-C6, lui, n'expose
+aucune interface de PHY brute : sa radio ne fait que Wi-Fi, BLE et 802.15.4.
+
+**Conclusion : une carte nRF52840 (Seeed XIAO, ~13 $) est le chemin le moins
+cher vers l'adresse.** Verifier qu'elle porte une antenne ceramique et pas un
+simple connecteur u.FL nu.
