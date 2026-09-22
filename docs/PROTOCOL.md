@@ -1059,9 +1059,21 @@ FC 00 55 | 8F F7 C1 3C | 25 89 67 E2 20 BE 7F ...
 
 Le preambule fait **un octet** (`55`), la ou notre balise en emet deux.
 
-**Verification par le correlateur materiel du BM5602** : avec `3C C1 F7 8F`, une
-trame acceptee et 36 transitions GIO3 ; avec l'ordre d'octets inverse, zero et
-zero. C'est le juge le plus dur dont on dispose -- il decode 789 trames de la
+**ADRESSE CONFIRMEE** par le correlateur materiel du BM5602, avec son controle :
+
+| adresse ecrite | duree | transitions GIO3 | trames |
+|---|---|---|---|
+| `3C C1 F7 8F` | 90 s | 200 | **7** |
+| `3C C1 F7 8E` (un bit d'ecart) | 40 s | 0 | **0** |
+| `8F F7 C1 3C` (ordre inverse) | 30 s | 0 | **0** |
+
+Et corroboration croisee entre deux radios et deux chaines d'analyse
+independantes : le prefixe de charge utile `06 B9 21 B*` apparait a la fois dans
+le flux brut du CC2500 (passes 21 et 25 : `06 B9 21 BD`, `06 B9 21 BF`) et dans
+une trame decodee par le moteur de paquets du BM5602 (`06 B9 21 BB`).
+
+Sept trames en 90 s reste peu : les erreurs binaires en rejettent la plupart.
+C'est desormais une question de rapport signal sur bruit, plus de protocole. C'est le juge le plus dur dont on dispose -- il decode 789 trames de la
 balise et rigoureusement aucune avec une adresse fausse.
 
 **Aucun modele de CRC ne valide ces trames** : 84 combinaisons de polynome,
