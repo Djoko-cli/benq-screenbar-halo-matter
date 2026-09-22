@@ -28,6 +28,35 @@
 // la liaison avec la puce, et compter les trames recues pendant la mesure.
 #ifndef PIN_GIO3_TAP
 #define PIN_GIO3_TAP 3
+
+#endif
+
+// --- Module CC2500 (24TRGC5-V4), sur sa propre carte -----------------------
+// Valeurs de depart seulement : la commande 'ccpins' les change a chaud, sans
+// reflasher, parce qu'on ne sait pas d'avance quelles broches la carte expose.
+#ifndef PIN_CC_SCK
+#define PIN_CC_SCK 18
+#endif
+#ifndef PIN_CC_MISO
+#define PIN_CC_MISO 19
+#endif
+#ifndef PIN_CC_MOSI
+#define PIN_CC_MOSI 20
+#endif
+#ifndef PIN_CC_CSN
+#define PIN_CC_CSN 14
+#endif
+#ifndef PIN_CC_GDO0
+#define PIN_CC_GDO0 3
+#endif
+#ifndef PIN_CC_GDO2
+#define PIN_CC_GDO2 15
+#endif
+#ifndef PIN_CC_PA_EN
+#define PIN_CC_PA_EN 2
+#endif
+#ifndef PIN_CC_RX_EN
+#define PIN_CC_RX_EN 1
 #endif
 
 #ifndef PIN_SWD_CLK

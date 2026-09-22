@@ -1,4 +1,5 @@
 #include "cli.h"
+#include "cc2500.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -104,6 +105,8 @@ static void cmdHelp() {
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
+  Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
+  Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -399,6 +402,28 @@ static void handleLine(char *line) {
     if (v >= 500 && v <= 120000) dwell = (uint32_t)v;
     halo.setMode(HaloMode::Normal);
     halo.probeRateByGio3(Serial, dwell);
+  } else if (!strcmp(line, "ccpins")) {
+    // ccpins sck miso mosi csn gdo0 gdo2 paen rxen
+    long v[8];
+    char *p = arg;
+    uint8_t n = 0;
+    while (n < 8 && *p) {
+      char *e = nullptr;
+      const long x = strtol(p, &e, 10);
+      if (e == p) break;
+      v[n++] = x;
+      p = e;
+      while (*p == ' ') p++;
+    }
+    if (n == 8) {
+      for (uint8_t i = 0; i < 8; i++) ccPins[i] = (uint8_t)v[i];
+      Serial.println("Broches CC2500 enregistrees. Lance 'cc' pour tester.");
+    }
+    Serial.printf("CC2500 : SCK=%u MISO=%u MOSI=%u CSN=%u GDO0=%u GDO2=%u PA_EN=%u RX_EN=%u\n",
+                  ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[4], ccPins[5], ccPins[6],
+                  ccPins[7]);
+  } else if (!strcmp(line, "cc")) {
+    ccIdentify(Serial);
   } else if (!strcmp(line, "amont")) {
     // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
     // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
@@ -659,6 +684,40 @@ static void handleLine(char *line) {
 
 static char buf[128];
 static uint8_t len = 0;
+
+// Broches du CC2500, modifiables a chaud : on ignore ce que la deuxieme carte
+// expose, et un reflash pour changer un numero de broche coute une manipulation
+// de plus a chaque essai.
+uint8_t ccPins[8] = {PIN_CC_SCK,  PIN_CC_MISO, PIN_CC_MOSI,  PIN_CC_CSN,
+                     PIN_CC_GDO0, PIN_CC_GDO2, PIN_CC_PA_EN, PIN_CC_RX_EN};
+
+// Premier jalon : la puce repond-elle ? PARTNUM vaut 0x80 sur un CC2500 et
+// 0x00 sur un CC1101 -- ce qui tranchera du meme coup ce que cache le blob
+// noir du module. Puis on balaye les quatre combinaisons de l'etage d'entree
+// en lisant le RSSI : la table de verite du RFX2402E se mesure au lieu de se
+// supposer, et une erreur de polarite rendrait le module sourd sans rien dire.
+void ccIdentify(Print &out) {
+  out.println();
+  out.println("=== Le CC2500 repond-il ? ===");
+  out.printf("  SCK=%u MISO=%u MOSI=%u CSN=%u GDO0=%u GDO2=%u PA_EN=%u RX_EN=%u\n", ccPins[0],
+             ccPins[1], ccPins[2], ccPins[3], ccPins[4], ccPins[5], ccPins[6], ccPins[7]);
+  Serial.flush();
+
+  const bool ok = radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7]);
+  const uint8_t part = radio2.partNumber();
+  const uint8_t ver = radio2.version();
+  out.printf("  PARTNUM 0x%02X, VERSION 0x%02X  -> %s\n", part, ver,
+             part == 0x80   ? "CC2500 confirme"
+             : part == 0x00 ? "CC1101 (sub-GHz !) ou bus muet"
+                            : "puce inconnue");
+  if (!ok) {
+    out.println("  La puce ne repond pas. Verifie l'alimentation et le cablage,");
+    out.println("  puis corrige les broches avec 'ccpins'.");
+    return;
+  }
+  out.printf("  MARCSTATE 0x%02X (%s)\n", radio2.marcState(),
+             cc2500::marcStateName(radio2.marcState()));
+}
 
 void cliBegin() {
   Serial.println("Tape 'help' pour la liste des commandes.");
