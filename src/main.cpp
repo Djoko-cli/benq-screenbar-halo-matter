@@ -151,8 +151,15 @@ void setup() {
   Serial.begin(115200);
   delay(400);
 
+#ifdef DIAG_ONLY
+  // IO15 porte aussi GDO2 du CC2500 sur la carte de capture : le piloter en
+  // sortie mettrait deux sorties en conflit sur le meme fil (audit, bogue B9).
+  // En diagnostic, la LED ne sert a rien : on laisse la broche en entree.
+  pinMode(PIN_STATUS_LED, INPUT);
+#else
   pinMode(PIN_STATUS_LED, OUTPUT);
   ledWrite(false);
+#endif
   pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
 
   // Tant que le noeud n'est pas mis en service, la pile Matter repete une

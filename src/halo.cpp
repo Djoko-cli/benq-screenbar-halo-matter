@@ -423,6 +423,14 @@ void BenqHalo::adoptReported() {
 // ---------------------------------------------------------------------------
 
 void BenqHalo::tick() {
+#ifdef DIAG_ONLY
+  // Build de diagnostic : AUCUNE activite radio de fond. Mesure a l'appui
+  // (audit du 23/09) : en mode normal, cette boucle appelait pollNow() toutes
+  // les 5 s, qui EMET une trame vers l'adresse enregistree -- elle a tourne
+  // toute la nuit en arriere-plan des mesures, et emettait vers la lampe sans
+  // qu'on l'ait demande. En diagnostic, la radio ne bouge que sur commande.
+  return;
+#endif
   if (!radio.present()) return;
   uint32_t now = millis();
   switch (mode_) {
@@ -3693,6 +3701,59 @@ void BenqHalo::txHalo1(Print &out, const uint8_t payload[6], uint16_t count, uin
   radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
   radio.command(CMD_LIGHT_SLEEP);
   snprintf(line, sizeof(line), "  %u emise(s), %u confirmee(s) par TX_DS.", sent, confirmed);
+  out.println(line);
+}
+
+
+// ---------------------------------------------------------------------------
+//  Emettre des octets BRUTS apres l'adresse, CRC materiel desactive.
+//
+//  Structure etablie le 2026-09-23 par la linearite du CRC, sur des captures
+//  asynchrones du CC2500 :
+//    commande (telecommande -> lampe) : adresse | en-tete | 2 octets | CRC
+//    accuse   (lampe -> telecommande) : adresse | en-tete | CRC
+//  en-tete = [longueur 4 bits][compteur 2 bits][type 2 bits].
+//  CRC-16/CCITT 0x1021 couvrant adresse + en-tete + charge, etat initial
+//  0xDFBE pour la telecommande et 0xF55A pour la lampe.
+//
+//  Le CRC materiel du BC5602 ne calcule pas avec ces etats initiaux : on le
+//  coupe et on fournit les deux octets de CRC nous-memes, en fin de charge.
+// ---------------------------------------------------------------------------
+void BenqHalo::txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t count,
+                     uint16_t gapMs) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  size_t w = (size_t)snprintf(line, sizeof(line), "  Sur l'air : %02X %02X %02X %02X |", addr_[3],
+                              addr_[2], addr_[1], addr_[0]);
+  for (uint8_t i = 0; i < len && w + 4 < sizeof(line); i++)
+    w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", bytes[i]);
+  out.println(line);
+  Serial.flush();
+
+  configForLoopback(radio, channel_, addr_, false, dataRate_);
+  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC materiel coupe
+
+  uint16_t confirmed = 0;
+  for (uint16_t i = 0; i < count; i++) {
+    radio.command(CMD_FLUSH_TX_FIFO);
+    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
+    radio.writeCommandData(CMD_WRITE_TX_FIFO_NO_ACK, bytes, len);
+    const uint32_t until = micros() + 5000;
+    while ((int32_t)(micros() - until) < 0) {
+      if (radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER) & IRQ_TX_DS) {
+        confirmed++;
+        break;
+      }
+      delayMicroseconds(10);
+    }
+    if (gapMs) delay(gapMs);
+  }
+  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+  radio.command(CMD_LIGHT_SLEEP);
+  snprintf(line, sizeof(line), "  %u emise(s), %u confirmee(s) par TX_DS.", count, confirmed);
   out.println(line);
 }
 

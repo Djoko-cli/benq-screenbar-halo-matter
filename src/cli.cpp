@@ -1,10 +1,12 @@
 #include "cli.h"
 #include "cc2500.h"
+#include <esp_cpu.h>
 
 // Salves capturees : 24 x 256 bits, soit 2 ms de flux chacune a 125 kbit/s.
 #define CC_BURSTS 24
 #define CC_BURST_BITS 256
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -111,6 +113,7 @@ static void cmdHelp() {
   Serial.println("  benq [ms] [octets]    reception Halo 1, lecture de 8 a 32 octets");
   Serial.println("  xo [0..31]            trim du quartz du BM5602 : reglage fin de la porteuse");
   Serial.println("  tx6 <hex12> [n] [ms]  emettre une trame Halo 1 (adresse + 6 octets + CRC)");
+  Serial.println("  txraw <hex> [n] [ms]  emettre des octets bruts apres l'adresse, CRC materiel coupe");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -127,6 +130,9 @@ static void cmdHelp() {
   Serial.println("  ccdump [seuil] [n]    vidage brut des salves, pour analyse sur l'ordinateur");
   Serial.println("  ccflux [bits] [n]     capture CONTINUE videe telle quelle (pas de declenchement)");
   Serial.println("  ccdebit [lo] [hi] [n] a quel debit EXACT la telecommande emet-elle ?");
+  Serial.println("  cccs [seuil] [ms]     proportion de temps ou la porteuse est detectee");
+  Serial.println("  ccscore [fenetres]    score de signal des fenetres asynchrones (reglage)");
+  Serial.println("  ccasync [n] [score] [s]  capture asynchrone des fenetres avec signal");
   Serial.println("  ccfreq [span] [pas] [ms]  sur quelle frequence la source est-elle centree ?");
   Serial.println("  ccoff [seuil] [ms]    ecart de porteuse mesure par la puce (FREQEST)");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
@@ -474,6 +480,29 @@ static void handleLine(char *line) {
       if (v >= 200 && v <= 20000) d = (uint32_t)v;
     }
     ccFreqSweep(Serial, span, step, d);
+  } else if (!strcmp(line, "cccs")) {
+    char *end = nullptr;
+    long thr = 0, ms = 2000;
+    if (*arg) thr = strtol(arg, &end, 10);
+    if (end && *end) ms = strtol(end, nullptr, 10);
+    if (thr < 0 || thr > 15) thr = 0;
+    if (ms < 200 || ms > 30000) ms = 2000;
+    ccCarrierDuty(Serial, (uint8_t)thr, (uint32_t)ms);
+  } else if (!strcmp(line, "ccscore")) {
+    long n = strtol(arg, nullptr, 10);
+    if (n < 10 || n > 2000) n = 200;
+    ccAsyncScore(Serial, (uint32_t)n);
+  } else if (!strcmp(line, "ccasync")) {
+    // ccasync [fenetres a garder] [score minimal] [delai max s]
+    char *end = nullptr;
+    long n = 4, minRuns = 40, to = 30;
+    if (*arg) n = strtol(arg, &end, 10);
+    if (end && *end) minRuns = strtol(end, &end, 10);
+    if (end && *end) to = strtol(end, nullptr, 10);
+    if (n < 1 || n > 40) n = 4;
+    if (minRuns < 1 || minRuns > 5000) minRuns = 40;
+    if (to < 1 || to > 600) to = 30;
+    ccAsyncCapture(Serial, (uint8_t)n, (uint32_t)minRuns, (uint32_t)to * 1000UL);
   } else if (!strcmp(line, "ccdebit")) {
     char *end = nullptr;
     long lo = 46, hi = 72, n = 3;
@@ -569,6 +598,28 @@ static void handleLine(char *line) {
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 60000) dwell = (uint32_t)v;
     ccListen(Serial, dwell);
+  } else if (!strcmp(line, "txraw")) {
+    // txraw <hex, 1 a 30 octets> [nombre] [intervalle ms]
+    uint8_t buf[32];
+    uint8_t len = 0;
+    char *p = arg;
+    while (isxdigit((unsigned char)p[0]) && isxdigit((unsigned char)p[1]) && len < 30) {
+      char pair[3] = {p[0], p[1], 0};
+      buf[len++] = (uint8_t)strtol(pair, nullptr, 16);
+      p += 2;
+    }
+    if (!len) {
+      Serial.println("Usage : txraw <hex> [nombre] [intervalle ms]");
+    } else {
+      long n = 3, gap = 2;
+      char *end = p;
+      if (*end) n = strtol(end, &end, 10);
+      if (*end) gap = strtol(end, nullptr, 10);
+      if (n < 1 || n > 5000) n = 3;
+      if (gap < 0 || gap > 2000) gap = 2;
+      halo.setMode(HaloMode::Normal);
+      halo.txRaw(Serial, buf, len, (uint16_t)n, (uint16_t)gap);
+    }
   } else if (!strcmp(line, "tx6")) {
     // tx6 <12 chiffres hex> [nombre] [intervalle ms]
     char *p = arg;
@@ -2490,6 +2541,197 @@ void ccRateSweep(Print &out, uint8_t mLo, uint8_t mHi, uint8_t passes) {
     out.println("  Aucun debit ne donne de CRC valide. Si des adresses ont ete");
     out.println("  vues, l'ecart de debit n'est pas la seule cause.");
   }
+}
+
+// ---------------------------------------------------------------------------
+//  Capture ASYNCHRONE avec pre-declenchement, pour analyse hors carte.
+//
+//  En mode asynchrone (PKTCTRL0.PKT_FORMAT=11), le CC2500 ne decide aucun bit :
+//  GDO0 recopie la sortie de son discriminateur. On l'echantillonne en continu
+//  dans un tampon CIRCULAIRE, et on declenche sur GDO2 configure en
+//  « porteuse detectee » -- lu a pleine vitesse sur le port, pas par SPI. Le
+//  tampon garde ce qui PRECEDE le declenchement : on ne peut plus rater le
+//  debut d'une trame, ce qui condamnait toutes les captures declenchees sur le
+//  RSSI (190 us de lecture SPI pour un preambule et une adresse de 384 us).
+//
+//  La recuperation d'horloge se fait ensuite sur l'ordinateur, ou elle peut
+//  encaisser une gigue ou une asymetrie que les recepteurs materiels ne
+//  tolerent pas.
+//
+//  Les interruptions sont masquees par fenetres de 150 ms au plus : le chien de
+//  garde des interruptions se declenche a 300 ms.
+// ---------------------------------------------------------------------------
+static uint32_t ccRing[1024];  // 32768 echantillons
+
+static void ccAsyncSetup(uint8_t csThr) {
+  // GDO2 est pilote par le CC2500 (IOCFG2) : cote ESP32, toujours en entree.
+  pinMode(ccPins[5], INPUT);
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.writeRegister(cc2500::REG_PKTCTRL0, 0x32);        // asynchrone
+  radio2.writeRegister(cc2500::REG_IOCFG0, 0x0D);          // GDO0 = donnee brute
+  radio2.writeRegister(cc2500::REG_IOCFG2, 0x0E);          // GDO2 = porteuse detectee
+  radio2.writeRegister(cc2500::REG_AGCCTRL1, (uint8_t)(csThr & 0x0F));
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+}
+
+// Proportion du temps ou la porteuse est detectee : pour regler le seuil.
+void ccCarrierDuty(Print &out, uint8_t csThr, uint32_t ms) {
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  ccAsyncSetup(csThr);
+  const uint8_t gdo2 = ccPins[5];
+  pinMode(gdo2, INPUT);
+  const uint32_t m2 = 1UL << gdo2;
+  uint32_t high = 0, total = 0, rises = 0;
+  uint32_t prev = 0;
+  const uint32_t until = millis() + ms;
+  while ((int32_t)(millis() - until) < 0) {
+    for (uint16_t k = 0; k < 4096; k++) {
+      const uint32_t cs = REG_READ(GPIO_IN_REG) & m2;
+      if (cs) high++;
+      if (cs && !prev) rises++;
+      prev = cs;
+      total++;
+    }
+  }
+  out.printf("  seuil %u : porteuse detectee %lu pour mille du temps, %lu front(s) montant(s), MARCSTATE %s\n",
+             (unsigned)csThr, (unsigned long)(total ? high * 1000 / total : 0), (unsigned long)rises,
+             cc2500::marcStateName(radio2.marcState()));
+}
+
+// Nombre de paliers « de la taille d'un bit » dans une fenetre : un signal a
+// 125 kbit/s en produit beaucoup (environ 28 echantillons chacun), le bruit en
+// produit peu -- ses paliers ne font que quelques echantillons, ou au contraire
+// s'etirent sans fin quand le discriminateur se colle a une butee.
+static uint32_t ccBitLikeRuns(uint32_t lo, uint32_t hi) {
+  uint32_t runs = 0, len = 0;
+  int prev = -1;
+  for (uint32_t w = 0; w < 1024; w++) {
+    const uint32_t word = ccRing[w];
+    for (int8_t k = 31; k >= 0; k--) {
+      const int b = (int)((word >> k) & 1u);
+      if (b == prev) {
+        len++;
+      } else {
+        if (len >= lo && len <= hi) runs++;
+        len = 1;
+        prev = b;
+      }
+    }
+  }
+  return runs;
+}
+
+// Capture sans declenchement : on remplit le tampon entier (environ 9 ms),
+// interruptions masquees le temps de la fenetre seulement, puis on ne garde
+// que les fenetres ou un vrai signal est present. Le declenchement sur la
+// porteuse detectee s'est revele inutilisable : non monotone selon le seuil,
+// et la broche reste haute par longues plages.
+void ccAsyncCapture(Print &out, uint8_t count, uint32_t minRuns, uint32_t timeoutMs) {
+  const uint8_t gdo0 = ccPins[4];
+  out.println();
+  out.printf("=== Capture asynchrone : %u fenetre(s) avec signal (>= %lu paliers d'un bit) ===\n",
+             count, (unsigned long)minRuns);
+  Serial.flush();
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  ccAsyncSetup(0);
+  pinMode(gdo0, INPUT);
+  const uint32_t m0 = 1UL << gdo0;
+  const uint32_t mhz = getCpuFrequencyMhz();
+
+  uint8_t kept = 0;
+  uint32_t windows = 0, best = 0;
+  const uint32_t giveUp = millis() + timeoutMs;
+  while (kept < count && (int32_t)(millis() - giveUp) < 0) {
+    noInterrupts();
+    const uint32_t c0 = esp_cpu_get_cycle_count();
+    for (uint32_t w = 0; w < 1024; w++) {
+      uint32_t word = 0;
+      for (uint8_t k = 0; k < 32; k++) word = (word << 1) | ((REG_READ(GPIO_IN_REG) & m0) ? 1u : 0u);
+      ccRing[w] = word;
+    }
+    const uint32_t c1 = esp_cpu_get_cycle_count();
+    interrupts();
+    windows++;
+
+    const uint32_t nsPerSample = (uint32_t)((uint64_t)(c1 - c0) * 1000ULL / mhz / 32768ULL);
+    // Un bit a 125 kbit/s dure 8000 ns : bornes a +/- 35 %.
+    const uint32_t spb = nsPerSample ? 8000 / nsPerSample : 28;
+    const uint32_t metric = ccBitLikeRuns(spb * 65 / 100, spb * 135 / 100);
+    if (metric > best) best = metric;
+    if (metric < minRuns) {
+      if ((windows & 0x3F) == 0) {
+        out.printf("  ... %lu fenetre(s) examinee(s), meilleur score %lu\n", (unsigned long)windows,
+                   (unsigned long)best);
+        Serial.flush();
+      }
+      delay(1);
+      continue;
+    }
+
+    out.printf("ASYNC %u %lu %lu\n", kept, (unsigned long)nsPerSample, (unsigned long)metric);
+    char lineBuf[96];
+    for (uint32_t k = 0; k < 1024; k += 8) {
+      size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "AS %u %4lu ", kept, (unsigned long)k);
+      for (uint32_t q = 0; q < 8; q++)
+        w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, "%08lX", (unsigned long)ccRing[k + q]);
+      out.println(lineBuf);
+    }
+    Serial.flush();
+    kept++;
+  }
+  out.printf("  %u fenetre(s) gardee(s) sur %lu examinee(s), meilleur score %lu.\n", kept,
+             (unsigned long)windows, (unsigned long)best);
+  radio2.strobe(cc2500::STROBE_SIDLE);
+}
+
+// Score de chaque fenetre, sans rien vider : pour regler le seuil.
+void ccAsyncScore(Print &out, uint32_t windowsWanted) {
+  const uint8_t gdo0 = ccPins[4];
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  ccAsyncSetup(0);
+  pinMode(gdo0, INPUT);
+  const uint32_t m0 = 1UL << gdo0;
+  const uint32_t mhz = getCpuFrequencyMhz();
+  uint32_t hist[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  uint32_t best = 0, ns = 0;
+  for (uint32_t i = 0; i < windowsWanted; i++) {
+    noInterrupts();
+    const uint32_t c0 = esp_cpu_get_cycle_count();
+    for (uint32_t w = 0; w < 1024; w++) {
+      uint32_t word = 0;
+      for (uint8_t k = 0; k < 32; k++) word = (word << 1) | ((REG_READ(GPIO_IN_REG) & m0) ? 1u : 0u);
+      ccRing[w] = word;
+    }
+    const uint32_t c1 = esp_cpu_get_cycle_count();
+    interrupts();
+    ns = (uint32_t)((uint64_t)(c1 - c0) * 1000ULL / mhz / 32768ULL);
+    const uint32_t spb = ns ? 8000 / ns : 28;
+    const uint32_t m = ccBitLikeRuns(spb * 65 / 100, spb * 135 / 100);
+    if (m > best) best = m;
+    uint8_t b = 0;
+    while (b < 7 && m >= (5u << b)) b++;
+    hist[b]++;
+    delay(1);
+  }
+  out.printf("  %lu fenetres, %lu ns par echantillon, meilleur score %lu\n",
+             (unsigned long)windowsWanted, (unsigned long)ns, (unsigned long)best);
+  out.println("  score :   <5  5-9  10-19  20-39  40-79  80-159  160-319  >=320");
+  out.printf("          %4lu %4lu  %5lu  %5lu  %5lu  %6lu  %7lu  %6lu\n", (unsigned long)hist[0],
+             (unsigned long)hist[1], (unsigned long)hist[2], (unsigned long)hist[3],
+             (unsigned long)hist[4], (unsigned long)hist[5], (unsigned long)hist[6],
+             (unsigned long)hist[7]);
 }
 
 void cliBegin() {
