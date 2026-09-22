@@ -112,6 +112,10 @@ static void cmdHelp() {
   Serial.println("  ccrx [ms]             CC2500 en ecoute brute sur 2405 MHz");
   Serial.println("  cccap [motif] [bits]  capture le flux brut et y cherche un motif de 32 bits");
   Serial.println("  ccfind [bits] [run] [n]  trouve une adresse SANS la connaitre, n captures cumulees");
+  Serial.println("  ccfront [ms]          table de verite mesuree de PA_EN et RX_EN");
+  Serial.println("  ccpres [ms]           le CC2500 entend-il la source ? distribution du RSSI");
+  Serial.println("  cccrc [bits] [n] [lo] [hi]  trouve les trames par leur CRC, sans hypothese");
+  Serial.println("  ccbit [seuil] [n]     duree reelle d'un bit, mesuree en mode asynchrone");
   Serial.println("  gio3check [ms]        ces sorties sont-elles avant ou apres le correlateur ?");
   Serial.println("  gio3bits [sel]        lit l'adresse dans le flux demodule (defaut : 14)");
   Serial.println("  taptest [s]           suivi en direct du contact des 3 fils d'ecoute");
@@ -433,6 +437,39 @@ static void handleLine(char *line) {
     ccDiagnose(Serial);
   } else if (!strcmp(line, "ccraw")) {
     ccRawProbe(Serial);
+  } else if (!strcmp(line, "ccbit")) {
+    char *end = nullptr;
+    long thr = -60;
+    if (*arg) thr = strtol(arg, &end, 10);
+    if (thr < -90 || thr > -20) thr = -60;
+    long n = 200;
+    if (end && *end) n = strtol(end, nullptr, 10);
+    if (n < 1 || n > 2000) n = 200;
+    ccPulseWidths(Serial, (int)thr, (uint16_t)n);
+  } else if (!strcmp(line, "cccrc")) {
+    char *end = nullptr;
+    uint32_t nb = 32768;
+    const long v = strtol(arg, &end, 10);
+    if (v >= 1024 && v <= 32768) nb = (uint32_t)v;
+    long rep = 10;
+    if (end && *end) rep = strtol(end, &end, 10);
+    if (rep < 1 || rep > 120) rep = 10;
+    long lo = 60, hi = 200;
+    if (end && *end) lo = strtol(end, &end, 10);
+    if (end && *end) hi = strtol(end, nullptr, 10);
+    if (lo < 24 || lo > 400) lo = 60;
+    if (hi < lo || hi > 400) hi = 200;
+    ccCrcHunt(Serial, nb, (uint8_t)rep, (uint16_t)lo, (uint16_t)hi);
+  } else if (!strcmp(line, "ccpres")) {
+    uint32_t d = 20000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 2000 && v <= 120000) d = (uint32_t)v;
+    ccPresence(Serial, d);
+  } else if (!strcmp(line, "ccfront")) {
+    uint32_t d = 3000;
+    const long v = strtol(arg, nullptr, 10);
+    if (v >= 500 && v <= 20000) d = (uint32_t)v;
+    ccFrontEnd(Serial, d);
   } else if (!strcmp(line, "ccfind")) {
     char *end = nullptr;
     uint32_t nb = 32768;
@@ -1224,7 +1261,8 @@ void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) 
 
   static CcCand cands[192];
   uint8_t nCand = 0;
-  uint32_t anchors = 0, totalBits = 0;
+  uint32_t anchors = 0, totalBits = 0, flips = 0;
+  int peakDbm = -128;
 
   for (uint8_t pass = 0; pass < repeats; pass++) {
     memset(ccBits, 0, sizeof(ccBits));
@@ -1244,6 +1282,13 @@ void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) 
     }
     interrupts();
     totalBits += got;
+
+    // Temoin de trafic, sans lequel un resultat nul ne veut rien dire : un
+    // flux demodule fige trahit une source absente, pas une adresse introuvable.
+    for (uint32_t k = 1; k < got; k++)
+      if (ccBitAt(ccBits, k) != ccBitAt(ccBits, k - 1)) flips++;
+    const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+    if (dbm > peakDbm) peakDbm = dbm;
 
     uint32_t i = 1, runStart = 0;
     while (i < got) {
@@ -1280,6 +1325,9 @@ void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) 
 
   out.printf("  %lu bits au total, %lu ancrage(s), %u candidat(s) distinct(s).\n",
              (unsigned long)totalBits, (unsigned long)anchors, nCand);
+  out.printf("  TEMOIN : %lu transitions dans le flux (%lu pour mille), RSSI de pic %d dBm.\n",
+             (unsigned long)flips, (unsigned long)(totalBits ? flips * 1000 / totalBits : 0),
+             peakDbm);
   if (!nCand) {
     out.println("  Aucun preambule dans le flux : soit la source n'a pas emis,");
     out.println("  soit elle n'est pas sur ce canal.");
@@ -1307,6 +1355,410 @@ void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats) 
   out.println();
   out.println("  Pour l'ecrire dans le BM5602, inverser l'ordre : le dernier");
   out.println("  octet affiche part en premier sur l'air.");
+}
+
+// ---------------------------------------------------------------------------
+//  Table de verite de l'etage d'entree RFX2402E, MESUREE et non supposee.
+//  Les deux broches PA_EN et RX_EN commandent un amplificateur de puissance et
+//  un amplificateur faible bruit. Une polarite fausse rend le module sourd, ou
+//  le fait ecouter a travers un chemin attenue -- sans rien dire. On balaie
+//  donc les quatre combinaisons en lisant le RSSI, avec une source connue.
+// ---------------------------------------------------------------------------
+void ccFrontEnd(Print &out, uint32_t dwellMs) {
+  out.println();
+  out.println("=== Etage d'entree : quelle combinaison ouvre la reception ? ===");
+  out.println("  RSSI en dBm, mesure sur une source qui doit emettre pendant");
+  out.println("  toute la mesure. Plus le chiffre est GRAND (moins negatif),");
+  out.println("  plus le chemin de reception est ouvert.");
+  out.println("  >>> BALISE ALLUMEE, ou molette tournee sans arret.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+
+  char lineBuf[132];
+  for (uint8_t combo = 0; combo < 4; combo++) {
+    const bool pa = (combo & 2) != 0, rx = (combo & 1) != 0;
+    radio2.strobe(cc2500::STROBE_SIDLE);
+    radio2.setFrontEnd(pa, rx);
+    delay(2);
+    radio2.strobe(cc2500::STROBE_SRX);
+    delay(10);
+
+    int best = -128;
+    long sum = 0;
+    uint16_t n = 0;
+    const uint32_t until = millis() + dwellMs;
+    while ((int32_t)(millis() - until) < 0) {
+      const int8_t raw = (int8_t)radio2.readStatus(cc2500::STA_RSSI);
+      const int dbm = raw / 2 - 72;
+      if (dbm > best) best = dbm;
+      sum += dbm;
+      n++;
+      delay(1);
+    }
+    snprintf(lineBuf, sizeof(lineBuf), "    PA_EN=%d RX_EN=%d  -> RSSI moyen %ld dBm, pic %d dBm  (%u mesures)",
+             pa ? 1 : 0, rx ? 1 : 0, n ? sum / n : 0, best, n);
+    out.println(lineBuf);
+    Serial.flush();
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  radio2.setFrontEnd(false, false);
+  out.println();
+  out.println("  Retenir la combinaison au pic le plus haut : c'est celle qui");
+  out.println("  passe par l'amplificateur faible bruit.");
+}
+
+// ---------------------------------------------------------------------------
+//  Le CC2500 entend-il la source, oui ou non ? Distribution du RSSI.
+//
+//  Un pic isole ne prouve rien : une salve d'une milliseconde se rate si on
+//  echantillonne une fois par seconde, et une rafale Wi-Fi produit un pic
+//  identique. On echantillonne donc en continu, sur deux phases -- repos puis
+//  source active -- et on compare les DISTRIBUTIONS. C'est la mesure qui avait
+//  etabli que la telecommande emet sur 2405 MHz, refaite ici avec un recepteur
+//  qui rend des dBm veritables.
+// ---------------------------------------------------------------------------
+void ccPresence(Print &out, uint32_t phaseMs) {
+  out.println();
+  out.println("=== Le CC2500 entend-il la source sur 2405 MHz ? ===");
+  out.println("  Distribution du RSSI, phase de repos puis phase active.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);  // table de verite mesuree : LNA seul
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : mesure annulee.");
+    return;
+  }
+
+  // Quatre bandes : plancher, un peu, fort, tres fort.
+  uint32_t hist[2][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
+  uint32_t total[2] = {0, 0};
+  int peak[2] = {-128, -128};
+  char lineBuf[132];
+
+  for (uint8_t phase = 0; phase < 2; phase++) {
+    if (phase == 0) out.println("  Phase 1 sur 2 -- NE TOUCHE A RIEN :");
+    else out.println("  Phase 2 sur 2 -- TOURNE LA MOLETTE SANS T'ARRETER :");
+    for (uint8_t k = 3; k >= 1; k--) {
+      snprintf(lineBuf, sizeof(lineBuf), "    %u...", (unsigned)k);
+      out.println(lineBuf);
+      Serial.flush();
+      delay(1000);
+    }
+
+    const uint32_t until = millis() + phaseMs;
+    while ((int32_t)(millis() - until) < 0) {
+      const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+      if (dbm > peak[phase]) peak[phase] = dbm;
+      if (dbm >= -50) hist[phase][3]++;
+      else if (dbm >= -60) hist[phase][2]++;
+      else if (dbm >= -70) hist[phase][1]++;
+      else hist[phase][0]++;
+      total[phase]++;
+      // La puce peut quitter le RX sur un evenement : on l'y remet.
+      if ((total[phase] & 0x3FF) == 0 && radio2.marcState() != cc2500::MARC_RX)
+        radio2.strobe(cc2500::STROBE_SRX);
+    }
+    out.println();
+  }
+
+  static const char *bands[4] = {"sous -70 dBm", "-70 a -60   ", "-60 a -50   ", "au-dessus de -50"};
+  out.println("  bande             repos        actif      rapport");
+  for (int8_t b = 3; b >= 0; b--) {
+    const float r0 = total[0] ? (1000.0f * hist[0][b] / total[0]) : 0.0f;
+    const float r1 = total[1] ? (1000.0f * hist[1][b] / total[1]) : 0.0f;
+    const float ratio = (r0 > 0.02f) ? (r1 / r0) : (r1 > 0.02f ? 999.0f : 1.0f);
+    snprintf(lineBuf, sizeof(lineBuf), "  %-17s %8.2f0/00 %8.2f0/00   x%.2f", bands[b],
+             (double)r0, (double)r1, (double)ratio);
+    out.println(lineBuf);
+  }
+  snprintf(lineBuf, sizeof(lineBuf), "  pics : repos %d dBm, actif %d dBm   (%lu et %lu mesures)",
+           peak[0], peak[1], (unsigned long)total[0], (unsigned long)total[1]);
+  out.println(lineBuf);
+}
+
+// ---------------------------------------------------------------------------
+//  Trouver les trames par leur CRC, sans aucune hypothese de structure.
+//
+//  Modele identifie sur une trame reellement capturee de la balise
+//  (E1 22 33 44 DE AD 55 0F A0 3C 01 02 03 04 puis C2 BA) : CRC-16/CCITT,
+//  polynome 0x1021, etat initial 0xFFFF, couvrant l'ADRESSE ET la charge
+//  utile, bit de poids fort d'abord. C'est aussi ce que documente le projet
+//  xfranek pour la deuxieme generation.
+//
+//  On balaie donc chaque position de depart et chaque longueur couverte : la
+//  ou les seize bits suivants valent le CRC de ce qui precede, il y a une
+//  trame. Aucune hypothese sur le preambule, l'adresse ni la longueur -- et un
+//  faux positif tous les 65 536 essais seulement, que la repetition elimine.
+//  L'adresse est alors simplement les 32 premiers bits.
+// ---------------------------------------------------------------------------
+void ccCrcHunt(Print &out, uint32_t nbits, uint8_t repeats, uint16_t minLen, uint16_t maxLen) {
+  if (nbits > sizeof(ccBits) * 8) nbits = sizeof(ccBits) * 8;
+  if (repeats < 1) repeats = 1;
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+
+  out.println();
+  out.println("=== Chasse aux trames par leur CRC ===");
+  out.printf("  %u capture(s) de %lu bits, longueurs couvertes de %u a %u bits.\n", repeats,
+             (unsigned long)nbits, minLen, maxLen);
+  out.println("  CRC-16/CCITT 0x1021, init 0xFFFF, couvrant adresse + charge utile.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(5);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : mesure annulee.");
+    return;
+  }
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+
+  struct Hit {
+    uint32_t addr;
+    uint16_t len;
+    uint16_t seen;
+  };
+  static Hit hits[160];
+  uint8_t nHit = 0;
+  uint32_t total = 0, found = 0, flips = 0;
+  int peakDbm = -128;
+
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  for (uint8_t pass = 0; pass < repeats; pass++) {
+    memset(ccBits, 0, sizeof(ccBits));
+    uint32_t got = 0;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
+    const uint32_t deadline = millis() + 2000;
+    noInterrupts();
+    while (got < nbits) {
+      const uint32_t now = REG_READ(GPIO_IN_REG);
+      const uint32_t clk = now & m2;
+      if (clk && !prev) {
+        if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
+        got++;
+      }
+      prev = clk;
+      if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
+    }
+    interrupts();
+    total += got;
+    for (uint32_t k = 1; k < got; k++)
+      if (ccBitAt(ccBits, k) != ccBitAt(ccBits, k - 1)) flips++;
+    const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+    if (dbm > peakDbm) peakDbm = dbm;
+
+    if (got < (uint32_t)maxLen + 32) continue;
+    const uint32_t last = got - (uint32_t)maxLen - 16;
+    for (uint32_t i = 0; i < last; i++) {
+      uint16_t win = 0;
+      for (uint8_t k = 0; k < 16; k++) win = (uint16_t)((win << 1) | (ccBitAt(ccBits, i + k) ? 1 : 0));
+      uint16_t crc = 0xFFFF;
+      for (uint16_t L = 1; L <= maxLen; L++) {
+        crc ^= (uint16_t)((ccBitAt(ccBits, i + L - 1) ? 1 : 0) << 15);
+        crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        win = (uint16_t)((win << 1) | (ccBitAt(ccBits, i + L + 15) ? 1 : 0));
+        if (L < minLen) continue;
+        if (win != crc) continue;
+
+        // Ecarter les zones degenerees. Un flux sature a 1 (ou a 0) produit des
+        // coincidences de CRC en quantite, et elles remplissaient la table au
+        // point d'en chasser les vraies trames. Une trame reelle -- preambule,
+        // adresse, charge utile -- est forcement riche en transitions.
+        uint16_t tr = 0;
+        for (uint16_t k = 1; k < L; k++)
+          if (ccBitAt(ccBits, i + k) != ccBitAt(ccBits, i + k - 1)) tr++;
+        if (tr * 8 < L) continue;
+        found++;
+        uint32_t a = 0;
+        for (uint8_t k = 0; k < 32; k++) a = (a << 1) | (ccBitAt(ccBits, i + k) ? 1 : 0);
+        bool dup = false;
+        for (uint8_t j = 0; j < nHit; j++)
+          if (hits[j].addr == a && hits[j].len == L) {
+            hits[j].seen++;
+            dup = true;
+            break;
+          }
+        if (!dup && nHit < 160) hits[nHit++] = {a, L, 1};
+      }
+    }
+    delay(1);
+  }
+
+  out.printf("  %lu bits, %lu trame(s) valide(s) par le CRC, %u distincte(s).\n",
+             (unsigned long)total, (unsigned long)found, nHit);
+  out.printf("  TEMOIN : %lu transitions (%lu pour mille), RSSI de pic %d dBm.\n",
+             (unsigned long)flips, (unsigned long)(total ? flips * 1000 / total : 0), peakDbm);
+  if (!nHit) {
+    out.println("  Aucune trame ne passe le CRC. Si le temoin montre du trafic,");
+    out.println("  c'est la demodulation ou le modele de trame qui est en cause,");
+    out.println("  pas l'absence de source.");
+    return;
+  }
+
+  out.println("  Trames trouvees (adresse SUR L'AIR, longueur couverte) :");
+  char lineBuf[140];
+  for (uint8_t rank = 0; rank < 10; rank++) {
+    uint8_t bi = 0xFF;
+    uint16_t bs = 0;
+    for (uint8_t j = 0; j < nHit; j++)
+      if (hits[j].seen > bs) {
+        bs = hits[j].seen;
+        bi = j;
+      }
+    if (bi == 0xFF || bs == 0) break;
+    const uint32_t a = hits[bi].addr;
+    snprintf(lineBuf, sizeof(lineBuf), "    %02X %02X %02X %02X   %3u bits couverts   vu %3u fois%s",
+             (unsigned)(a >> 24), (unsigned)((a >> 16) & 0xFF), (unsigned)((a >> 8) & 0xFF),
+             (unsigned)(a & 0xFF), hits[bi].len, bs, bs >= 3 ? "   <<< SERIEUX" : "");
+    out.println(lineBuf);
+    hits[bi].seen = 0;
+  }
+  out.println();
+  out.println("  Pour l'ecrire dans le BM5602, inverser l'ordre des octets.");
+}
+
+// ---------------------------------------------------------------------------
+//  Mesurer le DEBIT REEL de la source, a la regle.
+//
+//  Depuis le debut, le debit de 125 kbps vient du dossier FCC et d'un calcul de
+//  Carson -- jamais d'une mesure directe. Le mode ASYNCHRONE du CC2500 le rend
+//  possible : PKTCTRL0.PKT_FORMAT=11 sort la donnee demodulee BRUTE sur GDO0,
+//  sans aucune decision de bit ni recuperation d'horloge. On echantillonne donc
+//  cette broche aussi vite que possible et on mesure la duree des impulsions :
+//  la plus courte qui revient souvent EST la periode d'un bit.
+//
+//  Declenchement sur le RSSI, sans quoi on ne capturerait que du bruit : la
+//  telecommande n'emet qu'environ 1 % du temps.
+// ---------------------------------------------------------------------------
+void ccPulseWidths(Print &out, int trigDbm, uint16_t tries) {
+  const uint8_t gdo0 = ccPins[4];
+  out.println();
+  out.println("=== Duree reelle d'un bit, mesuree en mode asynchrone ===");
+  out.printf("  Declenchement au-dessus de %d dBm, %u tentatives.\n", trigDbm, tries);
+  out.println("  La donnee sort BRUTE : aucune decision de bit n'est faite par");
+  out.println("  la puce, donc les durees sont celles du signal lui-meme.");
+  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER, ou lance la balise.");
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  // Bascule en asynchrone : donnee brute sur GDO0.
+  radio2.writeRegister(cc2500::REG_PKTCTRL0, 0x32);  // PKT_FORMAT = 11
+  radio2.writeRegister(cc2500::REG_IOCFG0, 0x0D);    // GDO0 = donnee asynchrone
+  radio2.setFrontEnd(false, true);
+  radio2.strobe(cc2500::STROBE_SRX);
+  delay(10);
+  if (radio2.marcState() != cc2500::MARC_RX) {
+    out.println("  La puce n'est pas en reception : mesure annulee.");
+    return;
+  }
+  pinMode(gdo0, INPUT);
+
+  // Histogramme des durees, en pas d'echantillon, jusqu'a 64.
+  static uint32_t hist[65];
+  memset(hist, 0, sizeof(hist));
+  const uint32_t m0 = 1UL << gdo0;
+  uint16_t caught = 0;
+  uint32_t loops = 0;
+  uint32_t sampled = 0, elapsedTotal = 0;
+
+  for (uint16_t attempt = 0; attempt < tries; attempt++) {
+    // Attendre une salve.
+    bool armed = false;
+    const uint32_t giveUp = millis() + 200;
+    while ((int32_t)(millis() - giveUp) < 0) {
+      const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+      if (dbm >= trigDbm) {
+        armed = true;
+        break;
+      }
+      loops++;
+    }
+    if (!armed) continue;
+    caught++;
+
+    // Boucle a NOMBRE FIXE de tours : appeler micros() a chaque iteration la
+    // ralentissait a 6,3 us par echantillon, soit moins d'un point par bit.
+    // Le chronometre encadre la boucle au lieu de la traverser.
+    uint32_t run = 1;
+    uint32_t prev = REG_READ(GPIO_IN_REG) & m0;
+    // Une salve dure environ 1 ms : une fenetre plus large ne ramasserait
+    // que du bruit, qui noierait la distribution.
+    const uint32_t nSamp = 4000;
+    const uint32_t tA = micros();
+    for (uint32_t s = 0; s < nSamp; s++) {
+      const uint32_t now = REG_READ(GPIO_IN_REG) & m0;
+      if (now == prev) {
+        run++;
+      } else {
+        hist[run > 64 ? 64 : run]++;
+        run = 1;
+        prev = now;
+      }
+    }
+    elapsedTotal += micros() - tA;
+    sampled += nSamp;
+  }
+
+  const uint32_t elapsed = elapsedTotal;
+  out.printf("  %u salve(s) attrapee(s), %lu echantillons.\n", caught, (unsigned long)sampled);
+  if (!caught) {
+    out.println("  Aucune salve au-dessus du seuil : baisse-le, ou rapproche");
+    out.println("  la source.");
+    return;
+  }
+  if (!sampled) return;
+
+  // Cadence d'echantillonnage reelle, indispensable pour convertir en
+  // microsecondes : la boucle ne tourne pas a une vitesse connue d'avance.
+  const float sampleUs = (float)elapsed / (float)sampled;
+  out.printf("  Cadence mesuree : %.3f us par echantillon.\n", (double)sampleUs);
+  out.println("  Duree des paliers (les plus frequents en premier) :");
+
+  char lineBuf[132];
+  uint32_t peak = 0;
+  for (uint8_t k = 1; k <= 64; k++)
+    if (hist[k] > peak) peak = hist[k];
+  for (uint8_t k = 1; k <= 48; k++) {
+    if (!hist[k]) continue;
+    const float us = k * sampleUs;
+    const uint8_t bar = peak ? (uint8_t)((uint64_t)hist[k] * 40 / peak) : 0;
+    char bars[41];
+    for (uint8_t b = 0; b < bar && b < 40; b++) bars[b] = '#';
+    bars[bar > 40 ? 40 : bar] = 0;
+    snprintf(lineBuf, sizeof(lineBuf), "    %2u = %6.2f us %7.1f kbit/s %7lu %s", k, (double)us,
+             (double)(us > 0 ? 1000.0f / us : 0.0f), (unsigned long)hist[k], bars);
+    out.println(lineBuf);
+    Serial.flush();
+  }
+  out.println();
+  out.println("  Le palier le plus COURT qui revient souvent est la periode");
+  out.println("  d'un bit. 8 us = 125 kbit/s, 4 us = 250, 2 us = 500.");
 }
 
 void cliBegin() {
