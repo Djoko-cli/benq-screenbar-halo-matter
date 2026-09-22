@@ -87,6 +87,7 @@ static void cmdHelp() {
   Serial.println("  etalon tx [s] [1|2]   ETALONNAGE : cette carte EMET (preambule 1 ou 2 o.)");
   Serial.println("  etalon rx [s]         ETALONNAGE a deux cartes : cette carte ECOUTE");
   Serial.println("  autotest              verifie la carte maillon par maillon, sans partenaire");
+  Serial.println("  debit [125|250|500]   debit radio, persiste ; sans argument, affiche");
   Serial.println("  amble [1|2]           longueur de preambule attendue");
   Serial.println("  aw [3|4|5]            longueur d'adresse attendue");
   Serial.println("  chiplog               bascule les logs de la pile Matter");
@@ -293,6 +294,16 @@ static void handleLine(char *line) {
   } else if (!strcmp(line, "gio")) {
     halo.setMode(HaloMode::Normal);
     halo.probeGioFunctions(Serial);
+  } else if (!strcmp(line, "debit")) {
+    const long v = strtol(arg, nullptr, 10);
+    if (v == 125) halo.setDataRate(bc5602::DATARATE_125K);
+    else if (v == 250) halo.setDataRate(bc5602::DATARATE_250K);
+    else if (v == 500) halo.setDataRate(bc5602::DATARATE_500K);
+    else if (*arg) {
+      Serial.println("Valeurs acceptees : 125, 250 ou 500.");
+    }
+    Serial.print("Debit radio : ");
+    Serial.println(BenqHalo::dataRateName(halo.dataRate()));
   } else if (!strcmp(line, "autotest")) {
     halo.setMode(HaloMode::Normal);
     halo.selfTest(Serial);

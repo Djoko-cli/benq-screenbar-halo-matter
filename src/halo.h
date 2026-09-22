@@ -86,6 +86,14 @@ class BenqHalo {
   void setChannel(uint8_t ch);
   void setPreambleTwoBytes(bool two);
   bool preambleTwoBytes() const { return preambleTwoBytes_; }
+
+  // Debit radio. Mesure du 2026-09-22 : la telecommande du Halo 1 emet des
+  // rafales trop courtes pour 125 kbps sur une trame de 19 octets. Le debit
+  // ne doit donc plus etre code en dur, et il est persiste : le reoublier
+  // apres un flash rendrait toute chasse sourde sans le dire.
+  uint8_t dataRate() const { return dataRate_; }
+  void setDataRate(uint8_t rate);
+  static const char *dataRateName(uint8_t rate);
   uint8_t channel() const { return channel_; }
 
   // --- configuration radio ---
@@ -273,6 +281,7 @@ class BenqHalo {
   // logiciel : celui-ci remet tous les registres aux valeurs de mise sous
   // tension, ce qui effacait silencieusement le reglage.
   bool preambleTwoBytes_ = false;
+  uint8_t dataRate_ = bc5602::DATARATE_125K;
   uint32_t sweepAt_ = 0;
 
   // mode Finder

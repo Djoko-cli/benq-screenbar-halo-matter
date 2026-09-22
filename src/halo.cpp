@@ -57,6 +57,7 @@ void BenqHalo::loadConfig() {
     tail_[1] = 0x02;
   }
   channel_ = prefs_.getUChar("chan", RF_CHANNEL_1);
+  dataRate_ = prefs_.getUChar("rate", DATARATE_125K);
   prefs_.end();
 }
 
@@ -65,6 +66,7 @@ void BenqHalo::saveConfig() {
   prefs_.putBytes("addr", addr_, sizeof(addr_));
   prefs_.putBytes("tail", tail_, sizeof(tail_));
   prefs_.putUChar("chan", channel_);
+  prefs_.putUChar("rate", dataRate_);
   prefs_.end();
 }
 
@@ -114,7 +116,7 @@ void BenqHalo::sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_
   radio.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, cfg1);
   radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);
   addrLenBits_ = addrLenBits;
-  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, DATARATE_125K | addrLenBits);
+  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(dataRate_ | addrLenBits));
 
   // PAS de calibration ici. Mesure a l'appui (commande 'rxseq') : calibrer juste
   // avant d'entrer en reception empeche la puce d'atteindre le mode RX. Sans
@@ -2383,14 +2385,15 @@ static const uint8_t kCalPattern[10] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03
 // font les commandes de chasse -- CRC materiel desactive en reception, payload
 // statique, pas d'auto-ACK -- car etalonner une autre configuration que celle
 // qu'on utilise ne prouverait rien.
-static void configForLoopback(BC5602 &r, uint8_t channel, const uint8_t addr[4], bool receiver) {
+static void configForLoopback(BC5602 &r, uint8_t channel, const uint8_t addr[4], bool receiver,
+                              uint8_t rate) {
   r.softwareReset();
   delay(20);
   r.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
   r.setBank(0);
   r.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
   r.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel);
-  r.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(DATARATE_125K | ADDR_LEN_4));
+  r.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(rate | ADDR_LEN_4));
   r.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr, 4);
 
   uint8_t mask = r.readRegister(REG_MASK | CMD_READ_REGISTER);
@@ -2461,8 +2464,8 @@ void BenqHalo::loopbackTest(Print &out, uint16_t frames) {
                          : "  --- 2. adresse du recepteur fausse d'un octet : on doit RIEN recevoir ---");
     Serial.flush();
 
-    configForLoopback(radio2, RF_CHANNEL_1, kCalRegAddr, false);
-    configForLoopback(radio, RF_CHANNEL_1, matching ? kCalRegAddr : kCalWrongReg, true);
+    configForLoopback(radio2, RF_CHANNEL_1, kCalRegAddr, false, dataRate_);
+    configForLoopback(radio, RF_CHANNEL_1, matching ? kCalRegAddr : kCalWrongReg, true, dataRate_);
     radio.enterRxMode();
 
     uint16_t sent = 0, got = 0, good = 0;
@@ -2549,7 +2552,7 @@ void BenqHalo::calibrationBeacon(Print &out, uint32_t seconds, uint8_t preambleB
   out.println("  Lance 'etalon rx' sur l'AUTRE carte pendant que ceci tourne.");
   Serial.flush();
 
-  configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, false);
+  configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, false, dataRate_);
 
   // Longueur du preambule EMIS (CFO1 bit 6). Elle conditionne la chasse par le
   // preambule, qui cherche 'AA AA X' : avec un preambule d'un seul octet ce
@@ -2659,7 +2662,7 @@ void BenqHalo::calibrationListen(Print &out, uint32_t seconds) {
   for (uint8_t i = 0; i < 6; i++) {
     const RxCfg &cfg = cfgs[i];
 
-    configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, true);
+    configForLoopback(radio, RF_CHANNEL_1, kCalRegAddr, true, dataRate_);
     radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, cfg.pkt1);
     radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, cfg.dpl1);
     radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, cfg.dpl2);
@@ -2887,4 +2890,15 @@ void BenqHalo::selfTest(Print &out) {
   snprintf(line, sizeof(line), "  %u echec(s) au total.", (unsigned)failures);
   out.println(line);
   out.println();
+}
+
+const char *BenqHalo::dataRateName(uint8_t rate) {
+  if (rate == DATARATE_250K) return "250 kbps";
+  if (rate == DATARATE_500K) return "500 kbps";
+  return "125 kbps";
+}
+
+void BenqHalo::setDataRate(uint8_t rate) {
+  dataRate_ = rate;
+  saveConfig();
 }

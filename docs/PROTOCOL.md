@@ -402,3 +402,37 @@ valide. La méthode est close : ne pas la réessayer.
 Corollaire méthodologique : ce banc à deux cartes permet de **valider une
 technique de découverte sur une adresse connue** avant de la lancer contre la
 lampe. Toute méthode future doit passer par là d'abord.
+
+## Le débit de la télécommande n'est pas 125 kbps
+
+Mesure des durées de rafale du 2026-09-22, canal 5, seuil 70 dB.
+
+**Étalonnage** sur la balise, dont on connaît le débit (125 kbps) et la trame
+(19 octets = 152 bits = 1216 µs théoriques) :
+
+```
+1620 rafales — dominante 800-1499 µs, moyenne 913 µs, plus longue 1755 µs
+```
+
+L'instrument lit court d'environ un quart (913 pour 1216) : inertie du registre
+RSSI et seuil qui rogne les bords.
+
+**Télécommande de la lampe**, molette en rotation :
+
+```
+817 rafales — dominante 400-799 µs, moyenne 531 µs, plus longue 785 µs
+bande 800-1499 : ZERO
+```
+
+Aucune rafale dans la bande où la balise en plaçait 929, et une rafale maximale
+de 785 µs contre 1755 µs. Corrigé du biais, les 531 µs mesurés valent environ
+**708 µs réels** — soit 608 µs pour 19 octets à 250 kbps, contre 1216 µs à
+125 kbps.
+
+**125 kbps sur une trame de 19 octets est exclu par la mesure.** La durée seule ne
+sépare pas formellement « 19 octets à 250 kbps » de « 11 octets à 125 kbps »,
+la longueur du payload du Halo 1 étant inconnue — mais toutes les chasses menées
+jusqu'ici écoutaient à 125 kbps, ce qui suffit à expliquer leurs zéros.
+
+Le débit est désormais réglable et **persisté** (`debit 125|250|500`), au lieu
+d'être codé en dur dans `sharedRadioConfig()`.
