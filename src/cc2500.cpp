@@ -1,5 +1,6 @@
 #include "cc2500.h"
 
+
 namespace cc2500 {
 
 const char *marcStateName(uint8_t state) {
@@ -38,7 +39,25 @@ bool CC2500::waitReady(uint32_t timeoutMs) {
   return true;
 }
 
+// Mode 0 : la puce echantillonne SI sur le front montant de SCK et presente
+// son bit sur le front descendant. 1 us par demi-periode donne environ 250
+// kbit/s, largement assez pour configurer et lire des registres.
+uint8_t CC2500::transferByte(uint8_t v) {
+  uint8_t in = 0;
+  for (int8_t b = 7; b >= 0; b--) {
+    digitalWrite(mosi_, (v >> b) & 1);
+    delayMicroseconds(1);
+    digitalWrite(sck_, HIGH);
+    delayMicroseconds(1);
+    in = (uint8_t)((in << 1) | (digitalRead(miso_) ? 1 : 0));
+    digitalWrite(sck_, LOW);
+    delayMicroseconds(1);
+  }
+  return in;
+}
+
 void CC2500::select() {
+  digitalWrite(sck_, LOW);
   digitalWrite(csn_, LOW);
   waitReady();
 }
@@ -46,29 +65,23 @@ void CC2500::select() {
 void CC2500::deselect() { digitalWrite(csn_, HIGH); }
 
 void CC2500::strobe(uint8_t cmd) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer(cmd);
+  transferByte(cmd);
   deselect();
-  spi_.endTransaction();
 }
 
 void CC2500::writeRegister(uint8_t reg, uint8_t value) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer((uint8_t)(HDR_WRITE | reg));
-  spi_.transfer(value);
+  transferByte((uint8_t)(HDR_WRITE | reg));
+  transferByte(value);
   deselect();
-  spi_.endTransaction();
 }
 
 uint8_t CC2500::readRegister(uint8_t reg) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer((uint8_t)(HDR_READ | reg));
-  const uint8_t v = spi_.transfer(0x00);
+  transferByte((uint8_t)(HDR_READ | reg));
+  const uint8_t v = transferByte(0x00);
   deselect();
-  spi_.endTransaction();
   return v;
 }
 
@@ -76,31 +89,25 @@ uint8_t CC2500::readRegister(uint8_t reg) {
 // registres d'etat : seul le bit de rafale les distingue. Lire PARTNUM sans
 // HDR_BURST declencherait un reset logiciel au lieu d'une lecture.
 uint8_t CC2500::readStatus(uint8_t reg) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer((uint8_t)(HDR_READ | HDR_BURST | reg));
-  const uint8_t v = spi_.transfer(0x00);
+  transferByte((uint8_t)(HDR_READ | HDR_BURST | reg));
+  const uint8_t v = transferByte(0x00);
   deselect();
-  spi_.endTransaction();
   return v;
 }
 
 void CC2500::writeBurst(uint8_t reg, const uint8_t *data, size_t n) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer((uint8_t)(HDR_WRITE | HDR_BURST | reg));
-  for (size_t i = 0; i < n; i++) spi_.transfer(data[i]);
+  transferByte((uint8_t)(HDR_WRITE | HDR_BURST | reg));
+  for (size_t i = 0; i < n; i++) transferByte(data[i]);
   deselect();
-  spi_.endTransaction();
 }
 
 void CC2500::readBurst(uint8_t reg, uint8_t *data, size_t n) {
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   select();
-  spi_.transfer((uint8_t)(HDR_READ | HDR_BURST | reg));
-  for (size_t i = 0; i < n; i++) data[i] = spi_.transfer(0x00);
+  transferByte((uint8_t)(HDR_READ | HDR_BURST | reg));
+  for (size_t i = 0; i < n; i++) data[i] = transferByte(0x00);
   deselect();
-  spi_.endTransaction();
 }
 
 void CC2500::setFrontEnd(bool paEnable, bool rxEnable) {
@@ -112,19 +119,19 @@ bool CC2500::reset() {
   // Sequence de reveil manuel du datasheet : CSN bas puis haut brievement,
   // avant le strobe de reset. Sans elle, une puce sortie d'un etat inconnu
   // peut ne pas repondre.
+  digitalWrite(csn_, HIGH);
+  delayMicroseconds(10);
   digitalWrite(csn_, LOW);
   delayMicroseconds(10);
   digitalWrite(csn_, HIGH);
   delayMicroseconds(45);
 
-  spi_.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   digitalWrite(csn_, LOW);
   const bool ready = waitReady();
-  spi_.transfer(STROBE_SRES);
+  transferByte(STROBE_SRES);
   // Apres SRES, SO remonte puis retombe quand le reset est termine.
   const bool done = waitReady(50);
   digitalWrite(csn_, HIGH);
-  spi_.endTransaction();
   return ready && done;
 }
 
@@ -142,7 +149,13 @@ bool CC2500::begin(uint8_t sck, uint8_t miso, uint8_t mosi, uint8_t csn, uint8_t
   // Au repos, etage d'entree au neutre : ni emission, ni amplification.
   setFrontEnd(false, false);
 
-  spi_.begin(sck, miso, mosi, -1);
+  sck_ = sck;
+  mosi_ = mosi;
+  pinMode(sck_, OUTPUT);
+  pinMode(mosi_, OUTPUT);
+  pinMode(miso_, INPUT);
+  digitalWrite(sck_, LOW);
+  digitalWrite(mosi_, LOW);
   delay(10);
 
   if (!reset()) {
