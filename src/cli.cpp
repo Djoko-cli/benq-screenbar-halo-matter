@@ -2386,21 +2386,7 @@ void ccRateSweep(Print &out, uint8_t mLo, uint8_t mHi, uint8_t passes) {
     uint16_t addrHits = 0, crcOk = 0;
     for (uint8_t p = 0; p < passes; p++) {
       memset(ccBits, 0, sizeof(ccBits));
-      uint32_t got = 0;
-      uint32_t prev = REG_READ(GPIO_IN_REG) & m2;
-      const uint32_t deadline = millis() + 1500;
-      noInterrupts();
-      while (got < sizeof(ccBits) * 8) {
-        const uint32_t now = REG_READ(GPIO_IN_REG);
-        const uint32_t clk = now & m2;
-        if (clk && !prev) {
-          if (now & m0) ccBits[got >> 3] |= (uint8_t)(0x80 >> (got & 7));
-          got++;
-        }
-        prev = clk;
-        if ((got & 0x3FF) == 0 && (int32_t)(millis() - deadline) >= 0) break;
-      }
-      interrupts();
+      const uint32_t got = ccSampleBits(ccBits, sizeof(ccBits) * 8, m0, m2, 1500);
 
       for (uint32_t i = 0; i + 112 <= got; i++) {
         bool match = true;
