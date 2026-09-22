@@ -1008,3 +1008,70 @@ aucune interface de PHY brute : sa radio ne fait que Wi-Fi, BLE et 802.15.4.
 **Conclusion : une carte nRF52840 (Seeed XIAO, ~13 $) est le chemin le moins
 cher vers l'adresse.** Verifier qu'elle porte une antenne ceramique et pas un
 simple connecteur u.FL nu.
+
+## Capture brute au CC2500, et premiere adresse de la Halo 1 (2026-09-22)
+
+Le CC2500 donne ce que le BC5602 refuse : un MODE SERIE ou le moteur de paquets
+est debranche. `PKTCTRL0.PKT_FORMAT=01` sort les bits demodules sur GDO0 avec
+l'horloge de bit recuperee sur GDO2, et `MDMCFG2.SYNC_MODE=000` supprime toute
+exigence de preambule et de mot de synchro. Le datasheet prevoit exactement cet
+usage : « The MCU must then handle preamble and sync word insertion and
+detection in software. »
+
+Module : 24TRGC5-V4 (GC-02), CC2500 + RFX2402E (PA/LNA), quartz 26 MHz, u.FL.
+PARTNUM 0x80, VERSION 0x03. Table de verite de l'etage d'entree MESUREE :
+`PA_EN=0, RX_EN=1` donne 18 dB de plus que les trois autres combinaisons.
+
+**Le pilote est bit-bange**, volontairement : l'ESP32-C6 n'a qu'un controleur
+SPI generaliste, deja pris par le BM5602, et il ne se re-route pas ensuite.
+Mesure a l'appui, le peripherique rendait un octet d'etat 0x00 la ou le
+bit-bang rendait 0x0F sur les MEMES broches.
+
+**Chaine validee de bout en bout sur la balise.** Une trame lue dans le flux
+brut, par une puce a qui aucune adresse n'a ete donnee :
+
+```
+FF FF FF C0 2A AA | E1 22 33 44 | DE AD 55 0F A0 3C 01 02 03 04 | C2 BA
+     repos          adresse            charge utile                CRC
+```
+
+**Ce qui a ete mesure sur la telecommande, et non plus deduit :**
+
+- elle emet sur 2405 MHz : bandes fortes x8,76 quand la molette tourne, plancher
+  immobile (commande `ccpres`) ;
+- a **125 kbps** : duree d'un bit mesuree en mode asynchrone, pic a 8,08 us,
+  contre 8,09 us pour la balise a 125 kbps connus (commande `ccbit`) ;
+- sa porteuse est **bien centree** : FREQEST donne une masse a 0-31 kHz, contre
+  0-15 kHz pour la balise (commande `ccoff`) ;
+- elle est **forte** : pic a -19 dBm.
+
+**Adresse trouvee : `8F F7 C1 3C` sur l'air, soit `3C C1 F7 8F` en ordre
+d'ecriture.** Trouvee par recherche des sequences repetees dans 956 672 bits de
+flux brut, sans aucune hypothese de CRC ni de structure. Quatre occurrences,
+trois precedees d'un preambule, toutes suivies de charges utiles DIFFERENTES :
+
+```
+FC 00 55 | 8F F7 C1 3C | 53 13 11 6E 07 CF DF ...
+FC 00 55 | 8F F7 C1 3C | 25 89 67 E2 20 BE 7F ...
+7F 7C 00 05 | 8F F7 C1 3C | 06 B9 21 BD FF FE ...
+77 B6 01 55 | 8F F7 C1 3C | 06 B9 21 BF FF FE ...
+```
+
+Le preambule fait **un octet** (`55`), la ou notre balise en emet deux.
+
+**Verification par le correlateur materiel du BM5602** : avec `3C C1 F7 8F`, une
+trame acceptee et 36 transitions GIO3 ; avec l'ordre d'octets inverse, zero et
+zero. C'est le juge le plus dur dont on dispose -- il decode 789 trames de la
+balise et rigoureusement aucune avec une adresse fausse.
+
+**Aucun modele de CRC ne valide ces trames** : 84 combinaisons de polynome,
+d'etat initial et de sens de bits, sur sept points de depart. Les trames portent
+donc des erreurs binaires, ce qui explique aussi leur rarete.
+
+**Methodes essayees et ECARTEES, chacune par un controle sur la balise :**
+l'ancrage sur l'alternance du preambule (sort surtout les `0x55` de la charge
+utile), le consensus sur regions actives (37 bits unanimes sur la balise aussi,
+donc sans valeur), et toute capture DECLENCHEE sur le RSSI -- lire le RSSI coute
+190 us quand preambule et adresse n'en durent que 384 : l'adresse est passee
+avant qu'on echantillonne. Seules la chasse par CRC et la recherche de
+sequences repetees ont survecu a leur controle.
