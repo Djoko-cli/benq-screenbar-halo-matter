@@ -71,7 +71,11 @@ void netBegin() {}
 void netSetCredentials(const char *, const char *) {
   Serial.println("Inutile ici : Matter recupere le Wi-Fi du controleur pendant l'appairage BLE.");
 }
+#if MATTER_NET_THREAD
+void netPrintStatus(Print &out) { out.println("  reseau          : Thread (Apple Home donne le dataset pendant l'appairage BLE)"); }
+#else
 void netPrintStatus(Print &out) { out.println("  Wi-Fi           : fourni par le commissioning Matter (BLE)"); }
+#endif
 bool netNeedsCredentials() { return false; }
 
 #endif
