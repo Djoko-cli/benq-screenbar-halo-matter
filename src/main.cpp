@@ -181,16 +181,9 @@ void setup() {
                   PIN_RF_MOSI, PIN_RF_CSN);
     Serial.println("!! (MISO va sur GIO2, MOSI sur SDIO -- voir docs/WIRING.md)");
     Serial.println("!! Matter demarre quand meme, mais la lampe ne repondra pas.");
-  } else if (!halo.addressConfigured()) {
-    Serial.println();
-    Serial.println("!! Adresse de communication inconnue : lance 'find' pour la trouver.");
-  } else {
-    // Comme la telecommande a son reveil : on se signale, puis on aligne la
-    // consigne sur l'etat reel de la lampe avant de creer les endpoints.
-    halo.pollNow(HALO_CMD_HELLO);
-    halo.desired = halo.reported;
-    halo.printState(Serial);
   }
+  // Rien n'est emis au demarrage : l'ancien HELLO (protocole Halo 2, pollNow)
+  // est retire, la lampe est un Halo 1 (plan du pilote Halo 1, etape C1).
 
 #ifndef DIAG_ONLY
   netBegin();

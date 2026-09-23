@@ -186,21 +186,6 @@ static void cmdAddress(char *arg) {
   Serial.printf("Adresse enregistree : %02X %02X %02X %02X\n", v[0], v[1], v[2], v[3]);
 }
 
-static void cmdTail(char *arg) {
-  if (!*arg) {
-    Serial.printf("Octets de queue : %02X %02X\n", halo.tail()[0], halo.tail()[1]);
-    return;
-  }
-  uint8_t v[2];
-  if (parseHexBytes(arg, v, 2) != 2) {
-    Serial.println("Format attendu : tail 0102 (4 caracteres hexa)");
-    return;
-  }
-  halo.setTail(v[0], v[1]);
-  Serial.printf("Octets de queue enregistres : %02X %02X%s\n", v[0], v[1],
-                (v[0] == 0xFF && v[1] == 0xFF) ? " (controle desactive)" : "");
-}
-
 static void cmdChannel(char *arg) {
   if (!*arg) {
     Serial.printf("Canal : %u (%u MHz)\n", halo.channel(), 2400 + halo.channel());
@@ -215,71 +200,16 @@ static void cmdChannel(char *arg) {
   Serial.printf("Canal : %d (%d MHz)\n", ch, 2400 + ch);
 }
 
-static void cmdFind(char *arg) {
-  uint8_t sync[3];
-
-  // Mot-cle optionnel "sweep" : balaie les trois canaux du dossier FCC.
-  bool sweep = false;
-  char *kw = strstr(arg, "sweep");
-  if (kw) {
-    sweep = true;
-    *kw = 0;  // retire le mot-cle avant l'analyse numerique
-  }
-
-  if (*arg == 'x' || *arg == 'X') {
-    if (parseHexBytes(arg + 1, sync, 3) != 3) {
-      Serial.println("Format attendu : find x550f0a (6 caracteres hexa)");
-      return;
-    }
+// Commandes de la couche Halo 2 (poll, send, find, pair, sniff, tail) : la
+// lampe est un Halo 1, et ces commandes emettaient ou attendaient le format
+// Halo 2, qu'elle ne parle pas. Retirees (plan du pilote Halo 1, etape C1).
+static void cmdHalo2Retired(bool pairing) {
+  if (pairing) {
+    Serial.println("Commande Halo 2 retiree. Appairage Halo 1 (59 01 00 B0 sur l'air) :");
+    Serial.println("  'ecoute B0000159 5' pendant l'appairage, sans jamais y emettre.");
   } else {
-    long brightness = 10, kelvin = 3925;
-    if (*arg) {
-      char *end = nullptr;
-      brightness = strtol(arg, &end, 10);
-      kelvin = strtol(end, nullptr, 10);
-      if (brightness < HALO_BRIGHT_MIN || brightness > HALO_BRIGHT_MAX || kelvin < HALO_CT_MIN_K ||
-          kelvin > HALO_CT_MAX_K) {
-        Serial.printf("Valeurs attendues : luminosite %d-%d %%, temperature %d-%d K\n", HALO_BRIGHT_MIN,
-                      HALO_BRIGHT_MAX, HALO_CT_MIN_K, HALO_CT_MAX_K);
-        return;
-      }
-    }
-    // Sur l'air le payload contient [luminosite arriere, CT poids fort, CT poids
-    // faible] ; l'adresse s'ecrit dans l'ordre inverse.
-    sync[0] = (uint8_t)(kelvin & 0xFF);
-    sync[1] = (uint8_t)(kelvin >> 8);
-    sync[2] = (uint8_t)brightness;
-    Serial.printf("Mot de synchro deduit de : lampe arriere %ld %%, %ld K\n", brightness, kelvin);
+    Serial.println("Commande Halo 2 retiree : voir 'txack', 'ecoute' (puis 'lampe').");
   }
-
-  Serial.printf("Synchro (ordre d'ecriture) : %02X %02X %02X\n", sync[0], sync[1], sync[2]);
-  Serial.printf("  capture %d s%s. Regle CES valeurs exactes a la telecommande,\n",
-                sweep ? 135 : 60, sweep ? ", en balayant 3 debits x 3 canaux" : "");
-  Serial.println("puis actionne un bouton toutes les 2-3 s pour la faire emettre.");
-  halo.findAddressBegin(sync, sweep ? 135000 : 60000, sweep);  // 5 passes de 9 combos
-}
-
-static void cmdSendRaw(char *arg) {
-  uint8_t pkt[10];
-  if (parseHexBytes(arg, pkt, 10) != 10) {
-    Serial.println("Format attendu : send + 20 caracteres hexa (10 octets)");
-    return;
-  }
-  if (!halo.addressConfigured()) {
-    Serial.println("Adresse non configuree.");
-    return;
-  }
-  halo.setMode(HaloMode::Normal);
-  halo.prepareToTransfer();
-  bool sent = halo.sendWithAck(pkt);
-
-  uint8_t ack[10];
-  halo.readAck(ack);
-  Serial.printf("Emission : %s\n", sent ? "acquittee" : "PAS d'acquittement");
-  Serial.print("ACK      : ");
-  for (int i = 0; i < 10; i++) Serial.printf("%02X ", ack[i]);
-  Serial.printf(" %s\n", halo.validate(ack) ? "(valide)" : "(non conforme au format attendu)");
-  halo.prepareToSniff();
 }
 
 #ifndef DIAG_ONLY
@@ -312,15 +242,8 @@ static void handleLine(char *line) {
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "matter")) matterPrintStatus(Serial);
 #endif
-  else if (!strcmp(line, "poll")) {
-    if (!halo.addressConfigured()) {
-      Serial.println("Adresse non configuree : lance d'abord 'find'.");
-    } else {
-      Serial.printf("Interrogation : %s\n",
-                    halo.pollNow() ? "reponse valide" : "pas de reponse exploitable");
-      halo.printState(Serial);
-    }
-  } else if (!strcmp(line, "debug")) {
+  else if (!strcmp(line, "poll")) cmdHalo2Retired(false);
+  else if (!strcmp(line, "debug")) {
     halo.debug = !halo.debug;
     Serial.printf("Debug %s\n", halo.debug ? "active" : "desactive");
   } else if (!strcmp(line, "chiplog")) {
@@ -646,12 +569,13 @@ static void handleLine(char *line) {
     if (na != 4 || np < 1 || ch < 0 || ch > 83) {
       Serial.println("Usage : txack <adresse 8 hex> <canal> <charge hex> [essais] [intervalle ms]");
     } else {
-      // Garde-fous. Jamais l'adresse d'appairage (dans les deux ordres), jamais
-      // un octet de tete 0x0A (commande d'appairage du Halo 2).
-      const bool pairing = (addrReg[0] == 0xE2 && addrReg[1] == 0x08 && addrReg[2] == 0x00 &&
-                            addrReg[3] == 0xB0) ||
-                           (addrReg[0] == 0xB0 && addrReg[1] == 0x00 && addrReg[2] == 0x08 &&
-                            addrReg[3] == 0xE2);
+      // Garde-fous. Jamais une adresse d'appairage, Halo 2 (E2 08 00 B0) ou
+      // Halo 1 (59 01 00 B0, balise capturee le 23/09), dans les deux ordres ;
+      // jamais un octet de tete 0x0A (commande d'appairage du Halo 2).
+      static const uint8_t kPairing[4][4] = {{0xE2, 0x08, 0x00, 0xB0}, {0xB0, 0x00, 0x08, 0xE2},
+                                             {0x59, 0x01, 0x00, 0xB0}, {0xB0, 0x00, 0x01, 0x59}};
+      bool pairing = false;
+      for (const auto &p : kPairing) pairing = pairing || !memcmp(addrReg, p, 4);
       if (pairing || pay[0] == 0x0A) {
         Serial.println("Refuse : adresse ou commande d'appairage.");
       } else {
@@ -994,7 +918,7 @@ static void handleLine(char *line) {
     if (halo.radio.present()) halo.radio.dumpRegisters(Serial);
     else Serial.println("BM5602 absent.");
   } else if (!strcmp(line, "addr")) cmdAddress(arg);
-  else if (!strcmp(line, "tail")) cmdTail(arg);
+  else if (!strcmp(line, "tail")) cmdHalo2Retired(false);
   else if (!strcmp(line, "chan")) cmdChannel(arg);
   else if (!strcmp(line, "erase")) {
     uint8_t zero[4] = {0, 0, 0, 0};
@@ -1002,23 +926,13 @@ static void handleLine(char *line) {
     halo.setTail(0x01, 0x02);
     halo.setChannel(RF_CHANNEL_1);
     Serial.println("Configuration radio effacee.");
-  } else if (!strcmp(line, "find")) cmdFind(arg);
-  else if (!strcmp(line, "pair")) {
-    halo.startSniffer(HALO_PAIRING_ADDRESS);
-    Serial.println("Ecoute sur l'adresse d'appairage E2 08 00 B0 (sur l'air).");
-    Serial.println("Lance maintenant l'appairage entre la telecommande et la lampe.");
-    Serial.println("'normal' pour revenir au mode normal.");
-  } else if (!strcmp(line, "sniff")) {
-    if (!halo.addressConfigured()) {
-      Serial.println("Adresse non configuree : 'find' d'abord, ou 'pair' pour l'appairage.");
-    } else {
-      halo.startSniffer(nullptr);
-      Serial.println("Mode sniffer. 'normal' pour revenir au mode normal.");
-    }
-  } else if (!strcmp(line, "normal")) {
+  } else if (!strcmp(line, "find")) cmdHalo2Retired(false);
+  else if (!strcmp(line, "pair")) cmdHalo2Retired(true);
+  else if (!strcmp(line, "sniff")) cmdHalo2Retired(false);
+  else if (!strcmp(line, "normal")) {
     halo.setMode(HaloMode::Normal);
     Serial.println("Mode normal.");
-  } else if (!strcmp(line, "send")) cmdSendRaw(arg);
+  } else if (!strcmp(line, "send")) cmdHalo2Retired(false);
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "wifi")) cmdWifi(arg);
   else if (!strcmp(line, "decommission")) {
