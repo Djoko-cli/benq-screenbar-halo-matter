@@ -106,6 +106,16 @@
 #define STATUS_LED_ACTIVE_LOW 0
 #endif
 
+// LED d'etat RGB adressable (WS2812) : PIN_RGB_STATUS_LED, donnee par
+// platformio.ini (IO8 sur le C6 SuperMini). Definie, c'est elle le voyant, et
+// la LED simple de PIN_STATUS_LED reste eteinte ; sinon la LED simple suit les
+// memes motifs en tout ou rien (status_led.h). Ordre des couleurs : GRB, celui
+// de la WS2812B ; si 'led test' montre du rouge au lieu du vert, passer a
+// LED_COLOR_ORDER_RGB.
+#ifndef STATUS_RGB_ORDER
+#define STATUS_RGB_ORDER LED_COLOR_ORDER_GRB
+#endif
+
 // ===========================================================================
 //  Radio : canaux observes dans le dossier FCC (JVPCR20CCTR / JVPCR20C)
 //  Valeur du registre RFCH = frequence(MHz) - 2400

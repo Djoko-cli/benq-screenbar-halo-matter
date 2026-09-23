@@ -191,6 +191,49 @@ static bool onAuto(bool on) { return on ? post(halo1::IN_AUTO, [](halo1::MatterI
 #endif
 
 // ===========================================================================
+//  Identify ("Identifier" dans Apple Home) : arc-en-ciel sur la LED d'etat
+//
+//  Tache CHIP : les rappels ne font que poser des valeurs atomiques, lues par
+//  la tache loop (matterIdentifying). Une session Identify (IdentifyTime) finit
+//  par un STOP de la pile, par endpoint. Un TriggerEffect n'en recoit jamais
+//  (commentaire d'app_identification_cb, bibliotheque Matter) : sa fin est
+//  donc datee ici, d'apres l'effet demande.
+// ===========================================================================
+
+static uint32_t sIdentifyEps = 0;        // un bit par endpoint en session Identify
+static uint32_t sIdentifyEffectEnd = 0;  // fin d'un TriggerEffect (millis), 0 = aucun
+static uint32_t sIdentifyCount = 0;      // demandes recues (session ou effet)
+
+// Durees de la spec Matter (Breathe 15 s, ChannelChange 8 s), au moins 2 s :
+// Blink et Okay y durent a peine une seconde.
+static uint32_t identifyEffectMs(uint8_t effect) {
+  switch (effect) {
+    case MatterIdentifyRequest::BREATHE: return 15000;
+    case MatterIdentifyRequest::CHANNEL_CHANGE: return 8000;
+    default: return 2000;  // BLINK, OKAY, et tout effet inconnu
+  }
+}
+
+static bool onIdentify(const MatterEndPoint &ep, uint32_t bit, bool active) {
+  // Remplie par la bibliotheque juste avant ce rappel, dans cette meme tache.
+  const MatterIdentifyRequest r = ep.getIdentifyRequest();
+  if (active) __atomic_fetch_add(&sIdentifyCount, 1, __ATOMIC_RELAXED);
+  if (r.fromTriggerEffect) {
+    uint32_t end = 0;  // Stop ou Finish : fin tout de suite
+    if (active) {
+      end = millis() + identifyEffectMs(r.effectId);
+      if (!end) end = 1;
+    }
+    __atomic_store_n(&sIdentifyEffectEnd, end, __ATOMIC_RELAXED);
+  } else if (active) {
+    __atomic_fetch_or(&sIdentifyEps, bit, __ATOMIC_RELAXED);
+  } else {
+    __atomic_fetch_and(&sIdentifyEps, ~bit, __ATOMIC_RELAXED);
+  }
+  return true;
+}
+
+// ===========================================================================
 //  Etat du pont (tache loop uniquement)
 // ===========================================================================
 
@@ -1581,6 +1624,13 @@ void matterBridgeBegin() {
 #if HALO1_EXPOSE_AUTO
   autoButton.onChangeOnOff(onAuto);
 #endif
+  // Tous les endpoints : on ne sait pas lequel le controleur vise.
+  mainLight.onIdentify([](bool on) { return onIdentify(mainLight, 1u << 0, on); });
+  frontLamp.onIdentify([](bool on) { return onIdentify(frontLamp, 1u << 1, on); });
+  backLamp.onIdentify([](bool on) { return onIdentify(backLamp, 1u << 2, on); });
+#if HALO1_EXPOSE_AUTO
+  autoButton.onIdentify([](bool on) { return onIdentify(autoButton, 1u << 3, on); });
+#endif
 
   Matter.begin();
 #if MATTER_NET_THREAD
@@ -1720,6 +1770,16 @@ bool matterIsConnected() { return Matter.isDeviceConnected(); }
 #endif
 void matterDecommissionNow() { Matter.decommission(); }
 
+bool matterIdentifying() {
+  if (__atomic_load_n(&sIdentifyEps, __ATOMIC_RELAXED)) return true;
+  uint32_t end = __atomic_load_n(&sIdentifyEffectEnd, __ATOMIC_RELAXED);
+  if (!end) return false;
+  if ((int32_t)(end - millis()) > 0) return true;
+  // Echu : oublie, sauf si un nouvel effet vient d'etre pose par la tache CHIP.
+  __atomic_compare_exchange_n(&sIdentifyEffectEnd, &end, 0u, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  return false;
+}
+
 void matterPrintStatus(Print &out) {
   out.println();
   out.println("=== Matter ===");
@@ -1779,6 +1839,9 @@ void matterPrintStatus(Print &out) {
 #else
   out.printf("  bouton A (EP4)  : absent (HALO1_EXPOSE_AUTO 0), impulsion %u ms\n", sAutoPulseMs);
 #endif
+  out.printf("  identify        : %lu demande(s) recue(s), %s ('led' pour la LED d'etat)\n",
+             (unsigned long)__atomic_load_n(&sIdentifyCount, __ATOMIC_RELAXED),
+             matterIdentifying() ? "EN COURS" : "aucune en cours");
   out.printf("  reflets         : %lu (%lu attributs ecrits, %lu echecs, %lu verrou occupe), %lu traces perdues\n",
              (unsigned long)sStats.reflects, (unsigned long)sStats.writes, (unsigned long)sStats.writeFails,
              (unsigned long)sStats.lockBusy, (unsigned long)sStats.logDropped);

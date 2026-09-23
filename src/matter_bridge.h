@@ -23,6 +23,10 @@ bool matterSetAutoPulseMs(uint32_t ms, bool *saved);
 void matterDecommissionNow();
 bool matterIsCommissioned();
 bool matterIsConnected();
+// Identify demande par un controleur ("Identifier" dans Apple Home), sur
+// n'importe quel endpoint : session IdentifyTime jusqu'a son STOP, ou
+// TriggerEffect pendant sa duree. Tache loop (LED d'etat, 'matter').
+bool matterIdentifying();
 
 #if MATTER_NET_THREAD
 // Abonnements d'Apple Home apres un redemarrage (build Thread). Toutes ces

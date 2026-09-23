@@ -50,6 +50,12 @@ class Halo1Lamp {
   // par une impulsion d'EP4, sans rien emettre. Les copies d'un meme appui
   // comptent une fois ; nos propres trames A n'y passent jamais (onAir seul).
   uint32_t remoteAutoCount() const { return remoteAutoPresses_; }
+  // Consignes livrees en entier (une trame livree, et plus aucune tranche
+  // active) et abandons ("injoignable"), depuis le demarrage, jamais remis a
+  // zero : la LED d'etat en tire un eclat vert ou trois clignements rouges.
+  // Une trame brute du banc ('lampe brut') n'y compte pas.
+  uint32_t deliveredCount() const { return delivered_; }
+  uint32_t giveUpCount() const { return giveUps_; }
   // Niveau L3 : relance du module ratee (module muet), ou sans effet
   // (configuration toujours rejetee). Rien n'est emis ; nouvel essai de relance
   // toutes les 60 s.
@@ -142,6 +148,7 @@ class Halo1Lamp {
            lastTxEndAt_ = 0, persistFirst_ = 0, persistDue_ = 0, lastAckAt_ = 0, restartAt_ = 0;
   // Appuis A de la telecommande comptes, copies ecartees par remoteAuto_.
   uint32_t remoteAutoPresses_ = 0;
+  uint32_t delivered_ = 0, giveUps_ = 0;  // deliveredCount(), giveUpCount()
   halo1::AutoPressFilter remoteAuto_;
   uint16_t rawGapMs_ = 0;
   bool listening_ = false, trace_ = false, persistDirty_ = false, holding_ = false, lost_ = false,

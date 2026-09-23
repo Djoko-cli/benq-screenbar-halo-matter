@@ -27,6 +27,7 @@
 #include "config.h"
 #include "halo.h"
 #include "halo1_lamp.h"
+#include "status_led.h"
 #ifndef DIAG_ONLY
 #include "matter_bridge.h"
 #include "net.h"
@@ -61,39 +62,6 @@ void setChipLogging(bool on) {
 #endif
   esp_log_level_t level = on ? ESP_LOG_INFO : ESP_LOG_NONE;
   for (const char *tag : {"chip[DL]", "chip[SVR]", "chip[DIS]", "wifi"}) esp_log_level_set(tag, level);
-}
-
-static inline void ledWrite(bool on) {
-  digitalWrite(PIN_STATUS_LED, STATUS_LED_ACTIVE_LOW ? !on : on);
-}
-
-// LED d'etat : clignotement rapide = a appairer, lent = reseau absent,
-// eteinte = operationnel.
-static void statusLed() {
-  static uint32_t last = 0;
-  static bool on = false;
-
-  uint32_t period;
-#ifdef DIAG_ONLY
-  period = 0;
-#else
-  if (!matterIsCommissioned()) period = 200;
-  else if (!matterIsConnected()) period = 1000;
-  else period = 0;
-#endif
-
-  if (period == 0) {
-    if (on) {
-      on = false;
-      ledWrite(false);
-    }
-    return;
-  }
-  if (millis() - last >= period) {
-    last = millis();
-    on = !on;
-    ledWrite(on);
-  }
 }
 
 // Appui long sur le bouton BOOT : retire toutes les fabriques Matter pour
@@ -153,15 +121,7 @@ void setup() {
   Serial.begin(115200);
   delay(400);
 
-#ifdef DIAG_ONLY
-  // IO15 porte aussi GDO2 du CC2500 sur la carte de capture : le piloter en
-  // sortie mettrait deux sorties en conflit sur le meme fil (audit, bogue B9).
-  // En diagnostic, la LED ne sert a rien : on laisse la broche en entree.
-  pinMode(PIN_STATUS_LED, INPUT);
-#else
-  pinMode(PIN_STATUS_LED, OUTPUT);
-  ledWrite(false);
-#endif
+  statusLedBegin();  // LED eteinte ; diagnostic : IO15 en entree (bogue B9)
   pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
 
   // Tant que le noeud n'est pas mis en service, la pile Matter repete une
@@ -224,7 +184,7 @@ void loop() {
   matterBridgePoll();
 #endif
   cliPoll();
-  statusLed();
+  statusLedPoll();
   decommissionButton();
   // Cede la main a IDLE et aux taches moins prioritaires : tick() tourne ainsi
   // a ~1 kHz, assez pour l'ecoute passive.

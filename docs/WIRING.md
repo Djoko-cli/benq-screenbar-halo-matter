@@ -40,9 +40,9 @@ Cette carte a peu de broches vraiment libres :
 - **IO2, IO4, IO5, IO8, IO9, IO15** sont des broches de *strapping* : leur
   niveau est échantillonné au reset. Un module qui en pilote une pendant le
   démarrage peut empêcher la carte de booter ;
-- **IO8** est une LED adressable WS2812, pas une LED simple ;
-- **IO15** pilote la LED d'état, **IO9** est le bouton BOOT — le firmware s'en
-  sert déjà.
+- **IO8** est une LED adressable WS2812 : c'est le voyant d'état du firmware ;
+- **IO15** porte une LED simple, maintenue éteinte en build produit ; **IO9** est
+  le bouton BOOT — le firmware s'en sert déjà.
 
 Restent **IO14** et **IO18–IO20**, toutes sur le connecteur **extérieur
 gauche**, dont l'ordre est `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. Les
@@ -50,7 +50,7 @@ six fils, alimentation comprise, tiennent donc sur une seule rangée :
 
 ```
 IO14 ── CSN
-IO15    (LED d'état, on saute)
+IO15    (LED simple, on saute)
 IO18 ── SCK
 IO19 ── GIO2
 IO20 ── SDIO
