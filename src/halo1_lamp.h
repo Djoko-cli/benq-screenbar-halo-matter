@@ -19,7 +19,7 @@ class Halo1Lamp {
  public:
   using RestartFn = bool (*)();  // relance complete du module (halo.begin())
   void begin(BC5602 &chip, bool listen, RestartFn restart);  // NVS -> cru = consigne ; N'EMET RIEN
-  void tick();                    // <= ~35 ms au pire (un paquet), typiquement < 1 ms
+  void tick();                    // <= ~35 ms au pire (un paquet, + 26 ms de garde Thread), typiquement < 1 ms
   void invalidateRadio() { radio.invalidate(); }
   // Acheve un reset en cours (une reconfiguration de 40 ms, jusqu'a 3 si la
   // verification echoue ; 200 ms au plus) : un outil de banc trouve alors la

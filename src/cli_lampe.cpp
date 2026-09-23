@@ -230,6 +230,7 @@ static void cmdHelp() {
   Serial.println("  lampe attends <ms>      laisse tourner le pilote seul (observer l'ecoute)");
   Serial.println("  lampe rx <rearm> <silence> | rx fort 0|1  reglages de l'ecoute (ms)");
   Serial.println("  lampe leger 0|1         bascule TX/RX sans reset (NON PROUVEE)");
+  Serial.println("  lampe garde 0|1         Thread muet pendant chaque paquet (build Thread)");
   Serial.println("  lampe gamma <x.x>       courbe niveau -> luminosite (RAM)");
   Serial.println("  lampe trace 0|1         journal par evenement, jamais bloquant");
   Serial.println("  lampe stats [raz]       compteurs");
@@ -635,6 +636,17 @@ void cmdLampe(char *arg) {
       if (*w) lamp.radio.tuning.lightSwitch = on;
       Serial.printf("bascule legere TX/RX sans reset : %s (RAM)\n",
                     lamp.radio.tuning.lightSwitch ? "oui (NON PROUVEE)" : "non");
+    }
+  } else if (!strcmp(sub, "garde")) {
+    char *w = nextWord(p);
+    if (!lamp.radio.hasAirGuard()) {
+      Serial.println("garde Thread : absente de ce build (Matter sur Thread seulement), rien a regler");
+    } else if (*w && !parseOnOff(w, on)) {
+      Serial.println("Usage : lampe garde 0|1");
+    } else {
+      if (*w) lamp.radio.tuning.airGuard = on;
+      Serial.printf("garde Thread autour de chaque paquet : %s (RAM ; compteurs : 'lampe stats')\n",
+                    lamp.radio.tuning.airGuard ? "oui" : "non");
     }
   } else if (!strcmp(sub, "gamma")) {
     cmdGamma(p);

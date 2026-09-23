@@ -839,6 +839,11 @@ void Halo1Lamp::printStats(Print &out) const {
              (unsigned long)r.fullConfigs, (unsigned long)r.silenceReconf, (unsigned long)r.txReconf,
              (unsigned long)r.verifyFail, (unsigned long)r.rearms, (unsigned long)r.rxRaw,
              (unsigned long)r.lightSwitches);
+  if (radio.hasAirGuard())
+    out.printf("  garde    : %s, %lu paquets gardes, %lu refus du verrou, %lu attentes d'emission Thread "
+               "(%lu plafonnees, max %lu us)\n",
+               radio.tuning.airGuard ? "oui" : "COUPEE", (unsigned long)r.guarded, (unsigned long)r.guardRefused,
+               (unsigned long)r.guardWaits, (unsigned long)r.guardCapped, (unsigned long)r.guardMaxUs);
   out.printf("  divers   : %lu sauvegardes, %lu traces perdues, %lu relances du module\n", (unsigned long)s.persisted,
              (unsigned long)s.traceDropped, (unsigned long)s.restarts);
 }

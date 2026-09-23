@@ -194,6 +194,8 @@ Halo1Radio::TxReport Halo1Radio::sendOne(const uint8_t *pay, uint8_t len, uint32
   rep.v = Verdict::FifoRefused;
   if (!ready(Mode::Tx) || !present() || !len || len > 32) return rep;
   BC5602 &r = *chip_;
+  // Aucun retour entre ici et CE=0 : une garde prise est toujours rendue.
+  const Halo1AirGuard *held = guardEnter();
   r.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
   r.command(CMD_FLUSH_TX_FIFO);
   r.writeCommandData(CMD_WRITE_TX_FIFO_WITH_ACK, pay, len);  // 0x11 : AVEC accuse
@@ -221,6 +223,9 @@ Halo1Radio::TxReport Halo1Radio::sendOne(const uint8_t *pay, uint8_t len, uint32
   rep.status = r.readRegister(REG_STATUS | CMD_READ_REGISTER);
   // CE=0 tout de suite, sinon la puce repart seule tant que la FIFO n'est pas vide.
   r.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+  // La puce ne peut plus emettre, meme apres un Timeout : la garde est rendue
+  // avant la reconfiguration eventuelle (43 ms) et l'ecart jusqu'au paquet suivant.
+  if (held) held->leave();
   if (rep.v == Verdict::AckForeign) {  // avant le vidage des FIFO
     rep.fLen = r.readRegister(REG_PKT4 | CMD_READ_REGISTER);
     if (rep.fLen >= 1 && rep.fLen <= 4) r.readFifo(rep.fPay, rep.fLen, false);
@@ -233,6 +238,24 @@ Halo1Radio::TxReport Halo1Radio::sendOne(const uint8_t *pay, uint8_t len, uint32
   // PID doit avancer d'un paquet au suivant.
   if (rep.v != Verdict::Ack && rep.v != Verdict::AckForeign) beginReset(Mode::Tx, nowMs, WHY_TX);
   return rep;
+}
+
+// Refusee (verrou pas obtenu) : on emet quand meme, comme sans garde.
+const Halo1AirGuard *Halo1Radio::guardEnter() {
+  const Halo1AirGuard *g = guard_;
+  if (!g || !tuning.airGuard) return nullptr;
+  uint32_t waited = 0;
+  if (!g->enter(HALO1_AIR_GUARD_WAIT_US, &waited)) {
+    stats.guardRefused++;
+    return nullptr;
+  }
+  stats.guarded++;
+  if (waited) {
+    stats.guardWaits++;
+    if (waited >= HALO1_AIR_GUARD_WAIT_US) stats.guardCapped++;
+    if (waited > stats.guardMaxUs) stats.guardMaxUs = waited;
+  }
+  return g;
 }
 
 // Une iteration de la boucle de sniffStd, dans le meme ordre.
