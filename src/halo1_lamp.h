@@ -12,6 +12,7 @@
 #include "config.h"
 #include "halo1_map.h"
 #include "halo1_radio.h"
+#include "halo1_watch.h"
 
 enum class Halo1Link : uint8_t { Unknown, Ok, Lost };
 
@@ -20,7 +21,12 @@ class Halo1Lamp {
   using RestartFn = bool (*)();  // relance complete du module (halo.begin())
   void begin(BC5602 &chip, bool listen, RestartFn restart);  // NVS -> cru = consigne ; N'EMET RIEN
   void tick();                    // <= ~35 ms au pire (un paquet, + 26 ms de garde Thread), typiquement < 1 ms
-  void invalidateRadio() { radio.invalidate(); }
+  // Apres un outil de banc (CLI) : reconfiguration complete au prochain usage,
+  // et la surveillance repart sans preuve (l'outil a pu tout changer).
+  void invalidateRadio() {
+    radio.invalidate();
+    watch_.forget(millis());
+  }
   // Acheve un reset en cours (une reconfiguration de 40 ms, jusqu'a 3 si la
   // verification echoue ; 200 ms au plus) : un outil de banc trouve alors la
   // puce en SPI 4 fils, et non au milieu d'une reconfiguration.
@@ -61,6 +67,12 @@ class Halo1Lamp {
   // (configuration toujours rejetee). Rien n'est emis ; nouvel essai de relance
   // toutes les 60 s.
   bool lost() const { return (lost_ && !radio.present()) || (stuck_ && !relaunched_); }
+  // Relance automatique sur symptome de puce (L2, halo1_watch.h) : delais TX en
+  // serie, deluge de CRC faux en ecoute. EN PANNE : 3 relances de suite sans
+  // guerison et le symptome revient ; un essai toutes les 10 min. La LED d'etat
+  // montre moduleFault() : en panne, ou perdu (L3).
+  const halo1::ChipWatch &watch() const { return watch_; }
+  bool moduleFault() const { return lost() || watch_.failed(); }
 
   // Journal des derniers paquets emis, pour le bilan des commandes 'lampe'.
   enum : uint8_t { SLOT_BRIGHT, SLOT_TEMP, SLOT_AUTO, SLOT_RAW, SLOT_N };
@@ -126,7 +138,11 @@ class Halo1Lamp {
   void complete(uint8_t id, uint32_t now);
   void fail(uint8_t id, uint32_t now);
   void giveUp();
-  void restartModule(uint32_t now);
+  // cause : Verify (L2 sur verification), TxTimeout ou RxNoise (L2 sur
+  // symptome), None (nouvel essai L3, hors comptes).
+  void restartModule(uint32_t now, halo1::Relaunch cause);
+  void announceRelaunch(halo1::Relaunch cause);
+  void noteFault();  // annonce le passage EN PANNE et le retour
   void onAir(const halo1::AirFrame &f, uint32_t now);
   void onRemotePayload(halo1::Payload p, uint32_t now, bool arm = true);
   void noteAuto(uint8_t value, uint32_t now);
@@ -167,5 +183,7 @@ class Halo1Lamp {
   TxLog log_[kLogN] = {};
   uint32_t txCount_ = 0;
   uint32_t seenSilence_ = 0, seenTxReconf_ = 0, seenVerify_ = 0;  // traces de la radio
+  halo1::ChipWatch watch_;
+  bool faultSeen_ = false;  // watch_.failed() deja annonce
 };
 extern Halo1Lamp lamp;

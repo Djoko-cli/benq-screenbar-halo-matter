@@ -10,9 +10,13 @@
 //    - tout va bien               : eteinte, breve lueur blanche toutes les 10 s
 //    - consigne livree a la lampe : eclat vert (150 ms)
 //    - lampe injoignable (abandon): rouge, 3 clignements
+//    - module radio en panne      : rouge fixe, tant que dure la panne (relances
+//      automatiques sans effet, ou module perdu : Halo1Lamp::moduleFault())
 //    - Identify (Apple Home)      : arc-en-ciel pendant toute l'identification
-//  Priorite : Identify > rouge > vert > etat du reseau. Intensite basse (elle
-//  est sous un bureau) : 24/255 au plus par canal, 8/255 pour la lueur.
+//  Priorite : Identify > rouge x3 > rouge fixe > vert > etat du reseau. Les
+//  trois clignements restent visibles sur le rouge fixe (noir entre eux).
+//  Intensite basse (elle est sous un bureau) : 24/255 au plus par canal, 8/255
+//  pour la lueur.
 //
 //  Sans WS2812 declaree (PIN_RGB_STATUS_LED), la LED simple de PIN_STATUS_LED
 //  suit les memes motifs en tout ou rien, sans la lueur (esp32dev : IO2). Les
@@ -37,7 +41,7 @@ inline bool operator!=(Rgb a, Rgb b) { return !(a == b); }
 enum class Net : uint8_t { Unpaired, Offline, Online };
 
 // Motifs, du plus prioritaire au moins prioritaire.
-enum class Pattern : uint8_t { Identify, Unreachable, Delivered, Unpaired, Offline, Online };
+enum class Pattern : uint8_t { Identify, Unreachable, RadioFault, Delivered, Unpaired, Offline, Online };
 
 constexpr uint8_t kMax = 24;                 // plafond par canal
 constexpr uint8_t kGlowMax = 8;              // sommet de la lueur blanche
@@ -67,7 +71,7 @@ struct TestStep {
   Pattern p;
   uint32_t ms;
 };
-constexpr uint8_t kTestSteps = 6;
+constexpr uint8_t kTestSteps = 7;
 extern const TestStep kTest[kTestSteps];
 uint32_t testTotalMs();
 
@@ -83,6 +87,7 @@ class Logic {
   void setIdentify(bool on, uint32_t now);    // l'arc-en-ciel part du debut de l'identification
   void delivered(uint32_t now);                // eclat vert, relance s'il est en cours
   void unreachable(uint32_t now);              // trois clignements rouges, relances
+  void setFault(bool on, uint32_t now);        // rouge fixe tant que le module radio est en panne
   void startTest(uint32_t now);                // 'led test' : kTest, puis retour a la normale
   void stopTest() { testing_ = false; }
   bool testing() const { return testing_; }
@@ -93,8 +98,8 @@ class Logic {
  private:
   Pattern pick(uint32_t now, uint32_t &t);
   Net net_ = Net::Unpaired;
-  bool identify_ = false, red_ = false, green_ = false, testing_ = false;
-  uint32_t netAt_ = 0, identAt_ = 0, redAt_ = 0, greenAt_ = 0, testAt_ = 0;
+  bool identify_ = false, red_ = false, green_ = false, testing_ = false, fault_ = false;
+  uint32_t netAt_ = 0, identAt_ = 0, redAt_ = 0, greenAt_ = 0, testAt_ = 0, faultAt_ = 0;
 };
 
 // --- Identify par TriggerEffect (matter_bridge.cpp) ------------------------
@@ -127,8 +132,8 @@ uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now);
 // passe en sortie, eteinte. Build diagnostic : IO15 en entree, et la WS2812 mise
 // au noir une seule fois (elle garde sa derniere couleur a travers un reset).
 void statusLedBegin();
-// A chaque tour de loop() : lit l'etat (reseau toutes les 200 ms, compteurs du
-// pilote, Identify) et n'ecrit la LED que si sa couleur change.
+// A chaque tour de loop() : lit l'etat (reseau toutes les 200 ms, compteurs et
+// panne du module radio, Identify) et n'ecrit la LED que si sa couleur change.
 void statusLedPoll();
 // Commande 'led [test|stop]'.
 void statusLedCommand(const char *arg);

@@ -1,5 +1,5 @@
-// Tests hote du protocole Halo 1, des correspondances Matter et de la LED
-// d'etat (sans carte).
+// Tests hote du protocole Halo 1, des correspondances Matter, de la
+// surveillance du BM5602 et de la LED d'etat (sans carte).
 // Lancer : sh tools/test_halo1.sh
 //
 // Vecteurs et tables : docs/PLAN-PILOTE-HALO1.md (H/C2, D.3, E.2, E.4) et
@@ -11,6 +11,7 @@
 
 #include "halo1_map.h"
 #include "halo1_proto.h"
+#include "halo1_watch.h"
 #include "matter_resume.h"
 #include "status_led.h"
 
@@ -1144,6 +1145,286 @@ static void testResumePlanner() {
 }
 
 // ---------------------------------------------------------------------------
+//  Surveillance du BM5602 (halo1_watch.h) : relance sur symptome, limites
+// ---------------------------------------------------------------------------
+
+// n trames, une toutes les stepMs a partir de t, dont badPerMille pour mille au
+// CRC faux, reparties regulierement ; due() apres chaque trame, comme tick().
+// Rend la premiere cause permise (et son instant dans *at), None sinon ; t
+// avance d'autant.
+static halo1::Relaunch feedRx(halo1::ChipWatch &w, uint32_t &t, uint32_t n, uint32_t stepMs, uint32_t badPerMille,
+                              uint32_t *at = nullptr) {
+  halo1::Relaunch first = halo1::Relaunch::None;
+  uint32_t acc = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    acc += badPerMille;
+    const bool bad = acc >= 1000;
+    if (bad) acc -= 1000;
+    w.rxFrame(!bad, t);
+    const halo1::Relaunch c = w.due(t);
+    if (c != halo1::Relaunch::None && first == halo1::Relaunch::None) {
+      first = c;
+      if (at) *at = t;
+    }
+    t += stepMs;
+  }
+  return first;
+}
+
+static void timeouts(halo1::ChipWatch &w, unsigned n) {
+  for (unsigned i = 0; i < n; i++) w.txVerdict(halo1::TxSeen::Timeout);
+}
+
+static void testChipWatch() {
+  using W = ChipWatch;
+  using R = Relaunch;
+  using T = TxSeen;
+
+  // Serie de delais : remise a zero par un accuse ou un MAX_RT, pas par une
+  // FIFO refusee.
+  {
+    W w;
+    uint32_t t = 1000;
+    CHECK(w.due(t) == R::None && !w.failed() && w.symptom() == R::None, "neuve : rien");
+    timeouts(w, 2);
+    CHECK(w.due(t) == R::None && w.timeoutRun() == 2, "2 delais : rien");
+    w.txVerdict(T::Ack);
+    CHECK(w.timeoutRun() == 0 && w.due(t) == R::None, "accuse : serie remise a zero");
+    timeouts(w, 2);
+    w.txVerdict(T::MaxRt);
+    timeouts(w, 2);
+    CHECK(w.due(t) == R::None && w.timeoutRun() == 2, "MAX_RT coupe la serie");
+    w.txVerdict(T::Refused);
+    CHECK(w.due(t) == R::None && w.timeoutRun() == 2, "FIFO refusee : neutre");
+    w.txVerdict(T::Timeout);
+    CHECK(w.due(t) == R::TxTimeout && w.symptom() == R::TxTimeout, "3 delais de suite : relance");
+    CHECK(!w.failed() && w.waitMs(t) == 0, "premiere relance : ni panne ni attente");
+    timeouts(w, 300);
+    CHECK(w.timeoutRun() == 255 && w.due(t) == R::TxTimeout, "serie saturee a 255");
+  }
+
+  // MAX_RT seuls, ou meles aux delais sans jamais 3 de suite (lampe
+  // debranchee, emission difficile) : jamais de relance, jamais de panne.
+  {
+    W w;
+    uint32_t t = 0, fired = 0;
+    for (unsigned i = 0; i < 20000; i++, t += 100) {
+      w.txVerdict(T::MaxRt);
+      if (w.due(t) != R::None) fired++;
+    }
+    for (unsigned i = 0; i < 5000; i++, t += 100) {
+      timeouts(w, 2);
+      w.txVerdict(T::MaxRt);
+      if (w.due(t) != R::None) fired++;
+    }
+    CHECK(!fired && !w.failed() && w.total() == 0 && w.unrecovered() == 0, "MAX_RT : %u relances", (unsigned)fired);
+  }
+
+  // Deluge : 100 trames au moins dans la fenetre de 10 s, 90 % de CRC faux au moins.
+  {
+    W w;
+    uint32_t t = 50000;
+    CHECK(feedRx(w, t, 99, 50, 1000) == R::None && w.windowFrames() == 99, "99 trames fausses : rien");
+    CHECK(feedRx(w, t, 1, 50, 1000) == R::RxNoise && w.noisy(), "100e trame fausse : deluge");
+    CHECK(w.lastFlood().frames == 100 && w.lastFlood().bad == 100 && w.lastFlood().ms == 99 * 50,
+          "deluge retenu : %u trames, %u fausses, %lu ms", w.lastFlood().frames, w.lastFlood().bad,
+          (unsigned long)w.lastFlood().ms);
+  }
+  {
+    W w;
+    uint32_t t = 0;
+    feedRx(w, t, 10, 20, 0);
+    CHECK(feedRx(w, t, 89, 20, 1000) == R::None, "10 justes + 89 fausses : pas encore 100");
+    CHECK(feedRx(w, t, 1, 20, 1000) == R::RxNoise, "90 fausses sur 100 : deluge");
+  }
+  {
+    W w;
+    uint32_t t = 0;
+    feedRx(w, t, 11, 20, 0);
+    CHECK(feedRx(w, t, 89, 20, 1000) == R::None, "89 fausses sur 100 : rien");
+    CHECK(feedRx(w, t, 20, 20, 0) == R::None && !w.noisy(), "puis des justes : toujours rien");
+  }
+  {
+    // 150 trames fausses en 20 s : 75 par fenetre.
+    W w;
+    uint32_t t = 7;
+    CHECK(feedRx(w, t, 150, 20000 / 150, 1000) == R::None, "150 fausses etalees sur 20 s : rien");
+  }
+  {
+    // Molette de la telecommande et accuses de la lampe, 18 trames par seconde
+    // pendant 10 min, un CRC faux toutes les 10 s ; puis la meme chose avec une
+    // trame sur deux fausse (brouillage) : jamais de deluge.
+    W w;
+    uint32_t t = 0;
+    CHECK(feedRx(w, t, 18 * 600, 1000 / 18, 5) == R::None, "molette : rien");
+    CHECK(feedRx(w, t, 18 * 600, 1000 / 18, 500) == R::None, "molette brouillee a 50 %% : rien");
+  }
+  {
+    // Incident du 24/09 : ~23 trames par seconde, 99,8 % de CRC faux.
+    W w;
+    uint32_t t = 123456, at = 0;
+    const uint32_t t0 = t;
+    CHECK(feedRx(w, t, 23 * 60, 1000 / 23, 998, &at) == R::RxNoise, "incident : deluge");
+    CHECK(at - t0 <= 5000, "incident : deluge vu en %lu ms", (unsigned long)(at - t0));
+  }
+  {
+    // L'alerte tombe avec une fenetre calme, ou si plus rien n'arrive.
+    W w;
+    uint32_t t = 1000;
+    w.relaunched(R::Verify, t);  // attente de 60 s : le deluge ne peut pas partir
+    feedRx(w, t, 200, 20, 1000);
+    CHECK(w.noisy() && w.due(t) == R::None && w.symptom() == R::RxNoise, "deluge retenu pendant l'attente");
+    // Fenetre ouverte a 1000 par la relance, deluge de 1000 a 4980.
+    feedRx(w, t, 110, 60, 0);  // justes de 5000 a 11540 : la fenetre du deluge se ferme a 11000
+    CHECK(w.noisy(), "fenetre du deluge fermee : alerte gardee");
+    feedRx(w, t, 170, 60, 0);  // justes jusqu'a 21740 : la fenetre calme se ferme a 21020
+    CHECK(!w.noisy() && w.symptom() == R::None, "fenetre calme : alerte levee");
+    feedRx(w, t, 600, 20, 1000);
+    CHECK(w.noisy(), "nouveau deluge");
+    t += 25000;
+    CHECK(w.due(t) == R::None && !w.noisy(), "25 s sans trame : alerte levee");
+  }
+
+  // Limite d'une relance par minute, puis un essai toutes les 10 min apres 3
+  // relances sans guerison ; panne levee par un accuse.
+  {
+    W w;
+    uint32_t t = 5000;
+    timeouts(w, 3);
+    CHECK(w.due(t) == R::TxTimeout, "relance 1");
+    w.relaunched(R::TxTimeout, t);
+    const uint32_t t1 = t;
+    CHECK(w.timeoutRun() == 0 && w.due(t) == R::None && w.unrecovered() == 1, "preuves effacees par la relance");
+    timeouts(w, 3);
+    CHECK(w.due(t1 + 1000) == R::None && w.waitMs(t1 + 1000) == 59000, "symptome revenu : attente de 60 s");
+    CHECK(w.due(t1 + W::kGapMs - 1) == R::None, "59,999 s : toujours rien");
+    CHECK(w.due(t1 + W::kGapMs) == R::TxTimeout && !w.failed(), "60 s : relance 2");
+    w.relaunched(R::TxTimeout, t1 + W::kGapMs);
+    const uint32_t t2 = t1 + W::kGapMs;
+    timeouts(w, 3);
+    CHECK(w.due(t2 + W::kGapMs) == R::TxTimeout, "relance 3");
+    w.relaunched(R::TxTimeout, t2 + W::kGapMs);
+    const uint32_t t3 = t2 + W::kGapMs;
+    CHECK(w.unrecovered() == 3 && !w.failed(), "3 relances : pas de panne sans symptome");
+    CHECK(w.due(t3 + 5 * W::kGapMs) == R::None && !w.failed(), "sans symptome, jamais de panne");
+    timeouts(w, 3);
+    CHECK(w.due(t3 + 5 * W::kGapMs) == R::None && w.failed(), "symptome apres 3 relances : EN PANNE");
+    CHECK(w.waitMs(t3 + 5 * W::kGapMs) == W::kBackoffMs - 5 * W::kGapMs, "attente de 10 min : %lu",
+          (unsigned long)w.waitMs(t3 + 5 * W::kGapMs));
+    CHECK(w.due(t3 + W::kBackoffMs - 1) == R::None, "9 min 59,999 s : rien");
+    CHECK(w.due(t3 + W::kBackoffMs) == R::TxTimeout && w.failed(), "10 min : relance 4");
+    w.relaunched(R::TxTimeout, t3 + W::kBackoffMs);
+    const uint32_t t4 = t3 + W::kBackoffMs;
+    CHECK(w.failed() && w.unrecovered() == 4, "panne jusqu'a un signe de guerison");
+    timeouts(w, 3);
+    CHECK(w.due(t4 + W::kGapMs) == R::None, "toujours 10 min");
+    w.txVerdict(T::Ack);
+    CHECK(!w.failed() && w.unrecovered() == 0 && w.symptom() == R::None, "accuse : guerison");
+    CHECK(w.gapMs() == W::kGapMs && w.waitMs(t4 + W::kGapMs) == 0, "guerison : retour a 60 s");
+    CHECK(w.count(R::TxTimeout) == 4 && w.total() == 4 && w.count(R::RxNoise) == 0, "compteurs par cause");
+    W::Entry h[W::kHistN + 2];
+    const uint8_t n = w.history(h, W::kHistN + 2);
+    CHECK(n == W::kHistN && h[0].atMs == t4 && h[1].atMs == t3 && h[2].atMs == t2 && h[3].atMs == t1 &&
+              h[0].cause == R::TxTimeout,
+          "historique : %u entrees", n);
+    w.relaunched(R::RxNoise, t4 + W::kGapMs);
+    CHECK(w.history(h, W::kHistN) == W::kHistN && h[0].cause == R::RxNoise && h[3].atMs == t2, "historique tournant");
+    w.clearCounts();
+    CHECK(w.total() == 0 && !w.history(h, W::kHistN) && w.unrecovered() == 1 && w.waitMs(t4 + W::kGapMs) > 0,
+          "raz : compteurs seulement");
+  }
+
+  // Guerison par l'ecoute : une trame juste dans un deluge ne compte pas, une
+  // trame juste dans une fenetre calme, si.
+  {
+    W w;
+    uint32_t t = 0x40000000u;
+    for (unsigned i = 0; i < 3; i++) {
+      uint32_t at = 0;
+      CHECK(feedRx(w, t, 23 * 70, 1000 / 23, 998, &at) == R::RxNoise, "deluge %u", i + 1);
+      w.relaunched(R::RxNoise, at);
+      t = at + 1;
+    }
+    feedRx(w, t, 23 * 30, 1000 / 23, 998);  // ~1 trame juste pour 500
+    CHECK(w.failed() && w.unrecovered() == 3, "juste dans le deluge : pas de guerison");
+    feedRx(w, t, 3, 4000, 0);  // 3 trames justes, puis plus rien
+    t += 20000;
+    w.due(t);
+    CHECK(!w.failed() && w.unrecovered() == 0, "fenetre calme avec une trame juste : guerison");
+    CHECK(w.count(R::RxNoise) == 3, "3 relances pour bruit");
+  }
+  {
+    // Fenetre calme SANS trame juste : pas de guerison (le silence ne prouve rien).
+    W w;
+    uint32_t t = 0;
+    for (unsigned i = 0; i < 3; i++) {
+      w.relaunched(R::TxTimeout, t);
+      t += W::kGapMs;
+    }
+    timeouts(w, 3);
+    w.due(t);
+    CHECK(w.failed(), "panne");
+    feedRx(w, t, 3, 4000, 1000);
+    t += 30000;
+    w.due(t);
+    CHECK(w.failed(), "3 CRC faux et du silence : toujours en panne");
+  }
+
+  // Relance sur verification : comptee, et elle impose l'attente aux symptomes.
+  {
+    W w;
+    uint32_t t = 900;
+    w.relaunched(R::Verify, t);
+    timeouts(w, 3);
+    CHECK(w.due(t + 30000) == R::None && w.due(t + W::kGapMs) == R::TxTimeout, "apres une relance sur verif. : 60 s");
+    CHECK(w.count(R::Verify) == 1 && w.unrecovered() == 1, "verif. comptee");
+  }
+
+  // Outil de banc : preuves effacees, attente et compteurs gardes.
+  {
+    W w;
+    uint32_t t = 100;
+    w.relaunched(R::TxTimeout, t);
+    timeouts(w, 3);
+    feedRx(w, t, 150, 20, 1000);
+    w.forget(t);
+    CHECK(w.symptom() == R::None && w.timeoutRun() == 0 && !w.noisy() && w.windowFrames() == 0, "forget : preuves");
+    CHECK(w.waitMs(t) > 0 && w.unrecovered() == 1 && w.total() == 1, "forget : limites et compteurs gardes");
+  }
+
+  // Retour a zero de millis().
+  {
+    W w;
+    const uint32_t t0 = 0xFFFFF000u;
+    w.relaunched(R::TxTimeout, t0);
+    timeouts(w, 3);
+    CHECK(w.due(0x00000100u) == R::None, "attente a cheval sur le retour a zero");
+    CHECK(w.due(t0 + W::kGapMs - 1) == R::None && w.due(t0 + W::kGapMs) == R::TxTimeout,
+          "60 s a travers le retour a zero");
+  }
+  {
+    // Une attente echue ne revient pas 49,7 jours plus tard.
+    W w;
+    const uint32_t t0 = 1000;
+    w.relaunched(R::TxTimeout, t0);
+    CHECK(w.due(t0 + W::kGapMs) == R::None, "attente echue, sans symptome");
+    timeouts(w, 3);
+    CHECK(w.due(t0 + 30000) == R::TxTimeout, "49,7 jours plus tard : pas d'attente ranimee");
+  }
+  {
+    // Deluge a cheval sur le retour a zero.
+    W w;
+    uint32_t t = 0xFFFFF000u, at = 0;
+    CHECK(feedRx(w, t, 23 * 20, 1000 / 23, 998, &at) == R::RxNoise && at < 0x00002000u, "deluge a cheval : %08lX",
+          (unsigned long)at);
+  }
+
+  CHECK(!strcmp(relaunchText(R::TxTimeout), "delais") && !strcmp(relaunchText(R::RxNoise), "bruit") &&
+            !strcmp(relaunchText(R::Verify), "verif.") && !strcmp(relaunchText(R::None), "-"),
+        "textes des causes");
+}
+
+// ---------------------------------------------------------------------------
 //  LED d'etat (status_led.h) : motifs, priorites, intensite, rythme d'ecriture
 // ---------------------------------------------------------------------------
 
@@ -1212,7 +1493,7 @@ static void testStatusLed() {
   CHECK(render(P::Identify, kRainbowMs) == render(P::Identify, 0), "un tour en 2 s");
 
   // Intensite : jamais plus de 24 par canal, 8 pour la lueur.
-  const P all[] = {P::Identify, P::Unreachable, P::Delivered, P::Unpaired, P::Offline, P::Online};
+  const P all[] = {P::Identify, P::Unreachable, P::RadioFault, P::Delivered, P::Unpaired, P::Offline, P::Online};
   for (P p : all) {
     const unsigned cap = p == P::Online ? kGlowMax : kMax;
     for (uint32_t t = 0; t < 25000; t += 7) {
@@ -1228,6 +1509,10 @@ static void testStatusLed() {
     CHECK(renderMono(P::Unpaired, t) == !dark(render(P::Unpaired, t)), "LED simple, bleu t %u", (unsigned)t);
   }
   CHECK(renderMono(P::Identify, 0) && !renderMono(P::Identify, kIdentifyMonoHalfMs), "LED simple : Identify");
+
+  // Module radio en panne : rouge fixe, sans fin (LED simple : allumee).
+  for (uint32_t t = 0; t < 700000; t += 997)
+    CHECK(rgbIs(render(P::RadioFault, t), kMax, 0, 0) && renderMono(P::RadioFault, t), "rouge fixe, t %u", (unsigned)t);
 
   // Priorites : Identify > rouge > vert > reseau.
   {
@@ -1253,6 +1538,29 @@ static void testStatusLed() {
     l.unreachable(t0 + 3900);  // nouvel abandon : trois clignements de plus
     CHECK(l.frame(t0 + 3000 + kUnreachableMs).p == P::Unreachable, "rouge relance");
     CHECK(l.frame(t0 + 3900 + kUnreachableMs).p == P::Online, "rouge relance fini");
+  }
+
+  // Panne du module radio : au-dessus du vert et du reseau, sous le rouge x3
+  // (dont les noirs restent visibles) et Identify ; jusqu'a sa levee.
+  {
+    Logic l;
+    const uint32_t t0 = 40000;
+    l.setNet(Net::Unpaired, t0);
+    l.setFault(true, t0 + 10);
+    CHECK(l.frame(t0 + 10).p == P::RadioFault && rgbIs(l.frame(t0 + 10).c, kMax, 0, 0), "rouge fixe sur le bleu");
+    CHECK(l.frame(t0 + 3600000).p == P::RadioFault, "rouge fixe une heure plus tard");
+    l.delivered(t0 + 100);
+    CHECK(l.frame(t0 + 100).p == P::RadioFault, "rouge fixe par-dessus le vert");
+    l.unreachable(t0 + 200);
+    CHECK(l.frame(t0 + 200).p == P::Unreachable && dark(l.frame(t0 + 200 + kRedHalfMs).c), "rouge x3 : noirs visibles");
+    CHECK(l.frame(t0 + 200 + kUnreachableMs).p == P::RadioFault, "rouge x3 fini : rouge fixe");
+    l.setIdentify(true, t0 + 5000);
+    CHECK(l.frame(t0 + 5000).p == P::Identify, "Identify par-dessus le rouge fixe");
+    l.setIdentify(false, t0 + 6000);
+    l.setFault(true, t0 + 7000);  // deja en panne : rien ne change
+    CHECK(l.frame(t0 + 7000).p == P::RadioFault, "panne continue");
+    l.setFault(false, t0 + 8000);
+    CHECK(l.frame(t0 + 8000).p == P::Unpaired, "panne levee : retour au reseau");
   }
 
   // Phase du reseau : repart a chaque changement, pas quand l'etat se repete.
@@ -1367,6 +1675,7 @@ int main() {
   testSelectionMemory();
   testBenchT2();
   testResumePlanner();
+  testChipWatch();
   testStatusLed();
 
   // L'auto-test embarque passe, quel que soit le gamma en place.

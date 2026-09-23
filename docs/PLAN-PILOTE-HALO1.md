@@ -92,6 +92,7 @@ PROTOCOL.md note deja une perception logarithmique et demande une « conversion 
 | creer | `src/halo1_map.h/.cpp` | code pur : table gamma, conversions mired, `resolveMatter`, `SelectionMemory` |
 | creer | `src/halo1_radio.h/.cpp` | sequences BC5602 prouvees (deplacees de halo.cpp) et `Halo1Radio` non bloquant |
 | creer | `src/halo1_lamp.h/.cpp` | pilote `Halo1Lamp` : etat, tranches, ordonnanceur TX, suivi de la telecommande, NVS |
+| creer (24/09) | `src/halo1_watch.h/.cpp` | code pur : `ChipWatch`, relance du module sur symptome de puce et ses limites (C.5) |
 | creer | `src/cli_lampe.cpp` | famille de commandes `lampe ...` |
 | creer | `tools/host_tests/test_halo1.cpp`, `tools/test_halo1.sh` | tests hote sans carte (clang++) |
 | modifier | `src/halo.cpp` | `tick()` ne fait plus rien (C1) ; `configStdAutoAck` deplace ; `applyXoTrim` n'est plus `static` (l.12 et 2442) (C3) ; nettoyage (C6) |
@@ -574,10 +575,25 @@ L'ecoute ne peut jamais accuser : ENAA=0 est ecrit apres chaque configuration, a
 |---|---|---|---|
 | L0 rearmement | apres une trame, toutes les 100 ms, OMST ≠ RX | C.4 etapes 1 a 3 | < 0,5 ms |
 | L1 reconfiguration complete | verdict TX autre que Ack ; 500 ms de silence ; verification ratee ; `invalidate()` | C.2 | 40 ms, non bloquant, + ~3 ms |
-| L2 relance du module | 3 verifications ratees de suite, ou version de puce 0/FFFFFF | `restart_()` = `halo.begin()`, puis `radio.restartDone()` puis L1 | ~300 ms **bloquant** (rare) |
-| L3 module perdu | `halo.begin()` echoue | pilote inactif, `lampe` affiche « BM5602 perdu », nouvel essai L2 toutes les 60 s | — |
+| L2 relance du module | 3 verifications ratees de suite, ou version de puce 0/FFFFFF ; **symptome de puce** (24/09) : 3 delais TX de suite, ou deluge de CRC faux en ecoute (au moins 100 trames brutes en 10 s, dont au moins 90 % de CRC faux) | `restart_()` = `halo.begin()`, puis `radio.restartDone()` puis L1. Sur symptome : une relance au plus par minute, un essai toutes les 10 min une fois EN PANNE | ~300 ms **bloquant** (rare) |
+| L3 module perdu | `halo.begin()` echoue, ou configuration rejetee meme apres relance | pilote inactif, `lampe` affiche « BM5602 perdu », nouvel essai L2 toutes les 60 s | — |
 
 Pourquoi L2 ne met pas en danger le chien de garde : l'attente active de `calibrate()` ne masque pas les interruptions, donc le chien de garde d'interruption (300 ms) ne s'applique pas. loopTask n'est pas inscrite au chien de garde des taches (5 s).
+
+#### Relance sur symptome de puce (`src/halo1_watch.h`, depuis le 24/09)
+
+**Incident du 24/09** (carte produit, Matter sur Thread) : une pointe de pied a coulisse metallique a touche le quartz du BM5602. Pendant 70 min, **tous** les envois finissaient en delai (ni TX_DS ni MAX_RT en 30 ms : 1566 `DELAI` sur 1812 paquets) ; l'ecoute recevait ~96 000 trames brutes (~23 par seconde), dont 99,8 % de CRC faux (d'ordinaire : quelques-unes par heure) ; les instantanes lisaient STA1 00, IRQ1 00, STATUS 00, alors que RFCH, DM1 et RT1 se relisaient 05, 82 et 73. La verification ne voyait donc rien (2 echecs, 0 relance), et la reconfiguration L1 (reset logiciel + configuration) ne guerissait pas. Un `rfinit` a la main (`halo.begin()` : attente du quartz, calibration) a tout gueri d'un coup. Effet visible : chaque commande tournait jusqu'a l'abandon, Maison revenait a l'etat cru pendant que la lampe changeait en partie.
+
+`ChipWatch` (code pur, teste sur l'hote) decide ; `Halo1Lamp::tick()` relance, seul :
+
+- **Delais TX** : 3 verdicts `Timeout` de suite. Un `Ack` (ou `AckForeign`, qui porte aussi TX_DS) ou un `MaxRt` remet la serie a zero ; `FifoRefused` est neutre. **MAX_RT ne fait jamais relancer** : la puce emet et attend un accuse qui ne vient pas (lampe debranchee). Incident : 86 % de delais, la serie de 3 tombe des la premiere commande ; au milieu d'une rafale, ses paquets restants partent de la puce relancee.
+- **Deluge en ecoute** : fenetres consecutives de 10 s ; une fenetre qui atteint **100 trames brutes dont au moins 90 % de CRC faux** declenche tout de suite, sans attendre sa fin, et l'alerte tient jusqu'a la fermeture d'une fenetre calme (ou 20 s sans aucune trame). Incident : ~230 trames par fenetre, seuil atteint en ~4-5 s. Usage normal : la molette donne ~9 trames par seconde, et les accuses de la lampe au plus autant, au CRC juste ; le CRC faux se compte en unites par heure. Declencher demande 90 CRC faux en 10 s et une proportion que l'on n'a vue qu'avec la puce malade : une telecommande brouillee a 50 % n'y arrive pas (essai hote).
+- **Pas de declencheur « lampe muette »** : une lampe debranchee ne doit jamais faire relancer en boucle.
+- **Limites** : une relance sur symptome au plus 60 s apres la precedente, quelle qu'en soit la cause (une relance sur verification ratee n'attend pas, car la radio reste inerte sans elle et L3 arrete deja sa boucle ; elle compte comme les autres). Apres 3 relances de suite sans signe de guerison, si le symptome revient : **module EN PANNE**, un essai toutes les 10 min. Signe de guerison : un accuse, ou une trame au CRC juste dans une fenetre qui n'est pas un deluge ; 0,2 % du bruit de l'incident passait le CRC (une trame toutes les ~20 s), qui aurait sinon remis le compte a zero a chaque essai. L'etat EN PANNE dure jusqu'a ce signe (le silence ne prouve rien).
+- **Preuves effacees** a chaque relance (la serie et la fenetre repartent de zero : le symptome doit reapparaitre apres elle), a chaque outil de banc (`invalidateRadio()` : l'outil a pu tout changer, `rfinit` compris), et a chaque essai L3. Les limites et les compteurs, eux, restent.
+- **Outils de banc et build diag** : seul `tick()` relance ; un outil de banc (`txack`, `ecoute`, `xo`...) tourne dans la CLI sans `tick()`, puis invalide la radio. En diag, l'ecoute est coupee par defaut : seuls les envois du pilote (`lampe ...`, `lampe brut` compris) nourrissent la serie de delais.
+- **Comptes et traces** : chaque relance L2 est annoncee par une ligne toujours affichee (jamais bloquante, perdue et comptee si le tampon serie est plein), par exemple `[lampe] BM5602 : 3 paquets de suite sans TX_DS ni MAX_RT en 30 ms : relance automatique du module (1 depuis la derniere guerison)` ; de meme le passage EN PANNE et le retour. `lampe` montre la serie de delais, la fenetre d'ecoute en cours et l'etat EN PANNE ; `lampe stats` les relances par cause (verif., delais, bruit), les 4 dernieres datees, les relances de suite sans guerison et l'attente avant la prochaine permise. `lampe stats raz` remet les compteurs a zero, pas l'attente ni l'etat EN PANNE.
+- **LED d'etat** : rouge fixe tant que le module est EN PANNE ou perdu (L3) ; les trois clignements rouges d'un abandon restent visibles par-dessus (README).
 
 ### C.6 Option « bascule legere » (`lampe leger 1`, desactivee par defaut, non prouvee)
 
@@ -617,7 +633,7 @@ Les valeurs « mesure » viennent des logs tx-sem et ecoute-banc ; les autres so
   - `enterRxMode` : 4,5 ms ;
   - garde Thread avant chaque paquet (build Thread) : verrou OpenThread <= 20 ms (deux mutex, 10 ms chacun), puis fin d'une trame 802.15.4 deja partie <= 6 ms ; verrou rendu au plus 13 ms apres CE=1 (MAX_RT : 11,5 ms), donc tenu <= ~19 ms ;
   - ecriture NVS : quelques dizaines de ms ;
-  - L2 : ~300 ms, rare.
+  - L2 : ~300 ms, rare ; sur symptome, une fois par minute au plus, puis toutes les 10 min une fois EN PANNE (C.5).
 - Aucun masquage d'interruption, aucun `Serial.flush()` dans le pilote.
 - `loop()` se termine par `delay(1)` : cede la main a IDLE et aux taches moins prioritaires.
 
@@ -1205,9 +1221,10 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 | 14 | Remise en service obligatoire (changement de disposition) | a documenter dans le README |
 | 15 | Kelvin reels de 0x00 et 0x64 inconnus ; perception logarithmique | 153/370 nominaux ; γ reglable ; T14 |
 | 16 | Relecture de DM1 et RT1 non verifiee | repli sur RFCH et RT1 (C.2) ; `lampe regs` en T0 |
-| 17 | L2 bloquant (~300 ms) ; ramasse-miettes NVS | rare ; aucune interruption masquee ; ecritures au repos seulement |
+| 17 | L2 bloquant (~300 ms) ; ramasse-miettes NVS | rare ; aucune interruption masquee ; ecritures au repos seulement ; L2 sur symptome limitee a une par minute, puis une toutes les 10 min (C.5) |
 | 18 | Re-appairage en rejouant la balise (non essaye, fenetre d'appairage necessaire) | hors perimetre ; adresse d'appairage refusee partout |
 | 19 | Outils de banc (`txack`, `xo`) qui modifient la puce ou `gXoTrim` | invalidation apres chaque commande hors liste blanche ; B11 corrige |
+| 20 | Puce bloquee que la verification ne voit pas (incident du 24/09 : quartz touche, registres conformes, tous les envois en delai) | L2 sur symptome : 3 delais TX de suite, ou deluge de CRC faux en ecoute ; jamais sur une lampe muette (C.5) |
 ---
 
 ## Resultats du banc (23/09/2026, build diag, carte A = 144401, temoin B = 11301)
