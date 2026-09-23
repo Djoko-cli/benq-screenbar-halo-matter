@@ -596,6 +596,7 @@ Les valeurs « mesure » viennent des logs tx-sem et ecoute-banc ; les autres so
   - `sendOne` MAX_RT : 11,5 ms ;
   - delai maximal d'attente : 30 ms ;
   - `enterRxMode` : 4,5 ms ;
+  - garde Thread avant chaque paquet (build Thread) : verrou OpenThread <= 20 ms, puis fin d'une trame 802.15.4 deja partie <= 6 ms ;
   - ecriture NVS : quelques dizaines de ms ;
   - L2 : ~300 ms, rare.
 - Aucun masquage d'interruption, aucun `Serial.flush()` dans le pilote.
@@ -1043,6 +1044,7 @@ ok C5 A0 3/3 accuses (1650 1602 1611 us) -> cru : allumee deux lum A0 temp 35
 | `lampe attends <ms>` | fait tourner `tick()` seulement (observer l'ecoute) |
 | `lampe rx <rearm ms> <silence ms>`, `lampe rx fort 0\|1`, `lampe leger 0\|1` | options C.4, C.7, C.6 |
 | `lampe gamma <x.x>` | reconstruit la table (RAM) |
+| `lampe garde 0\|1` | build Thread : verrou OpenThread tenu pendant chaque paquet, apres la fin d'une trame Thread en cours (defaut 1, RAM) ; ailleurs absente. Compteurs dans `lampe stats` |
 | `lampe trace 0\|1` | journal par evenement, sans jamais bloquer : `[lampe] TX C5 A0 #2/3 ACK 1650 us RT2 00`, `[lampe] RX tele PID 2 C4 BC -> allumee avant lum BC`, `[lampe] RADIO reconf silence #118` |
 | `lampe stats [raz]` | compteurs |
 | `lampe regs` | RFCH/DM1/RT1 relus, version de puce, 4 instantanes |

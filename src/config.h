@@ -184,6 +184,9 @@
 #ifndef HALO1_EXPOSE_AUTO
 #define HALO1_EXPOSE_AUTO 1            // bouton A expose dans Matter (A2)
 #endif
+#ifndef HALO1_AIR_GUARD_WAIT_US
+#define HALO1_AIR_GUARD_WAIT_US 6000   // garde Thread : fin d'une trame 802.15.4 deja partie (4,3 ms + accuse)
+#endif
 #ifndef HALO1_LISTEN_DEFAULT
 #ifdef DIAG_ONLY
 #define HALO1_LISTEN_DEFAULT false     // diag : aucune activite radio de fond

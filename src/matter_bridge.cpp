@@ -7,6 +7,7 @@
 #include "halo1_lamp.h"
 
 #if MATTER_NET_THREAD
+#include <esp_ieee802154.h>
 #include <esp_openthread.h>
 #include <esp_openthread_lock.h>
 #include <openthread/link.h>
@@ -14,6 +15,70 @@
 #include <openthread/thread.h>
 // Prendre le verrou OpenThread avant l'init de la pile planterait.
 static bool sMatterStarted = false;
+
+// esp_openthread_lock_acquire prend deux mutex recursifs a la suite et, si le
+// second expire, rend false SANS lacher le premier (IDF 5.5.5, desassemble) :
+// la tache OpenThread resterait bloquee pour toujours. Le second est pris seul,
+// et brievement, par la tache lwIP a chaque paquet IPv6 sortant. On rend donc
+// apres un echec : FreeRTOS refuse sans effet de rendre un mutex qu'on ne tient
+// pas (xQueueGiveMutexRecursive), et lache celui qu'on tient.
+static bool otLockTry(TickType_t ticks) {
+  if (esp_openthread_lock_acquire(ticks)) return true;
+  esp_openthread_lock_release();
+  return false;
+}
+
+// ===========================================================================
+//  Garde d'antenne Thread autour de chaque paquet lampe
+//
+//  Terrain du 23/09 : Thread a +20 dBm sur le canal 25 (2475 MHz), a quelques
+//  cm du BM5602 qui parle a la lampe sur 2405 MHz. Juste apres chaque commande
+//  Apple Home, des paquets lampe finissent en MAX_RT par rafales (17/250 en
+//  routeur, 19/64 en MED), 0 au banc sans Thread ; certains accuses n'arrivent
+//  qu'apres des reprises du BC5602 (RT2 03). Hypothese : nos propres trames
+//  Thread (reponse a l'ecriture, rapports d'attributs) chevauchent l'echange
+//  de ~1,6 ms et aveuglent le BM5602 (ou la lampe).
+//
+//  Le verrou OpenThread tenu pendant l'echange empeche toute nouvelle trame :
+//  CSMA et reprises MAC sont logicielles sur le C6 (otPlatRadioGetCaps n'a ni
+//  CSMA_BACKOFF ni TRANSMIT_RETRIES), donc dans la tache OT. Une trame deja
+//  partie se termine en materiel : on attend la fin de l'etat TRANSMIT (CCA,
+//  emission, attente de son accuse). Reste hors d'atteinte l'accuse MAC que la
+//  puce renvoie seule a une trame recue (~0,5 ms) : l'API publique le classe
+//  en RECEIVE, comme l'ecoute permanente d'un routeur ou d'un MED.
+//
+//  REGLE : sous ce verrou, AUCUN appel Matter/CHIP (verrou de la pile
+//  compris). La tache CHIP prend le verrou OT en tenant le sien : prendre le
+//  sien ici bloquerait les deux taches pour toujours. Seul le SPI du BC5602
+//  tourne entre enter et leave (Halo1Radio::sendOne).
+// ===========================================================================
+
+static constexpr uint32_t kGuardLockMs = 20;  // au-dela, paquet emis sans garde
+static bool sGuardHeld = false;
+
+static bool airGuardEnter(uint32_t maxWaitUs, uint32_t *waitedUs) {
+  *waitedUs = 0;
+  if (!sMatterStarted || !otLockTry(pdMS_TO_TICKS(kGuardLockMs))) return false;
+  sGuardHeld = true;
+  if (esp_ieee802154_get_state() == ESP_IEEE802154_RADIO_TRANSMIT) {
+    const uint32_t t0 = micros();
+    uint32_t w;
+    do {
+      delayMicroseconds(50);
+      w = micros() - t0;
+    } while (w < maxWaitUs && esp_ieee802154_get_state() == ESP_IEEE802154_RADIO_TRANSMIT);
+    *waitedUs = w ? w : 1;
+  }
+  return true;
+}
+
+static void airGuardLeave() {
+  if (!sGuardHeld) return;
+  sGuardHeld = false;
+  esp_openthread_lock_release();
+}
+
+static const Halo1AirGuard kAirGuard = {airGuardEnter, airGuardLeave};
 #endif
 
 using namespace chip::app::Clusters;
@@ -334,6 +399,8 @@ void matterBridgeBegin() {
       chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
   chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 #endif
+  // Pile OpenThread demarree : son verrou existe. Active par defaut ('lampe garde').
+  lamp.radio.setAirGuard(&kAirGuard);
 #endif
   // Matter.begin() attend la fin de l'init de la pile, dont les ecritures de
   // demarrage passent par les callbacks : le delai du garde-fou part d'ici.
@@ -392,7 +459,7 @@ void matterPrintStatus(Print &out) {
              Matter.getNetworkEndPointId(MATTER_NETWORK_THREAD),
              Matter.isWiFiConnected() ? "CONNECTE (anormal)" : "coupe");
   otInstance *ot = sMatterStarted ? esp_openthread_get_instance() : nullptr;
-  if (ot && esp_openthread_lock_acquire(pdMS_TO_TICKS(50))) {
+  if (ot && otLockTry(pdMS_TO_TICKS(50))) {
     const uint8_t ch = otLinkGetChannel(ot);
     int8_t rssi = 0, pw = 0;
     const bool parent = otThreadGetParentAverageRssi(ot, &rssi) == OT_ERROR_NONE;
