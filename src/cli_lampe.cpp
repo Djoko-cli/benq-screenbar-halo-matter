@@ -388,9 +388,12 @@ static void cmdRx(char *p) {
     t.strongRearm = on;
   } else if (*w) {
     long rearm, silence;
-    if (!parseLong(w, rearm, 10) || !parseLong(nextWord(p), silence, 10) || rearm < 10 || rearm > 5000 ||
-        silence < 100 || silence > 60000) {
-      Serial.println("Usage : lampe rx <rearmement 10..5000 ms> <silence 100..60000 ms>");
+    if (!parseLong(w, rearm, 10) || !parseLong(nextWord(p), silence, 10) || rearm < 10 || silence < 100 ||
+        silence > 60000 || !ChipWatch::calmVisible((uint32_t)rearm, (uint32_t)silence)) {
+      // Hors de calmVisible, une piece calme ne donne plus assez de
+      // rearmements periodiques pour la guerison apres surdite (halo1_watch.h).
+      Serial.printf("Usage : lampe rx <rearmement 10..%u ms> <silence 100..60000 ms, > 2 x rearmement>\n",
+                    (unsigned)ChipWatch::kCalmMaxRearmMs);
       return;
     }
     t.rearmMs = (uint16_t)rearm;

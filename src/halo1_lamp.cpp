@@ -18,6 +18,10 @@ static constexpr uint8_t kBlobVersion = 1;
 static constexpr uint32_t kPersistAfterTxMs = 500;
 // Module perdu (L3) : nouvel essai de relance toutes les 60 s.
 static constexpr uint32_t kLostRetryMs = 60000;
+// Reglage d'origine de l'ecoute : assez de rearmements periodiques en piece
+// calme pour la guerison apres surdite ('lampe rx' refuse de meme).
+static_assert(ChipWatch::calmVisible(HALO1_RX_REARM_MS, HALO1_RX_SILENCE_MS),
+              "HALO1_RX_REARM_MS <= 200 et HALO1_RX_SILENCE_MS > 2 x HALO1_RX_REARM_MS (halo1_watch.h)");
 
 // ---------------------------------------------------------------------------
 //  Textes

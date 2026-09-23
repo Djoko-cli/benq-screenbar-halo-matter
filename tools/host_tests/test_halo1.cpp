@@ -1699,6 +1699,81 @@ static void testChipWatch() {
       listen(w, t, 30000, 10, 0, 8);
       CHECK(w.unrecovered() == 1, "ecoute calme apres %s : pas de guerison", relaunchText(c));
     }
+    // Surdite puis delais 60 s plus tard : la derniere cause decide.
+    W w;
+    uint32_t t = 1000;
+    w.relaunched(R::RxDeaf, t);
+    t += W::kGapMs;
+    timeouts(w, 3);
+    CHECK(w.due(t) == R::TxTimeout, "delais apres la surdite");
+    w.relaunched(R::TxTimeout, t);
+    listen(w, t, 30000, 10, 0, 8);
+    CHECK(w.unrecovered() == 2, "ecoute calme apres surdite puis delais : pas de guerison (%u)",
+          (unsigned)w.unrecovered());
+  }
+  {
+    // Apres une relance pour surdite, l'emission doit aussi aller : un delai
+    // dans la fenetre (meme suivi d'un MAX_RT) l'empeche, la fenetre suivante
+    // sans delai guerit ; une serie de delais pas encore close par un accuse
+    // ou un MAX_RT l'empeche aussi, fenetre apres fenetre.
+    W w;
+    uint32_t t = 1000;
+    w.relaunched(R::RxDeaf, t);
+    listen(w, t, 5000, 10, 0, 8);
+    w.txVerdict(T::Timeout);
+    w.txVerdict(T::MaxRt);
+    listen(w, t, 5010, 10, 0, 8);  // la fenetre ferme a 10 s
+    CHECK(w.unrecovered() == 1, "delai puis MAX_RT dans la fenetre : pas de guerison");
+    listen(w, t, W::kNoiseWindowMs, 10, 0, 8);
+    CHECK(w.unrecovered() == 0, "fenetre suivante sans delai : guerison");
+
+    W v;
+    t = 1000;
+    v.relaunched(R::RxDeaf, t);
+    v.txVerdict(T::Timeout);
+    listen(v, t, 30000, 10, 0, 8);
+    CHECK(v.unrecovered() == 1 && v.timeoutRun() == 1, "un delai en serie, 3 fenetres calmes : pas de guerison");
+    v.txVerdict(T::MaxRt);
+    listen(v, t, W::kNoiseWindowMs, 10, 0, 8);
+    CHECK(v.unrecovered() == 0, "MAX_RT, la puce emet : guerison");
+  }
+  {
+    // Relance 4 d'un module EN PANNE pour surdite : l'ecoute revient en RX mais
+    // chaque envoi reste en delai (l'incident montrait les deux). EN PANNE et
+    // les 10 min tiennent ; la relance suivante vient pour delais, a 10 min.
+    W w;
+    uint32_t t = 0x40000000u;
+    w.forget(t);
+    for (unsigned i = 0; i < 3; i++) {
+      CHECK(listen(w, t, W::kBackoffMs, 2, 450, 0) == R::RxDeaf, "surdite %u", i + 1);
+      w.relaunched(R::RxDeaf, t);
+    }
+    const uint32_t t3 = t;
+    CHECK(listen(w, t, W::kBackoffMs + 10, 2, 450, 0) == R::RxDeaf && t == t3 + W::kBackoffMs && w.failed(),
+          "EN PANNE, relance 4 a 10 min");
+    w.relaunched(R::RxDeaf, t);
+    const uint32_t t4 = t;
+    // Une commande toutes les 2 s, 3 delais chacune, ecoute calme entre elles.
+    for (unsigned i = 0; i < 15; i++) {
+      timeouts(w, 3);
+      CHECK(listen(w, t, 2000, 10, 0, 8) == R::None, "delais tenus par l'attente (%u)", i);
+    }
+    CHECK(w.failed() && w.unrecovered() == 4 && w.symptom() == R::TxTimeout && w.gapMs() == W::kBackoffMs,
+          "ecoute en RX, envois en delai : toujours EN PANNE (%u)", (unsigned)w.unrecovered());
+    CHECK(w.waitMs(t) == W::kBackoffMs - (t - t4), "attente de 10 min gardee");
+    CHECK(w.due(t4 + W::kBackoffMs - 1) == R::None && w.due(t4 + W::kBackoffMs) == R::TxTimeout,
+          "relance 5 pour delais a 10 min");
+  }
+  {
+    // Reglage de l'ecoute qui laisse voir la guerison en piece calme (verifie
+    // par 'lampe rx', et par static_assert dans halo1_lamp.cpp pour config.h).
+    CHECK(W::calmVisible(100, 500), "reglage d'origine 100/500");
+    CHECK(W::calmVisible(10, 100) && W::calmVisible(200, 401) && W::calmVisible(100, 5000) &&
+              W::calmVisible(200, 60000),
+          "reglages permis");
+    CHECK(!W::calmVisible(200, 400) && !W::calmVisible(250, 500) && !W::calmVisible(201, 60000) &&
+              !W::calmVisible(1000, 500) && !W::calmVisible(5000, 60000),
+          "reglages refuses");
   }
   {
     // Surdite a cheval sur le retour a zero de millis().

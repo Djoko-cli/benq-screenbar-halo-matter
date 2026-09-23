@@ -38,8 +38,9 @@
 //    aucune trame, 350 a 450 rearmements hors RX par seconde, vue en ~2-3 s
 //    au lieu d'attendre la commande suivante. D'ordinaire : ~7 rearmements
 //    par seconde EN TOUT, presque tous periodiques (un par 100 ms au plus,
-//    puce en RX : ils ne comptent pas ici) ; les hors RX, bien moins d'un par
-//    seconde. Le seuil, 100 par seconde en moyenne, est plus de 10 fois
+//    puce en RX : ils ne comptent pas ici) ; les hors RX, estimes a bien moins
+//    d'un par seconde (deduit des totaux ; a confirmer par "hors RX" dans
+//    'lampe stats'). Le seuil, 100 par seconde en moyenne, est plus de 10 fois
 //    au-dessus de tous les rearmements normaux reunis et 3,5 fois sous
 //    l'incident. Lampe debranchee (MAX_RT) : l'ecoute reste normale, rien.
 //  Rien sur une lampe muette : la debrancher ne doit pas relancer en boucle.
@@ -57,12 +58,18 @@
 //  remettrait sinon le compte a zero a chaque essai. Le silence ne prouve
 //  rien, sauf apres une relance pour surdite : une fenetre close sans CRC
 //  faux, avec au moins kCalmMinInRx rearmements periodiques (la puce disait
-//  RX) et au plus kCalmMaxOffRx hors RX, montre que ce symptome-la est parti.
-//  Sans elle, une piece calme (lampe debranchee ou pas commandee, telecommande
-//  posee) laisserait le module EN PANNE apres une relance qui a gueri. Apres
-//  une autre cause, elle ne compte pas : une puce qui reste en RX peut encore
-//  mal emettre, et les delais garderaient sinon leur limite de 10 min. L'etat
-//  EN PANNE dure jusqu'a un signe de guerison.
+//  RX) et au plus kCalmMaxOffRx hors RX, montre que ce symptome-la est parti,
+//  si l'emission ne dit pas le contraire : aucun delai dans la fenetre, et pas
+//  de serie de delais en cours (close par un accuse ou un MAX_RT). Sans elle,
+//  une piece calme (lampe debranchee ou pas commandee, telecommande posee)
+//  laisserait le module EN PANNE apres une relance qui a gueri. Apres une
+//  autre cause, elle ne compte pas : une puce qui reste en RX peut encore mal
+//  emettre, et les delais garderaient sinon leur limite de 10 min ; pour la
+//  meme raison, des delais apres une relance pour surdite l'empechent (sinon
+//  EN PANNE tomberait, LED eteinte, pendant que chaque envoi echoue). Elle
+//  suppose un reglage de l'ecoute qui donne assez de periodiques en piece
+//  calme (calmVisible, verifie par 'lampe rx'). L'etat EN PANNE dure jusqu'a
+//  un signe de guerison.
 //
 //  Chaque relance efface les preuves (serie, fenetres) : le symptome doit etre
 //  vu de nouveau apres elle. Un outil de banc (forget) les efface aussi : il a
@@ -96,6 +103,17 @@ class ChipWatch {
   static constexpr uint16_t kDeafMinRearms = 1000;    // rearmements hors RX au moins
   static constexpr uint16_t kCalmMaxOffRx = 10;       // guerison apres surdite : au plus 10 hors RX...
   static constexpr uint16_t kCalmMinInRx = 20;        // ... et 20 periodiques au moins, sur 10 s
+  // Reglage de l'ecoute (Halo1Radio::Tuning, 'lampe rx') qui donne au moins
+  // kCalmMinInRx periodiques par fenetre en piece calme : rearmement d'au plus
+  // kCalmMaxRearmMs et silence de plus de 2 rearmements. Au pire 22 en 10 s
+  // (rearmement 199, silence 399 : un periodique par cycle de ~445 ms ; simule
+  // avec un tour toutes les 1 a 10 ms, reset de 40 ms) ; ~74 par defaut. Hors
+  // de la, la guerison apres surdite ne viendrait jamais en piece calme
+  // (rearmement 250 et silence 500 : 18 ; rearmement 1000 sans silence : 9).
+  static constexpr uint16_t kCalmMaxRearmMs = 200;
+  static constexpr bool calmVisible(uint32_t rearmMs, uint32_t silenceMs) {
+    return rearmMs <= kCalmMaxRearmMs && 2u * rearmMs < silenceMs;
+  }
   static constexpr uint32_t kGapMs = 60000;           // une relance au plus par minute
   static constexpr uint8_t kFruitless = 3;            // relances de suite sans guerison...
   static constexpr uint32_t kBackoffMs = 600000;      // ... puis un essai toutes les 10 min
@@ -161,6 +179,7 @@ class ChipWatch {
   uint32_t winAt_ = 0;
   uint16_t winFrames_ = 0, winBad_ = 0;
   uint32_t winOffRx_ = 0, winInRx_ = 0;  // rearmements de la fenetre (guerison apres surdite)
+  bool winTimeout_ = false;              // delai dans la fenetre (idem)
   Flood flood_{};
   // Surdite : tranches de kDeafSliceMs, deafIdx_ celle en cours, ouverte a deafAt_.
   uint16_t deafSlice_[kDeafSlices] = {};  // saturees a 65535
