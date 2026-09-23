@@ -115,6 +115,19 @@
 #define RF_CHANNEL_3 75   // 2475 MHz
 
 // ===========================================================================
+//  Halo 1 : pilote produit (prouve, ou reglable au banc via 'lampe')
+// ===========================================================================
+#ifndef HALO1_RESET_WAIT_MS
+#define HALO1_RESET_WAIT_MS 40         // 2 x 20 ms du chemin prouve (configStdAutoAck)
+#endif
+#ifndef HALO1_RX_REARM_MS
+#define HALO1_RX_REARM_MS 100          // rearmement de l'ecoute, comme 'ecoute'
+#endif
+#ifndef HALO1_RX_SILENCE_MS
+#define HALO1_RX_SILENCE_MS 500        // reconfiguration apres ce silence, comme 'ecoute'
+#endif
+
+// ===========================================================================
 //  Limites de la lampe (a reverifier sur le Halo 1re gen via la CLI)
 // ===========================================================================
 #define HALO_CT_MIN_K 2700

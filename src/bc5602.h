@@ -77,15 +77,15 @@ constexpr uint8_t B0_OM = 0x20;
 constexpr uint8_t B0_CFO1 = 0x21;
 constexpr uint8_t B0_STA1 = 0x26;
 constexpr uint8_t B0_RSSI1 = 0x27;   // seuil de detection de porteuse
-constexpr uint8_t B0_RSSI2 = 0x28;
-// XO1 : trim de la capacite de charge du quartz (bits 4-0), donc reglage
-// FIN de la frequence porteuse. Valeur de mise sous tension 0x10.
-constexpr uint8_t B0_XO1 = 0x38;   // RSSI_NEGDB : mesure temps reel, unite -dB
+constexpr uint8_t B0_RSSI2 = 0x28;   // RSSI_NEGDB : mesure temps reel, unite -dB
 constexpr uint8_t B0_RSSI3 = 0x29;   // RSSI au moment ou le mot de synchro accroche
 constexpr uint8_t B0_DPL1 = 0x2A;    // longueur de payload dynamique
 constexpr uint8_t B0_DPL2 = 0x2B;
 constexpr uint8_t B0_RXPW0 = 0x2C;   // longueur de payload statique, pipe 0
 constexpr uint8_t B0_ENAA = 0x32;    // activation de l'auto-ACK par pipe
+// XO1 : trim de la capacite de charge du quartz (bits 4-0), donc reglage
+// FIN de la frequence porteuse. Valeur de mise sous tension 0x10.
+constexpr uint8_t B0_XO1 = 0x38;
 
 // --- Bits utiles -----------------------------------------------------------
 constexpr uint8_t ACAL_ENABLE = 0x08;  // OM bit 3 : lance la calibration du VCO
@@ -126,6 +126,9 @@ constexpr uint8_t OMST_RX = 5;
 constexpr uint8_t OMST_CALIB = 6;
 
 constexpr uint8_t STATUS_RX_DR = 0x01;         // 0 = donnees disponibles en RX
+// Meme bit, sous un nom qui dit ce qu'il mesure : le "RX_DR" de STATUS vaut 1
+// quand la FIFO RX est VIDE, a l'inverse du RX_DR d'IRQ1.
+constexpr uint8_t STATUS_RX_EMPTY = STATUS_RX_DR;
 constexpr uint8_t STATUS_TX_FIFO_EMPTY = 0x10;
 constexpr uint8_t STATUS_TX_FIFO_FULL = 0x20;
 
@@ -176,8 +179,10 @@ class BC5602 {
   void clearInterrupts() {
     writeRegister(bc5602::REG_IRQ1 | bc5602::CMD_WRITE_REGISTER, bc5602::IRQ_CLEAR_ALL);
   }
-  // Pose CE=1 puis strobe RX, et attend que OMST rapporte vraiment RX.
-  bool enterRxMode(uint32_t timeoutUs = 1500);  // par tentative, 4 tentatives max
+  // Pose PRM_RX, puis, tant que OMST ne rapporte pas RX : vide la FIFO RX,
+  // acquitte RX_DR et strobe RX_MODE (0x8E). Ne touche PAS a CE. Rend la main
+  // tout de suite si la puce est deja en RX : ce n'est pas un rearmement force.
+  bool enterRxMode(uint32_t timeoutUs = 1500);  // par tentative, 3 tentatives au plus
   bool crystalReady() const { return crystalReady_; }
   uint8_t lastCalibOM() const { return lastCalibOM_; }
   // Nombre de registres recommandes qui ne se relisent pas a la valeur ecrite.
