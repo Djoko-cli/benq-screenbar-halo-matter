@@ -11,7 +11,7 @@ namespace halo1 {
 //  parait logarithmique (PROTOCOL.md) : gamma 2 met 0x80 vers le niveau 138.
 //  Jusqu'au plancher (kMatterLevelFloor), 0x4C quel que soit gamma : le niveau
 //  rapporte pour le minimum y revient exactement. A gamma 2, rien ne change
-//  (niveaux 1..14 deja a 0x4C) ; a gamma 1, 0x4D n'est plus atteint.
+//  (niveaux 1..14 deja a 0x4C) ; a gamma 1, 0x4D et 0x4E ne sont plus atteints.
 //  Calcul en double : en float, l'arrondi de certains points tomberait a
 //  moins d'un ulp de 0,5 et pourrait differer de l'hote a la carte.
 // ---------------------------------------------------------------------------
@@ -82,8 +82,8 @@ uint16_t miredFromTemp(uint8_t t) {
 }
 
 // Affichage stable : la valeur qu'un controleur a ecrite ne saute jamais vers
-// une voisine qui donne la meme valeur brute, sauf sous le plancher : 1 ou 2
-// (4C) s'affichent 3, sinon Apple Home montrerait la lampe pleine.
+// une voisine qui donne la meme valeur brute, sauf sous le plancher : 1 a 3
+// (4C) s'affichent 4, sinon Apple Home pourrait montrer la lampe pleine.
 uint8_t displayLevel(uint8_t attr, uint8_t bright) {
   if (attr >= kMatterLevelFloor && attr <= 254 && rawFromLevel(attr) == bright) return attr;
   return levelFromRaw(bright);

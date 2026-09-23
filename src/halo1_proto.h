@@ -86,6 +86,24 @@ Plan plan(const State &target, const State &believed, uint8_t dirty);
 uint8_t dueFields(const State &target, uint8_t fields);
 
 uint8_t nextAuto(uint8_t last);            // 0 ou 255 -> 1, sinon last + 1
+
+// Appuis sur A entendus de la telecommande. Elle emet chaque appui en 3 copies
+// du meme numero a ~100 ms (btn-A4.log : E0 01 x3 en 200 ms) ; le numero
+// augmente d'un appui a l'autre et repart a 01 apres une pause ou une autre
+// commande (PROTOCOL.md). Une trame A est un nouvel appui si c'est la premiere
+// depuis reset(), si son numero change, ou si la precedente est a kRepeatMs ou
+// plus, avant OU apres elle : dans un meme tour de tick(), une trame lue dans
+// un accuse (instant de fin d'emission) precede une trame lue ensuite avec
+// l'instant, plus ancien, du debut du tour.
+struct AutoPressFilter {
+  static constexpr uint32_t kRepeatMs = 1000;
+  bool feed(uint8_t value, uint32_t nowMs);  // true : nouvel appui
+  void reset() { fresh_ = true; }            // autre commande de la telecommande
+ private:
+  bool fresh_ = true;
+  uint8_t value_ = 0;
+  uint32_t at_ = 0;
+};
 uint8_t crc8(const uint8_t *p, size_t n);  // poly 0x07, init 0 : blob NVS
 int selfTest(char *msg, size_t n);         // 0 = ok, sinon nb d'echecs (1er dans msg)
 }  // namespace halo1

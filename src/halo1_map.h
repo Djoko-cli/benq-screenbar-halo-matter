@@ -8,12 +8,14 @@ constexpr uint16_t kMiredCold = 153;  // temp 0x00 (le plus froid) ; ~6536 K NOM
 constexpr uint16_t kMiredWarm = 370;  // temp 0x64 (le plus chaud) ; ~2703 K NOMINAL, non mesure
 
 // Plancher des niveaux RAPPORTES a Matter. Apple Home affiche CurrentLevel en
-// pourcentage entier de 254 : le niveau 1 (0,39 %) y devient 0 %, et une
-// lumiere allumee a 0 % s'y affiche au MAXIMUM (terrain du 23/09 : lampe au
-// minimum 4C, reglee a la molette, montree pleine). Le niveau 2 (0,79 %)
-// depend du sens de l'arrondi ; 3 (1,18 %) donne 1 %, arrondi ou tronque.
-// Les niveaux 0..3 ecrits par un controleur donnent tous 4C, le minimum.
-constexpr uint8_t kMatterLevelFloor = 3;
+// pourcentage entier : le niveau 1 y devient 0 %, et une lumiere allumee a
+// 0 % s'y affiche au MAXIMUM (terrain du 23/09 : lampe au minimum 4C, reglee a
+// la molette, montree pleine). Sa formule exacte n'est pas connue : L/254, ou
+// (L-1)/253 si la plage part de MinLevel = 1, arrondi ou tronque. 3 tomberait
+// a 0 % en (L-1)/253 tronque (0,79 %) ; 4 donne au moins 1 % dans les quatre
+// cas (1,57 % et 1,19 %). Les niveaux 0..4 ecrits par un controleur donnent
+// tous 4C, le minimum ; a gamma 2, les niveaux 1..14 y sont deja.
+constexpr uint8_t kMatterLevelFloor = 4;
 
 // Tant que mapInit n'a pas ete appele, la table est construite a gamma 2,0
 // (decision A3) au premier usage. Ce repli ignore HALO1_LEVEL_GAMMA : c'est

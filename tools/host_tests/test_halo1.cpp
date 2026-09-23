@@ -447,12 +447,69 @@ static void testAutoAndCrc8() {
 }
 
 // ---------------------------------------------------------------------------
+//  Appuis A de la telecommande (AutoPressFilter, D.6)
+// ---------------------------------------------------------------------------
+
+// Trames A (numero, instant) ; numero 0 : autre commande (reset). Renvoie le
+// nombre d'appuis comptes.
+struct AutoRx { uint8_t value; uint32_t at; };
+static unsigned countPresses(const AutoRx *rx, size_t n) {
+  AutoPressFilter f;
+  unsigned presses = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (!rx[i].value) f.reset();
+    else if (f.feed(rx[i].value, rx[i].at)) presses++;
+  }
+  return presses;
+}
+
+static void testAutoPresses() {
+  // btn-A4.log : E0 01 x3 en 200 ms, un seul appui.
+  const AutoRx copies[] = {{1, 5000}, {1, 5100}, {1, 5200}};
+  CHECK(countPresses(copies, 3) == 1, "3 copies : %u appuis", countPresses(copies, 3));
+  // Premiere trame depuis le demarrage, meme a l'instant 0.
+  const AutoRx first[] = {{1, 0}};
+  CHECK(countPresses(first, 1) == 1, "premiere trame a 0 ms");
+  // Numero suivant : nouvel appui, meme 300 ms apres.
+  const AutoRx next[] = {{1, 5000}, {1, 5100}, {2, 5300}, {2, 5400}};
+  CHECK(countPresses(next, 4) == 2, "01 puis 02 : %u appuis", countPresses(next, 4));
+  // Meme numero 1 s apres la trame precedente : nouvel appui ; 999 ms : copie.
+  const AutoRx again[] = {{1, 5000}, {1, 6000}, {1, 6999}};
+  CHECK(countPresses(again, 3) == 2, "01 puis 01 a +1000 : %u appuis", countPresses(again, 3));
+  // Retour a zero de millis() entre deux copies : meme appui ; puis 1 s apres.
+  const AutoRx wrap[] = {{1, 0xFFFFFFA0u}, {1, 0x00000040u}, {1, 0x00000440u}};
+  CHECK(countPresses(wrap, 2) == 1 && countPresses(wrap, 3) == 2, "retour a zero : %u/%u appuis",
+        countPresses(wrap, 2), countPresses(wrap, 3));
+  // Une autre commande (C4 xx) entre deux A : le numero repart a 01, nouvel appui.
+  const AutoRx reset[] = {{1, 5000}, {0, 5200}, {1, 5400}, {1, 5500}};
+  CHECK(countPresses(reset, 4) == 2, "01, C4 xx, 01 a +400 : %u appuis", countPresses(reset, 4));
+  // Instant anterieur dans le meme tour (trame d'accuse a la fin d'emission,
+  // puis trame lue avec l'instant du debut du tour) : meme appui.
+  const AutoRx back[] = {{1, 5030}, {1, 5000}, {1, 5100}};
+  CHECK(countPresses(back, 3) == 1, "instant anterieur : %u appuis", countPresses(back, 3));
+  // Tres anterieur (plus de 1 s) : nouvel appui, comme tres posterieur.
+  const AutoRx far[] = {{1, 9000}, {1, 5000}};
+  CHECK(countPresses(far, 2) == 2, "instant anterieur de 4 s : %u appuis", countPresses(far, 2));
+  // Longue pause (plus de 24,8 jours) : nouvel appui malgre le changement de signe.
+  const AutoRx pause[] = {{1, 5000}, {1, 5000u + 0x90000000u}};
+  CHECK(countPresses(pause, 2) == 2, "pause de 28 jours : %u appuis", countPresses(pause, 2));
+}
+
+// ---------------------------------------------------------------------------
 //  Conversions Matter (E.2)
 // ---------------------------------------------------------------------------
 
-// Pourcentage qu'affiche Apple Home pour un niveau, arrondi ou tronque.
+// Pourcentage qu'affiche Apple Home pour un niveau : formule inconnue, donc
+// les quatre candidates, sur 254 ou depuis MinLevel = 1 (sur 253), arrondi ou
+// tronque. Le plancher doit donner au moins 1 % dans chacune.
 static unsigned percentRounded(unsigned level) { return (level * 100 + 127) / 254; }
 static unsigned percentTruncated(unsigned level) { return level * 100 / 254; }
+static unsigned percentMinRounded(unsigned level) { return ((level - 1) * 100 + 126) / 253; }
+static unsigned percentMinTruncated(unsigned level) { return (level - 1) * 100 / 253; }
+static bool showsAtLeast1(unsigned level) {
+  return level >= 1 && percentRounded(level) >= 1 && percentTruncated(level) >= 1 &&
+         percentMinRounded(level) >= 1 && percentMinTruncated(level) >= 1;
+}
 
 static void checkTableInvariants(const char *what) {
   CHECK(rawFromLevel(0) == rawFromLevel(1) && rawFromLevel(1) == 0x4C && rawFromLevel(254) == 0xFE,
@@ -467,8 +524,8 @@ static void checkTableInvariants(const char *what) {
   for (unsigned r = 0; r < 256; r++) {
     const uint8_t l = levelFromRaw((uint8_t)r);
     CHECK(l >= kMatterLevelFloor && l <= 254, "%s : levelFromRaw(%02X) = %u", what, r, l);
-    // Jamais 0 % dans Apple Home, qu'il arrondisse ou qu'il tronque.
-    CHECK(percentRounded(l) >= 1 && percentTruncated(l) >= 1, "%s : levelFromRaw(%02X) = %u, 0 %%", what, r, l);
+    // Jamais 0 % dans Apple Home, quelle que soit sa formule.
+    CHECK(showsAtLeast1(l), "%s : levelFromRaw(%02X) = %u, 0 %%", what, r, l);
     if (r <= 0xFE)
       CHECK(rawFromLevel(l) >= r && (l == kMatterLevelFloor || rawFromLevel((uint8_t)(l - 1)) < r),
             "%s : levelFromRaw(%02X) = %u n'est pas le plus petit", what, r, l);
@@ -502,7 +559,7 @@ static void checkDisplay(const char *what) {
   // Quel que soit le cache, le niveau affiche est >= plancher et donne 4C.
   for (unsigned a = 0; a < 256; a++) {
     const uint8_t d = displayLevel((uint8_t)a, 0x4C);
-    CHECK(d >= kMatterLevelFloor && rawFromLevel(d) == 0x4C && percentTruncated(d) >= 1,
+    CHECK(d >= kMatterLevelFloor && rawFromLevel(d) == 0x4C && showsAtLeast1(d),
           "%s : 4C affiche %u (cache %u)", what, d, a);
   }
   CHECK(displayLevel(1, 0x4C) == kMatterLevelFloor && displayLevel(0, 0x4C) == kMatterLevelFloor,
@@ -521,6 +578,10 @@ static void checkDisplay(const char *what) {
 }
 
 static void testLevelMap() {
+  // Plancher : le plus petit niveau montre a au moins 1 % par les quatre
+  // formules (3 donne 0 % en (L-1)/253 tronque).
+  CHECK(showsAtLeast1(kMatterLevelFloor) && !showsAtLeast1(kMatterLevelFloor - 1u),
+        "plancher %u : pas le plus petit niveau a 1 %%", kMatterLevelFloor);
   // Avant tout mapInit : gamma 2 (decision A3).
   CHECK(mapGamma() == 2.0f, "gamma par defaut %f", (double)mapGamma());
   CHECK(rawFromLevel(138) == 0x80, "table par defaut");
@@ -534,12 +595,16 @@ static void testLevelMap() {
     CHECK(rawFromLevel((uint8_t)l) == want, "gamma 1 : raw(%u)", l);
   }
   // Aller-retour brut -> niveau rapporte (>= plancher) -> brut : l'identite pour
-  // toute valeur atteinte depuis le plancher. Seule 4D, que donnait le niveau 2
-  // (desormais 4C), ne l'est plus : elle se rapporte au niveau de 4E.
+  // toute valeur atteinte depuis le plancher. Seules 4D et 4E, que donnaient
+  // les niveaux 3 et 4 (desormais 4C), ne le sont plus : elles se rapportent au
+  // niveau de 4F, le premier au-dessus du plancher.
+  CHECK(rawFromLevel(kMatterLevelFloor + 1) == 0x4F, "gamma 1 : premier niveau au-dessus du plancher -> %02X",
+        rawFromLevel(kMatterLevelFloor + 1));
   for (unsigned r = 0x4C; r <= 0xFE; r++) {
     const uint8_t l = levelFromRaw((uint8_t)r);
-    if (r == 0x4D) {
-      CHECK(l == kMatterLevelFloor + 1 && rawFromLevel(l) == 0x4E, "gamma 1 : 4D -> %u -> %02X", l, rawFromLevel(l));
+    if (r == 0x4D || r == 0x4E) {
+      CHECK(l == kMatterLevelFloor + 1 && rawFromLevel(l) == 0x4F, "gamma 1 : %02X -> %u -> %02X", r, l,
+            rawFromLevel(l));
       continue;
     }
     CHECK(l >= kMatterLevelFloor && rawFromLevel(l) == r, "gamma 1 : aller-retour %02X -> %u -> %02X", r, l,
@@ -547,7 +612,7 @@ static void testLevelMap() {
     // Inverse ferme de E.2, au-dessus du plancher : exact lui aussi, mais il
     // vise le niveau le plus proche et non le plus petit (levelFromRaw suit B.3
     // pour tout gamma). Meme valeur brute dans tous les cas.
-    if (r > 0x4D) {
+    if (r > 0x4E) {
       const unsigned lf = 1 + ((r - 0x4C) * 253 + 89) / 178;
       CHECK(lf > kMatterLevelFloor && rawFromLevel((uint8_t)lf) == r && lf >= l,
             "gamma 1 : inverse ferme L(%02X) = %u", r, lf);
@@ -969,6 +1034,7 @@ int main() {
   testPlan();
   testDelivery();
   testAutoAndCrc8();
+  testAutoPresses();
   testMireds();
   testRules();
   testSelectionMemory();
