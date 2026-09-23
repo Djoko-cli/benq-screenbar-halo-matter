@@ -50,9 +50,11 @@ void ChipWatch::openWindow(uint32_t nowMs) {
 
 // Fenetres consecutives de kNoiseWindowMs (la suivante part a la fermeture de
 // la precedente, due() tournant a chaque tour). Une fenetre close decide : un
-// deluge garde l'alerte, une fenetre calme la leve, et une trame juste y vaut
-// guerison. Plus d'une fenetre ecoulee depuis l'ouverture : la plus recente
-// etait vide, l'alerte tombe.
+// deluge garde l'alerte, une fenetre calme la leve, et elle vaut guerison si
+// plus de la moitie de ses trames ont le CRC juste (60 fausses et une juste :
+// une puce malade sous le seuil du deluge, pas une guerison). Plus d'une
+// fenetre ecoulee depuis l'ouverture : la plus recente etait vide, l'alerte
+// tombe.
 void ChipWatch::roll(uint32_t nowMs) {
   if (!winOpen_) {
     openWindow(nowMs);
@@ -61,7 +63,7 @@ void ChipWatch::roll(uint32_t nowMs) {
   const uint32_t age = nowMs - winAt_;
   if (age < kNoiseWindowMs) return;
   noisy_ = winMet_ && age < 2 * kNoiseWindowMs;
-  if (!winMet_ && winFrames_ > winBad_) recovered();
+  if (!winMet_ && (uint32_t)winBad_ * 2u < winFrames_) recovered();
   openWindow(nowMs);
 }
 

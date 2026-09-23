@@ -214,12 +214,13 @@ bool Halo1Lamp::waitIdle(uint32_t maxMs) {
   return true;
 }
 
-// L2 : relance complete du module (halo.begin(), ~300 ms bloquant, rare), puis
+// L2 : relance complete du module (halo.begin(), ~300 ms bloquant, jusqu'a
+// ~0,5 s si le quartz ou la calibration ne repondent pas ; rare), puis
 // reconfiguration. Relance ratee, ou sans effet sur la verification (aucune
 // configuration verifiee depuis la precedente) : L3, pilote inactif, nouvel
 // essai toutes les 60 s. Les relances L2 (verification ou symptome) sont
-// annoncees et comptees par la surveillance ; les essais L3 ne font qu'effacer
-// ses preuves.
+// annoncees et comptees par la surveillance ; les essais L3 effacent ses
+// preuves et lui imposent son attente (une relance au plus par minute).
 void Halo1Lamp::restartModule(uint32_t now, Relaunch cause) {
   restartAt_ = now;
   if (cause == Relaunch::Verify && relaunched_ && radio.stats.fullConfigs == relaunchConfigs_) {
@@ -246,8 +247,9 @@ void Halo1Lamp::restartModule(uint32_t now, Relaunch cause) {
   }
   if (cause == Relaunch::None) {
     watch_.forget(now);
+    watch_.held(now);  // pas de relance sur symptome juste apres cet essai
   } else {
-    announceRelaunch(cause);  // avant les ~300 ms de halo.begin()
+    announceRelaunch(cause);  // avant les ~300 ms (jusqu'a ~0,5 s) de halo.begin()
     watch_.relaunched(cause, now);
   }
   const bool ok = restart_ && restart_();
@@ -259,7 +261,17 @@ void Halo1Lamp::restartModule(uint32_t now, Relaunch cause) {
     // stuck_ reste leve jusqu'a une configuration verifiee (tick).
     relaunched_ = true;
     relaunchConfigs_ = radio.stats.fullConfigs;
-    trace("[lampe] RADIO module relance");
+    const BC5602 *c = radio.chip();
+    if (cause != Relaunch::None && c) {
+      // BC5602::begin() reussit des que la version se lit, quartz pret ou non :
+      // ce qui a vraiment ete refait se lit ici.
+      char msg[96];
+      snprintf(msg, sizeof(msg), "[lampe] BM5602 relance : quartz %s, calibration %s",
+               c->crystalReady() ? "pret" : "PAS PRET", c->calibrated() ? "faite" : "RATEE");
+      notice(msg);
+    } else {
+      trace("[lampe] RADIO module relance");
+    }
     return;
   }
   if (!lost_) notice("[lampe] BM5602 perdu : nouvel essai de relance toutes les 60 s");
@@ -899,10 +911,16 @@ void Halo1Lamp::printStatus(Print &out) const {
              kModes[(uint8_t)radio.mode()], (unsigned long)rs.fullConfigs, (unsigned long)rs.silenceReconf,
              (unsigned long)rs.txReconf, (unsigned long)rs.verifyFail, (unsigned long)rs.rearms);
   out.printf("  surveil.    : %u delai(s) de suite (relance a %u), fenetre d'ecoute %u trames dont %u CRC faux "
-             "(deluge : %u dont %u %%), %lu relance(s) auto\n",
+             "(deluge : %u dont %u %%), %lu relance(s) auto",
              (unsigned)watch_.timeoutRun(), (unsigned)ChipWatch::kTimeoutRun, (unsigned)watch_.windowFrames(),
              (unsigned)watch_.windowBad(), (unsigned)ChipWatch::kNoiseMinFrames, (unsigned)ChipWatch::kNoiseBadPct,
              (unsigned long)watch_.total());
+  // La derniere relance reste lisible ici meme si sa ligne sur la console a ete
+  // perdue (tampon serie plein, traceDropped).
+  ChipWatch::Entry last;
+  if (watch_.history(&last, 1))
+    out.printf(", derniere : %s il y a %lu s", relaunchText(last.cause), (unsigned long)((now - last.atMs) / 1000));
+  out.println();
   out.printf("  dernier A   : %u (%lu appuis entendus de la telecommande), memoire des lampes : %s\n", lastAuto_,
              (unsigned long)remoteAutoPresses_, lampsText(selMem_.memory(target_)));
   out.printf("  sauvegarde  : %s\n", persistDirty_ ? "en attente" : "a jour");
@@ -929,11 +947,11 @@ void Halo1Lamp::printStats(Print &out) const {
              (unsigned long)s.rxFrames, (unsigned long)s.rxState, (unsigned long)s.rxAuto,
              (unsigned long)s.rxLampAcks, (unsigned long)s.rxService, (unsigned long)s.rxReserved,
              (unsigned long)s.rxInvalid, (unsigned long)s.rxCrcBad);
-  out.printf("  radio    : %lu config., %lu reconf. silence, %lu reconf. TX, %lu verif. ratees, %lu rearm., "
-             "%lu brutes, %lu bascules legeres\n",
+  out.printf("  radio    : %lu config., %lu reconf. silence, %lu reconf. TX, %lu verif. ratees, %lu rearm. "
+             "(%lu hors RX), %lu brutes, %lu bascules legeres\n",
              (unsigned long)r.fullConfigs, (unsigned long)r.silenceReconf, (unsigned long)r.txReconf,
-             (unsigned long)r.verifyFail, (unsigned long)r.rearms, (unsigned long)r.rxRaw,
-             (unsigned long)r.lightSwitches);
+             (unsigned long)r.verifyFail, (unsigned long)r.rearms, (unsigned long)r.rearmsOffRx,
+             (unsigned long)r.rxRaw, (unsigned long)r.lightSwitches);
   if (radio.hasAirGuard())
     out.printf("  garde    : %s, %lu paquets gardes, %lu refus du verrou, %lu attentes d'emission Thread "
                "(%lu plafonnees, max %lu us)\n",

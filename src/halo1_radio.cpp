@@ -219,6 +219,10 @@ Halo1Radio::TxReport Halo1Radio::sendOne(const uint8_t *pay, uint8_t len, uint32
       }
       delayMicroseconds(20);
     }
+    // Une preemption entre la derniere lecture et le test d'echeance a pu
+    // couvrir TX_DS ou MAX_RT : relu avant de conclure au delai, qui compte
+    // pour la relance du module (halo1_watch.h).
+    if (!(irq & (IRQ_TX_DS | IRQ_MAX_RT))) irq = r.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     us = micros() - t0;
     // TX_DS avec RX_DR : une trame avec charge (la telecommande, sans doute)
     // est arrivee dans notre fenetre d'accuse. Jamais observe.
@@ -290,6 +294,7 @@ bool Halo1Radio::pollRx(uint32_t nowMs, uint8_t raw[8]) {
     r.enterRxMode(300);
     lastArm_ = nowMs;
     stats.rearms++;
+    stats.rearmsOffRx++;
   } else if ((uint32_t)(nowMs - lastArm_) > tuning.rearmMs) {
     // Rearmement de securite. La puce disant RX, enterRxMode rend la main tout
     // de suite : le rearmement prouve se reduit a CE=0 + reecriture de MASK.
