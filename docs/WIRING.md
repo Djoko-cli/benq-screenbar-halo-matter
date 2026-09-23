@@ -69,10 +69,10 @@ change-les là plutôt que dans le code.
 
 ## Points à ne pas négliger
 
-**Découplage.** Mets un 100 nF **plus** un 10 µF au plus près de `VDD`. En
-émission à +7 dBm le module tire des pointes de courant courtes ; sur une
-breadboard alimentée par le régulateur d'un devkit, ça se traduit sinon par des
-trames perdues au hasard.
+**Découplage (optionnel).** Un 100 nF **plus** un 10 µF au plus près de `VDD`
+est une bonne pratique peu coûteuse. Mais tout le projet a été mesuré **sans**
+(0 perte au banc hors Thread, 23/09), et le module a vraisemblablement son
+propre découplage : rien n'a jamais montré qu'il était nécessaire.
 
 **Cohabitation 2,4 GHz.** L'ESP32 émet en Wi-Fi jusqu'à +20 dBm ; le BenQ
 travaille à 2405 MHz, en plein sur le canal Wi-Fi 1. Deux précautions :
