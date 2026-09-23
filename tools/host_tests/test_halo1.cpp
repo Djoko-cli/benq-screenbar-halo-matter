@@ -450,34 +450,66 @@ static void testAutoAndCrc8() {
 //  Conversions Matter (E.2)
 // ---------------------------------------------------------------------------
 
+// Pourcentage qu'affiche Apple Home pour un niveau, arrondi ou tronque.
+static unsigned percentRounded(unsigned level) { return (level * 100 + 127) / 254; }
+static unsigned percentTruncated(unsigned level) { return level * 100 / 254; }
+
 static void checkTableInvariants(const char *what) {
   CHECK(rawFromLevel(0) == rawFromLevel(1) && rawFromLevel(1) == 0x4C && rawFromLevel(254) == 0xFE,
         "%s : bornes", what);
+  // Niveaux 0..plancher : tous au minimum, quel que soit gamma.
+  for (unsigned l = 0; l <= kMatterLevelFloor; l++)
+    CHECK(rawFromLevel((uint8_t)l) == 0x4C, "%s : niveau %u sous le plancher -> %02X", what, l,
+          rawFromLevel((uint8_t)l));
   for (unsigned l = 2; l <= 254; l++)
     CHECK(rawFromLevel((uint8_t)l) >= rawFromLevel((uint8_t)(l - 1)), "%s : non monotone en %u", what, l);
   CHECK(rawFromLevel(255) == 0xFE, "%s : niveau 255", what);
   for (unsigned r = 0; r < 256; r++) {
     const uint8_t l = levelFromRaw((uint8_t)r);
-    CHECK(l >= 1 && l <= 254, "%s : levelFromRaw(%02X) = %u", what, r, l);
+    CHECK(l >= kMatterLevelFloor && l <= 254, "%s : levelFromRaw(%02X) = %u", what, r, l);
+    // Jamais 0 % dans Apple Home, qu'il arrondisse ou qu'il tronque.
+    CHECK(percentRounded(l) >= 1 && percentTruncated(l) >= 1, "%s : levelFromRaw(%02X) = %u, 0 %%", what, r, l);
     if (r <= 0xFE)
-      CHECK(rawFromLevel(l) >= r && (l == 1 || rawFromLevel((uint8_t)(l - 1)) < r),
+      CHECK(rawFromLevel(l) >= r && (l == kMatterLevelFloor || rawFromLevel((uint8_t)(l - 1)) < r),
             "%s : levelFromRaw(%02X) = %u n'est pas le plus petit", what, r, l);
   }
+  CHECK(levelFromRaw(0x4C) == kMatterLevelFloor && levelFromRaw(0) == kMatterLevelFloor,
+        "%s : minimum rapporte %u", what, levelFromRaw(0x4C));
   CHECK(levelFromRaw(0xFF) == 254, "%s : levelFromRaw(FF)", what);
 }
 
 static void checkDisplay(const char *what) {
-  // La valeur ecrite par un controleur reste affichee.
-  for (unsigned l = 1; l <= 254; l++)
-    CHECK(displayLevel((uint8_t)l, rawFromLevel((uint8_t)l)) == l, "%s : niveau %u saute", what, l);
-  // Idempotent, dans 1..254, et toujours la valeur canonique hors correspondance.
+  // La valeur ecrite par un controleur reste affichee, des le plancher ;
+  // dessous, le plancher (meme valeur brute 4C).
+  for (unsigned l = 0; l <= 254; l++) {
+    const uint8_t d = displayLevel((uint8_t)l, rawFromLevel((uint8_t)l));
+    if (l >= kMatterLevelFloor)
+      CHECK(d == l, "%s : niveau %u saute a %u", what, l, d);
+    else
+      CHECK(d == kMatterLevelFloor, "%s : niveau %u affiche %u, pas le plancher", what, l, d);
+  }
+  // Idempotent, dans plancher..254, et toujours la valeur canonique hors correspondance.
   for (unsigned a = 0; a < 256; a++)
     for (unsigned r = 0x4C; r <= 0xFE; r++) {
       const uint8_t d = displayLevel((uint8_t)a, (uint8_t)r);
-      CHECK(d >= 1 && d <= 254 && displayLevel(d, (uint8_t)r) == d, "%s : affichage niveau %u/%02X", what, a, r);
+      CHECK(d >= kMatterLevelFloor && d <= 254 && displayLevel(d, (uint8_t)r) == d,
+            "%s : affichage niveau %u/%02X", what, a, r);
       CHECK(rawFromLevel(d) == r || d == levelFromRaw((uint8_t)r), "%s : affichage niveau %u/%02X faux", what, a,
             r);
     }
+  // Terrain du 23/09 : lampe au minimum (4C, molette ou 'C5 4C' renvoye par le
+  // switch), CurrentLevel 1 en cache -> 0 % dans Apple Home, montre plein.
+  // Quel que soit le cache, le niveau affiche est >= plancher et donne 4C.
+  for (unsigned a = 0; a < 256; a++) {
+    const uint8_t d = displayLevel((uint8_t)a, 0x4C);
+    CHECK(d >= kMatterLevelFloor && rawFromLevel(d) == 0x4C && percentTruncated(d) >= 1,
+          "%s : 4C affiche %u (cache %u)", what, d, a);
+  }
+  CHECK(displayLevel(1, 0x4C) == kMatterLevelFloor && displayLevel(0, 0x4C) == kMatterLevelFloor,
+        "%s : 4C depuis le niveau 1", what);
+  // Un pas de molette au-dessus : affichage deja juste, inchange.
+  CHECK(displayLevel(0, 0x4D) == levelFromRaw(0x4D) && levelFromRaw(0x4D) > kMatterLevelFloor,
+        "%s : 4D affiche %u", what, displayLevel(0, 0x4D));
   for (unsigned m = kMiredCold; m <= kMiredWarm; m++)
     CHECK(displayMired((uint16_t)m, tempFromMired((uint16_t)m)) == m, "mired %u saute", m);
   for (unsigned a = 0; a <= 600; a++)
@@ -493,21 +525,33 @@ static void testLevelMap() {
   CHECK(mapGamma() == 2.0f, "gamma par defaut %f", (double)mapGamma());
   CHECK(rawFromLevel(138) == 0x80, "table par defaut");
 
-  // gamma 1 : formule entiere exacte, aller-retour brut -> niveau -> brut identite.
+  // gamma 1 : formule entiere exacte au-dessus du plancher, 4C jusqu'a lui.
   mapInit(1.0f);
   CHECK(mapGamma() == 1.0f, "gamma 1");
   for (unsigned l = 0; l <= 254; l++) {
     const unsigned L = l ? l : 1;
-    CHECK(rawFromLevel((uint8_t)l) == 0x4C + ((L - 1) * 178 + 126) / 253, "gamma 1 : raw(%u)", l);
+    const unsigned want = L <= kMatterLevelFloor ? 0x4C : 0x4C + ((L - 1) * 178 + 126) / 253;
+    CHECK(rawFromLevel((uint8_t)l) == want, "gamma 1 : raw(%u)", l);
   }
+  // Aller-retour brut -> niveau rapporte (>= plancher) -> brut : l'identite pour
+  // toute valeur atteinte depuis le plancher. Seule 4D, que donnait le niveau 2
+  // (desormais 4C), ne l'est plus : elle se rapporte au niveau de 4E.
   for (unsigned r = 0x4C; r <= 0xFE; r++) {
     const uint8_t l = levelFromRaw((uint8_t)r);
-    CHECK(rawFromLevel(l) == r, "gamma 1 : aller-retour %02X -> %u -> %02X", r, l, rawFromLevel(l));
-    // Inverse ferme de E.2 : exact lui aussi, mais il vise le niveau le plus
-    // proche et non le plus petit (38 valeurs sur 179 different de levelFromRaw,
-    // qui suit B.3 pour tout gamma). Meme valeur brute dans tous les cas.
-    const unsigned lf = 1 + ((r - 0x4C) * 253 + 89) / 178;
-    CHECK(rawFromLevel((uint8_t)lf) == r && lf >= l, "gamma 1 : inverse ferme L(%02X) = %u", r, lf);
+    if (r == 0x4D) {
+      CHECK(l == kMatterLevelFloor + 1 && rawFromLevel(l) == 0x4E, "gamma 1 : 4D -> %u -> %02X", l, rawFromLevel(l));
+      continue;
+    }
+    CHECK(l >= kMatterLevelFloor && rawFromLevel(l) == r, "gamma 1 : aller-retour %02X -> %u -> %02X", r, l,
+          rawFromLevel(l));
+    // Inverse ferme de E.2, au-dessus du plancher : exact lui aussi, mais il
+    // vise le niveau le plus proche et non le plus petit (levelFromRaw suit B.3
+    // pour tout gamma). Meme valeur brute dans tous les cas.
+    if (r > 0x4D) {
+      const unsigned lf = 1 + ((r - 0x4C) * 253 + 89) / 178;
+      CHECK(lf > kMatterLevelFloor && rawFromLevel((uint8_t)lf) == r && lf >= l,
+            "gamma 1 : inverse ferme L(%02X) = %u", r, lf);
+    }
   }
   checkTableInvariants("gamma 1");
   checkDisplay("gamma 1");
@@ -697,6 +741,35 @@ static void testRules() {
   in.level = shown;
   r = resolveMatter(off, in, F_LAMPS);
   CHECK(r.target == off && r.fields == FLD_BRIGHT, "niveau seul eteinte, egal a la consigne");
+
+  // Plancher : un controleur ecrit 1..3 (1 % dans Apple Home) -> le minimum 4C.
+  for (unsigned l = 0; l <= kMatterLevelFloor; l++) {
+    in = MatterIntents();
+    in.has = IN_LEVEL;
+    in.level = (uint8_t)l;
+    r = resolveMatter(onBoth, in, F_LAMPS);
+    CHECK(r.target == mk(true, F_LAMPS, 0x4C, 0x35) && r.fields == FLD_BRIGHT, "niveau %u -> lum %02X", l,
+          r.target.bright);
+  }
+  // EP1 on + un niveau sous le plancher, consigne deja a 4C : n'ajoute rien a
+  // l'allumage (qui part avec 4C), comme le niveau affiche (le plancher).
+  const State offMin = mk(false, F_LAMPS, 0x4C, 0x35);
+  for (unsigned l = 0; l <= kMatterLevelFloor; l++) {
+    in = MatterIntents();
+    in.has = IN_POWER | IN_LEVEL;
+    in.power = true;
+    in.level = (uint8_t)l;
+    r = resolveMatter(offMin, in, F_LAMPS);
+    CHECK(r.target == mk(true, F_LAMPS, 0x4C, 0x35) && r.fields == FLD_FLAGS,
+          "EP1 on + niveau %u, lum 4C : champs %u", l, r.fields);
+    CHECK(plan(r.target, offMin, dueFields(r.target, r.fields)).pb == P(0xC5, 0x4C),
+          "EP1 on + niveau %u, lum 4C : trame", l);
+  }
+  // ... mais depuis A5, le niveau 1 reste un ordre (4C).
+  in.level = 1;
+  r = resolveMatter(off, in, F_LAMPS);
+  CHECK(r.target.power && r.target.bright == 0x4C && r.fields == (FLD_FLAGS | FLD_BRIGHT),
+        "EP1 on + niveau 1 depuis A5");
 
   // A : seulement lampe allumee et sans intention marche/lampe dans la fenetre.
   CHECK(resolveMatter(onFront, intents("A1"), F_FRONT).fireAuto, "A seul allumee");

@@ -9,6 +9,9 @@ namespace halo1 {
 //
 //  raw(L) = 0x4C + round(178 * ((L-1)/253)^gamma), raw(0) = raw(1). La lampe
 //  parait logarithmique (PROTOCOL.md) : gamma 2 met 0x80 vers le niveau 138.
+//  Jusqu'au plancher (kMatterLevelFloor), 0x4C quel que soit gamma : le niveau
+//  rapporte pour le minimum y revient exactement. A gamma 2, rien ne change
+//  (niveaux 1..14 deja a 0x4C) ; a gamma 1, 0x4D n'est plus atteint.
 //  Calcul en double : en float, l'arrondi de certains points tomberait a
 //  moins d'un ulp de 0,5 et pourrait differer de l'hote a la carte.
 // ---------------------------------------------------------------------------
@@ -29,6 +32,7 @@ void mapInit(float gamma) {
     else
       v = (unsigned)floor(178.0 * pow((double)(l - 1) / 253.0, (double)gamma) + 0.5);
     if (v > 178) v = 178;
+    if (l <= kMatterLevelFloor) v = 0;  // jamais rapportes : alias du plancher
     sRaw[l] = (uint8_t)(kBrightMin + v);
     if (l > 1 && sRaw[l] < sRaw[l - 1]) sRaw[l] = sRaw[l - 1];  // monotone quoi qu'il arrive
   }
@@ -48,8 +52,9 @@ uint8_t rawFromLevel(uint8_t level) {
 
 uint8_t levelFromRaw(uint8_t raw) {
   ensureTable();
-  // Plus petit L tel que raw(L) >= raw ; au-dela de 0xFE, 254.
-  uint8_t lo = 1, hi = 254;
+  // Plus petit L >= plancher tel que raw(L) >= raw ; au-dela de 0xFE, 254.
+  // raw(plancher) = 0x4C : le minimum se rapporte au plancher, jamais dessous.
+  uint8_t lo = kMatterLevelFloor, hi = 254;
   while (lo < hi) {
     const uint8_t mid = (uint8_t)((lo + hi) / 2);
     if (sRaw[mid] >= raw)
@@ -77,9 +82,10 @@ uint16_t miredFromTemp(uint8_t t) {
 }
 
 // Affichage stable : la valeur qu'un controleur a ecrite ne saute jamais vers
-// une voisine qui donne la meme valeur brute.
+// une voisine qui donne la meme valeur brute, sauf sous le plancher : 1 ou 2
+// (4C) s'affichent 3, sinon Apple Home montrerait la lampe pleine.
 uint8_t displayLevel(uint8_t attr, uint8_t bright) {
-  if (attr >= 1 && attr <= 254 && rawFromLevel(attr) == bright) return attr;
+  if (attr >= kMatterLevelFloor && attr <= 254 && rawFromLevel(attr) == bright) return attr;
   return levelFromRaw(bright);
 }
 
@@ -100,10 +106,13 @@ Resolution resolveMatter(const State &base, const MatterIntents &order, uint8_t 
   // marche. Une extinction ne porte jamais d'ordre de luminosite, et le niveau
   // affiche pour la consigne n'ajoute rien a un allumage (A4 (a) envoie deja la
   // luminosite) : on l'ecarte, sinon il resterait a livrer lampe eteinte et
-  // partirait au prochain allumage a la telecommande (E.6-1).
+  // partirait au prochain allumage a la telecommande (E.6-1). N'ajoute rien :
+  // un niveau qui donne deja la valeur brute de la consigne (sous le plancher
+  // compris : 1 pour 4C), ou le niveau affiche pour elle (une valeur hors
+  // d'atteinte de Matter, reglee a la telecommande, s'affiche par une voisine).
   MatterIntents in = order;
   if ((in.has & IN_POWER) && (in.has & IN_LEVEL) &&
-      (!in.power || displayLevel(in.level, base.bright) == in.level))
+      (!in.power || rawFromLevel(in.level) == base.bright || levelFromRaw(base.bright) == in.level))
     in.has &= (uint8_t)~IN_LEVEL;
   Resolution r;
   r.target = base;

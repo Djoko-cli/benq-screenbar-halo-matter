@@ -170,7 +170,7 @@
 #define HALO1_REFLECT_MIN_MS 250       // ecart minimal entre deux reflets vers Matter
 #endif
 #ifndef HALO1_AUTO_PULSE_MS
-#define HALO1_AUTO_PULSE_MS 1000       // l'endpoint du bouton A revient a off apres 1 s
+#define HALO1_AUTO_PULSE_MS 1000       // EP4 (bouton A) revient a off apres 1 s ; 'matter impulsion' en NVS
 #endif
 #ifndef HALO1_BOOT_IGNORE_MS
 #define HALO1_BOOT_IGNORE_MS 2000      // ordres Matter ignores juste apres le demarrage
