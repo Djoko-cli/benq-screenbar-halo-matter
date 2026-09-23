@@ -150,6 +150,20 @@ de paquets sans accuse selon les phases, toujours rattrapes par les renvois. Un
 bon boitier ne doit pas faire pire ; si c'est le cas, c'est la disposition des
 antennes qu'il faut revoir.
 
+**Controle obligatoire avant/apres boitier (demande de Majid, 23/09).** Dans le
+montage de reference, le BM5602 pend a **~12-15 cm au-dessus du C6** sur des fils
+Dupont, antenne vers le haut : un ecartement BIEN superieur aux 25-30 mm vises
+ici. Le boitier compact va donc rapprocher les antennes. Protocole :
+1. AVANT demontage, montage actuel : `lampe stats raz`, puis ~20 commandes depuis
+   Apple Home et ~1 min de telecommande, puis `lampe stats` ; noter paquets,
+   accuses, MAX_RT, trames recues et CRC faux.
+2. APRES assemblage dans le boitier : meme protocole, memes conditions (meme
+   emplacement de la lampe, telephone au meme endroit).
+3. Si le taux de paquets sans accuse ou de CRC faux se degrade nettement :
+   **allonger le boitier** (plus d'ecart entre antennes) plutot que de compacter.
+   Le levier puissance est deja epuise : le BM5602 emet a +6 dBm, son maximum
+   (RFTXP_1 = 0xAF, RFTXP_2 = 0x21, table 1 de la note Holtek AN0560).
+
 ## 7. Ce que tu dois demander a Majid avant de modeliser
 
 Au pied a coulisse (en mm, au dixieme) :
