@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "halo1_lamp.h"
+#include "status_led.h"
 
 #if MATTER_NET_THREAD
 #include <app/CASESessionManager.h>
@@ -197,38 +198,35 @@ static bool onAuto(bool on) { return on ? post(halo1::IN_AUTO, [](halo1::MatterI
 //  la tache loop (matterIdentifying). Une session Identify (IdentifyTime) finit
 //  par un STOP de la pile, par endpoint. Un TriggerEffect n'en recoit jamais
 //  (commentaire d'app_identification_cb, bibliotheque Matter) : sa fin est
-//  donc datee ici, d'apres l'effet demande.
+//  donc datee ici, par endpoint, d'apres l'effet demande (statusled::effectEnd).
 // ===========================================================================
 
-static uint32_t sIdentifyEps = 0;        // un bit par endpoint en session Identify
-static uint32_t sIdentifyEffectEnd = 0;  // fin d'un TriggerEffect (millis), 0 = aucun
-static uint32_t sIdentifyCount = 0;      // demandes recues (session ou effet)
+static_assert(statusled::kEffectBlink == MatterIdentifyRequest::BLINK &&
+                  statusled::kEffectBreathe == MatterIdentifyRequest::BREATHE &&
+                  statusled::kEffectOkay == MatterIdentifyRequest::OKAY &&
+                  statusled::kEffectChannelChange == MatterIdentifyRequest::CHANNEL_CHANGE &&
+                  statusled::kEffectFinish == MatterIdentifyRequest::FINISH &&
+                  statusled::kEffectStop == MatterIdentifyRequest::STOP,
+              "identifiants d'effet Identify");
 
-// Durees de la spec Matter (Breathe 15 s, ChannelChange 8 s), au moins 2 s :
-// Blink et Okay y durent a peine une seconde.
-static uint32_t identifyEffectMs(uint8_t effect) {
-  switch (effect) {
-    case MatterIdentifyRequest::BREATHE: return 15000;
-    case MatterIdentifyRequest::CHANNEL_CHANGE: return 8000;
-    default: return 2000;  // BLINK, OKAY, et tout effet inconnu
-  }
-}
+static constexpr uint8_t kIdentifyEps = 4;              // EP1 a EP4
+static uint32_t sIdentifyEps = 0;                       // un bit par endpoint en session Identify
+static uint32_t sIdentifyEffectEnd[kIdentifyEps] = {};  // fin d'un TriggerEffect (millis), 0 = aucun
+static uint32_t sIdentifyCount = 0;                     // demandes recues (session ou effet)
 
-static bool onIdentify(const MatterEndPoint &ep, uint32_t bit, bool active) {
+static bool onIdentify(const MatterEndPoint &ep, uint8_t i, bool active) {
   // Remplie par la bibliotheque juste avant ce rappel, dans cette meme tache.
   const MatterIdentifyRequest r = ep.getIdentifyRequest();
   if (active) __atomic_fetch_add(&sIdentifyCount, 1, __ATOMIC_RELAXED);
   if (r.fromTriggerEffect) {
-    uint32_t end = 0;  // Stop ou Finish : fin tout de suite
-    if (active) {
-      end = millis() + identifyEffectMs(r.effectId);
-      if (!end) end = 1;
-    }
-    __atomic_store_n(&sIdentifyEffectEnd, end, __ATOMIC_RELAXED);
+    // Seule cette tache pose une fin ; la tache loop ne fait qu'effacer une fin
+    // echue, par echange compare (matterIdentifying) : rien ne se perd.
+    const uint32_t end = __atomic_load_n(&sIdentifyEffectEnd[i], __ATOMIC_RELAXED);
+    __atomic_store_n(&sIdentifyEffectEnd[i], statusled::effectEnd(end, r.effectId, millis()), __ATOMIC_RELAXED);
   } else if (active) {
-    __atomic_fetch_or(&sIdentifyEps, bit, __ATOMIC_RELAXED);
+    __atomic_fetch_or(&sIdentifyEps, 1u << i, __ATOMIC_RELAXED);
   } else {
-    __atomic_fetch_and(&sIdentifyEps, ~bit, __ATOMIC_RELAXED);
+    __atomic_fetch_and(&sIdentifyEps, ~(1u << i), __ATOMIC_RELAXED);
   }
   return true;
 }
@@ -1625,11 +1623,11 @@ void matterBridgeBegin() {
   autoButton.onChangeOnOff(onAuto);
 #endif
   // Tous les endpoints : on ne sait pas lequel le controleur vise.
-  mainLight.onIdentify([](bool on) { return onIdentify(mainLight, 1u << 0, on); });
-  frontLamp.onIdentify([](bool on) { return onIdentify(frontLamp, 1u << 1, on); });
-  backLamp.onIdentify([](bool on) { return onIdentify(backLamp, 1u << 2, on); });
+  mainLight.onIdentify([](bool on) { return onIdentify(mainLight, 0, on); });
+  frontLamp.onIdentify([](bool on) { return onIdentify(frontLamp, 1, on); });
+  backLamp.onIdentify([](bool on) { return onIdentify(backLamp, 2, on); });
 #if HALO1_EXPOSE_AUTO
-  autoButton.onIdentify([](bool on) { return onIdentify(autoButton, 1u << 3, on); });
+  autoButton.onIdentify([](bool on) { return onIdentify(autoButton, 3, on); });
 #endif
 
   Matter.begin();
@@ -1771,13 +1769,18 @@ bool matterIsConnected() { return Matter.isDeviceConnected(); }
 void matterDecommissionNow() { Matter.decommission(); }
 
 bool matterIdentifying() {
-  if (__atomic_load_n(&sIdentifyEps, __ATOMIC_RELAXED)) return true;
-  uint32_t end = __atomic_load_n(&sIdentifyEffectEnd, __ATOMIC_RELAXED);
-  if (!end) return false;
-  if ((int32_t)(end - millis()) > 0) return true;
-  // Echu : oublie, sauf si un nouvel effet vient d'etre pose par la tache CHIP.
-  __atomic_compare_exchange_n(&sIdentifyEffectEnd, &end, 0u, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-  return false;
+  const uint32_t now = millis();
+  bool on = __atomic_load_n(&sIdentifyEps, __ATOMIC_RELAXED) != 0;
+  // Toutes les fins, a chaque appel : une fin echue doit etre oubliee bien
+  // avant que le retour a zero de millis() la fasse paraitre future.
+  for (uint32_t &slot : sIdentifyEffectEnd) {
+    uint32_t end = __atomic_load_n(&slot, __ATOMIC_RELAXED);
+    if (statusled::effectPending(end, now))
+      on = true;
+    else if (end)  // echu : oublie, sauf si un nouvel effet vient d'etre pose par la tache CHIP
+      __atomic_compare_exchange_n(&slot, &end, 0u, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  }
+  return on;
 }
 
 void matterPrintStatus(Print &out) {

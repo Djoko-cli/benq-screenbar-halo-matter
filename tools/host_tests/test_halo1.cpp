@@ -1316,6 +1316,35 @@ static void testStatusLed() {
     const unsigned rainbow = writesOver(l, 30000, 30000 + kRainbowMs);
     CHECK(rainbow <= kRainbowMs / kStepMs, "arc-en-ciel : %u ecritures en 2 s", rainbow);
   }
+
+  // Identify par TriggerEffect : fin datee par endpoint (matter_bridge.cpp).
+  {
+    CHECK(!effectPending(0, 0) && !effectPending(0, 0x80000000u) && !effectPending(0, 0xFFFFFFFFu), "0 : aucun effet");
+    CHECK(effectPending(5, 0xFFFFFFF0u), "fin juste apres le retour a zero de millis()");
+    CHECK(!effectPending(5, 5) && !effectPending(5, 6), "fin atteinte");
+    CHECK(effectPending(5, 4), "1 ms avant la fin");
+
+    const uint32_t now = 1000;
+    CHECK(effectEnd(0, kEffectBlink, now) == now + 2000 && effectEnd(0, kEffectOkay, now) == now + 2000,
+          "Blink, Okay : 2 s");
+    CHECK(effectEnd(0, kEffectBreathe, now) == now + 15000, "Breathe : 15 s");
+    CHECK(effectEnd(0, kEffectChannelChange, now) == now + 8000, "ChannelChange : 8 s");
+    CHECK(effectEnd(0, 0x42, now) == now + 2000, "effet inconnu : 2 s");
+    CHECK(effectEnd(now + 500, kEffectBreathe, now) == now + 15000, "nouvel effet : remplace le precedent");
+    CHECK(effectEnd(now + 9000, kEffectStop, now) == 0 && effectEnd(0, kEffectStop, now) == 0, "Stop : fin immediate");
+    CHECK(effectEnd(now + 9000, kEffectFinish, now) == now + kEffectFinishMs, "Finish : cycle en cours acheve");
+    CHECK(effectEnd(now + 300, kEffectFinish, now) == now + 300, "Finish : un effet presque fini garde sa fin");
+    CHECK(effectEnd(0, kEffectFinish, now) == 0, "Finish sans effet : rien ne s'allume");
+    CHECK(effectEnd(now - 10, kEffectFinish, now) == 0, "Finish apres un effet echu : rien ne s'allume");
+
+    // A cheval sur le retour a zero, et jamais 0 pour un effet en cours.
+    const uint32_t late = 0xFFFFF000u, end = effectEnd(0, kEffectBreathe, late);
+    CHECK(effectPending(end, late) && effectPending(end, late + 14999) && !effectPending(end, late + 15000),
+          "Breathe a cheval sur le retour a zero");
+    CHECK(effectEnd(end, kEffectFinish, late + 100) == late + 100 + kEffectFinishMs, "Finish a cheval");
+    CHECK(effectEnd(0, kEffectBlink, 0u - 2000) == 1 && effectPending(1, 0u - 2000), "fin a 0 : decalee a 1");
+    CHECK(effectEnd(0x100u, kEffectFinish, 0u - kEffectFinishMs) == 1, "Finish a 0 : decalee a 1");
+  }
 }
 
 // ---------------------------------------------------------------------------

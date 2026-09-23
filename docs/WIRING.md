@@ -41,8 +41,8 @@ Cette carte a peu de broches vraiment libres :
   niveau est échantillonné au reset. Un module qui en pilote une pendant le
   démarrage peut empêcher la carte de booter ;
 - **IO8** est une LED adressable WS2812 : c'est le voyant d'état du firmware ;
-- **IO15** porte une LED simple, maintenue éteinte en build produit ; **IO9** est
-  le bouton BOOT — le firmware s'en sert déjà.
+- **IO15** porte une LED simple, laissée en entrée (donc éteinte) par le
+  firmware ; **IO9** est le bouton BOOT — le firmware s'en sert déjà.
 
 Restent **IO14** et **IO18–IO20**, toutes sur le connecteur **extérieur
 gauche**, dont l'ordre est `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. Les

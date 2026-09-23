@@ -191,7 +191,7 @@ sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
 | orange lent (1 s allumee, 1 s eteinte) | mis en service, mais reseau absent (Thread perdu ; Wi-Fi pour `esp32c6supermini`) |
 | eteinte, breve lueur blanche toutes les 10 s | tout va bien (signe de vie) ; une lueur aussi au retour du reseau |
 | eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
-| rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne |
+| rouge, 3 clignements | lampe injoignable (ou module radio perdu) : le pilote abandonne la consigne |
 | arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
 
 Priorite : arc-en-ciel > rouge > vert > etat du reseau. Au banc, `led test`
@@ -199,10 +199,15 @@ joue chaque motif a tour de role (16 s) et `led` dit le motif en cours. Si le
 vert et le rouge sont inverses, la WS2812 de la carte n'est pas en GRB :
 `-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` dans `platformio.ini`.
 
-La petite LED d'IO15 reste eteinte en build produit : un seul voyant. Le build
-diagnostic ne pilote aucune LED (IO15 en entree : sur la carte de capture, elle
-porte GDO2 du CC2500). Les cibles sans WS2812 declaree (`PIN_RGB_STATUS_LED`)
-font clignoter leur LED simple avec les memes motifs, sans la lueur.
+La petite LED d'IO15 reste en entree, donc eteinte quelle que soit sa
+polarite : un seul voyant. En entree, elle ne gene pas non plus GDO2 du CC2500,
+qui arrive sur IO15 quand la carte de capture est branchee. Le build diagnostic
+ne fait que mettre la WS2812 au noir au demarrage : elle garde sa derniere
+couleur a travers un reset ou un flash, et le bleu d'un build produit resterait
+allume sur le banc. Parmi les autres cibles, seule `esp32dev` fait clignoter sa
+LED simple (IO2) avec les memes motifs, sans la lueur ; sur les DevKit C3 et S3,
+`PIN_STATUS_LED` (IO8, IO48) est la broche de leur WS2812, non declaree : pas de
+voyant visible.
 
 ### Certification : ce qui marche et ce qui demande une étape en plus
 

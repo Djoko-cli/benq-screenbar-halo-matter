@@ -14,8 +14,11 @@
 //  Priorite : Identify > rouge > vert > etat du reseau. Intensite basse (elle
 //  est sous un bureau) : 24/255 au plus par canal, 8/255 pour la lueur.
 //
-//  Sans WS2812 (autres cibles), la LED simple de PIN_STATUS_LED suit les memes
-//  motifs en tout ou rien, sans la lueur. Build diagnostic : aucune LED pilotee.
+//  Sans WS2812 declaree (PIN_RGB_STATUS_LED), la LED simple de PIN_STATUS_LED
+//  suit les memes motifs en tout ou rien, sans la lueur (esp32dev : IO2). Les
+//  DevKit C3 et S3 n'ont pas de LED simple (IO8 et IO48 y portent leur WS2812,
+//  non declaree) : pas de voyant visible. Build diagnostic : la WS2812 est
+//  seulement mise au noir au demarrage, IO15 reste en entree.
 //
 //  La logique (statusled::) est pure et sans Arduino : testee sur l'hote
 //  (tools/host_tests). Toutes les durees sont des ecarts non signes a partir
@@ -94,13 +97,35 @@ class Logic {
   uint32_t netAt_ = 0, identAt_ = 0, redAt_ = 0, greenAt_ = 0, testAt_ = 0;
 };
 
+// --- Identify par TriggerEffect (matter_bridge.cpp) ------------------------
+// La pile n'envoie jamais de STOP apres un effet : sa fin est datee (millis)
+// par endpoint, 0 = aucun effet. Identifiants de la spec Matter
+// (EffectIdentifierEnum, MatterIdentifyRequest::EffectId dans la bibliotheque).
+constexpr uint8_t kEffectBlink = 0x00, kEffectBreathe = 0x01, kEffectOkay = 0x02, kEffectChannelChange = 0x0B,
+                  kEffectFinish = 0xFE, kEffectStop = 0xFF;
+constexpr uint32_t kEffectFinishMs = 1000;  // Finish : le cycle en cours s'acheve (1 s au plus)
+
+// Effet en cours a now ? Ecart signe : juste a travers le retour a zero de
+// millis(), tant qu'une fin echue est oubliee (remise a 0) avant 24,8 jours.
+inline bool effectPending(uint32_t end, uint32_t now) { return end && (int32_t)(end - now) > 0; }
+// Fin d'effet d'un endpoint qui recoit l'effet 'effect' a now, son effet
+// precedent finissant a 'end'. Stop : fin immediate. Finish : l'effet en cours
+// finit son cycle (kEffectFinishMs au plus) et rien ne s'allume sans effet en
+// cours. Les autres durent ce que dit la spec (Breathe 15 s, ChannelChange
+// 8 s), 2 s au moins (Blink et Okay y durent a peine une seconde). Jamais 0
+// pour un effet en cours.
+uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now);
+
 }  // namespace statusled
 
 // --- Cote carte (status_led.cpp, tache loop uniquement) ---------------------
 
-// Au debut de setup() : met la LED d'etat au noir (IO8 apres le demarrage,
-// donc apres l'echantillonnage des broches de strapping) et IO15 eteinte.
-// Build diagnostic : IO15 en entree, WS2812 jamais pilotee.
+// Au debut de setup() : met la WS2812 au noir (IO8 apres le demarrage, donc
+// apres l'echantillonnage des broches de strapping) et laisse la LED simple
+// d'IO15 en entree : eteinte quelle que soit sa polarite, sans conflit avec
+// GDO2 du CC2500 sur la carte de capture (bogue B9). Sans WS2812, la LED simple
+// passe en sortie, eteinte. Build diagnostic : IO15 en entree, et la WS2812 mise
+// au noir une seule fois (elle garde sa derniere couleur a travers un reset).
 void statusLedBegin();
 // A chaque tour de loop() : lit l'etat (reseau toutes les 200 ms, compteurs du
 // pilote, Identify) et n'ecrit la LED que si sa couleur change.

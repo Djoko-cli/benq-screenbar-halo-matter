@@ -144,6 +144,23 @@ Frame Logic::frame(uint32_t now) {
   return Frame{p, render(p, t), renderMono(p, t)};
 }
 
+uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now) {
+  uint32_t ms = 2000;  // Blink, Okay, et tout effet inconnu
+  switch (effect) {
+    case kEffectStop: return 0;
+    case kEffectFinish: {
+      if (!effectPending(end, now)) return 0;
+      const uint32_t soon = now + kEffectFinishMs;
+      return effectPending(end, soon) ? (soon ? soon : 1) : end;
+    }
+    case kEffectBreathe: ms = 15000; break;
+    case kEffectChannelChange: ms = 8000; break;
+    default: break;
+  }
+  const uint32_t e = now + ms;
+  return e ? e : 1;  // 0 veut dire "aucun effet"
+}
+
 }  // namespace statusled
 
 // ===========================================================================
@@ -169,8 +186,6 @@ static Frame sFrame{Pattern::Unpaired, Rgb{}, false};  // image du dernier tour 
 static bool sShownValid = false;                        // quelque chose a deja ete ecrit
 static uint32_t sNetAt = 0, sSeenDelivered = 0, sSeenGiveUps = 0;
 
-static void monoWrite(bool on) { digitalWrite(PIN_STATUS_LED, STATUS_LED_ACTIVE_LOW ? !on : on); }
-
 #ifdef PIN_RGB_STATUS_LED
 static Rgb sShown;  // couleur ecrite
 // rgbLedWriteOrdered (core 3.x, esp32-hal-rgb-led) : 24 bits par le RMT,
@@ -182,10 +197,12 @@ static void rgbWrite(Rgb c) {
 }
 #else
 static bool sShownOn = false;  // etat ecrit de la LED simple
+static void monoWrite(bool on) { digitalWrite(PIN_STATUS_LED, STATUS_LED_ACTIVE_LOW ? !on : on); }
 #endif
 
-// N'ecrit que si ce qui se voit change : quelques ecritures par seconde au
-// plus hors Identify (25 par seconde pendant l'arc-en-ciel).
+// N'ecrit que si ce qui se voit change : 16 ecritures par lueur de 600 ms
+// toutes les 10 s, 25 par seconde pendant l'arc-en-ciel, sinon une par
+// changement de motif ou demi-periode de clignotement.
 static void show(const Frame &f) {
   sFrame = f;
 #ifdef PIN_RGB_STATUS_LED
@@ -203,18 +220,28 @@ void statusLedBegin() {
 #ifdef DIAG_ONLY
   // IO15 porte aussi GDO2 du CC2500 sur la carte de capture : le piloter en
   // sortie mettrait deux sorties en conflit sur le meme fil (audit, bogue B9).
-  // En diagnostic, la LED ne sert a rien : on laisse la broche en entree, et la
-  // WS2812 n'est jamais pilotee.
+  // En diagnostic, la LED ne sert a rien : on laisse la broche en entree.
   pinMode(PIN_STATUS_LED, INPUT);
-#else
-  // Avec une WS2812, la LED simple d'IO15 reste eteinte (sortie basse, comme
-  // avant) : un seul voyant, la WS2812. Sans WS2812, c'est elle qui clignote.
-  pinMode(PIN_STATUS_LED, OUTPUT);
-  monoWrite(false);
 #ifdef PIN_RGB_STATUS_LED
+  // Une seule ecriture, au noir : la WS2812 garde sa derniere couleur a travers
+  // un reset ou un flash (son alimentation ne coupe pas), et le bleu d'un build
+  // produit resterait allume sur le banc. IO8 ne sert a rien d'autre ici, et le
+  // demarrage est fini.
+  rgbLedWriteOrdered(PIN_RGB_STATUS_LED, STATUS_RGB_ORDER, 0, 0, 0);
+#endif
+#else
+#ifdef PIN_RGB_STATUS_LED
+  // Un seul voyant, la WS2812. La LED simple d'IO15 reste en entree : eteinte
+  // quelle que soit sa polarite (non verifiee), et sans conflit avec GDO2 du
+  // CC2500 si la carte de capture est branchee (bogue B9).
+  pinMode(PIN_STATUS_LED, INPUT);
   // IO8 est une broche de strapping, deja echantillonnee a ce stade : la
   // piloter depuis setup() ne gene pas le demarrage.
   rgbWrite(Rgb{});
+#else
+  // Sans WS2812, c'est la LED simple qui porte les motifs.
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  monoWrite(false);
 #endif
   sNetAt = millis() - kNetSampleMs;  // releve au premier tour de loop()
 #endif
@@ -244,7 +271,7 @@ void statusLedPoll() {
 void statusLedCommand(const char *arg) {
 #ifdef DIAG_ONLY
   (void)arg;
-  Serial.println("LED d'etat : aucune en build diagnostic (IO15 en entree, WS2812 jamais pilotee).");
+  Serial.println("LED d'etat : aucune en build diagnostic (IO15 en entree, WS2812 mise au noir au demarrage).");
 #else
   if (!strcmp(arg, "test")) {
     sLed.startTest(millis());
@@ -266,7 +293,8 @@ void statusLedCommand(const char *arg) {
     return;
   }
 #ifdef PIN_RGB_STATUS_LED
-  Serial.printf("LED d'etat : WS2812 sur IO%d (LED simple IO%d eteinte)\n", PIN_RGB_STATUS_LED, PIN_STATUS_LED);
+  Serial.printf("LED d'etat : WS2812 sur IO%d (LED simple IO%d en entree, eteinte)\n", PIN_RGB_STATUS_LED,
+                PIN_STATUS_LED);
 #else
   Serial.printf("LED d'etat : LED simple sur IO%d\n", PIN_STATUS_LED);
 #endif

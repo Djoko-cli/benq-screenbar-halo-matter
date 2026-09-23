@@ -957,7 +957,7 @@ Cas testes :
 5. On ne reflete jamais tant que la boite contient des intentions : un curseur en cours ne revient pas en arriere.
 6. EP1 OnOff = `t.power`, EP2 = `power && front`, EP3 = `power && back`, EP4 vaut false sauf pendant l'impulsion (1 s par defaut, `matter impulsion`). CurrentLevel jamais sous 4.
 
-Une option, hors v1 : Identify fait clignoter la LED de IO15, jamais la lampe, ce qui voudrait dire emettre.
+Identify : arc-en-ciel sur la WS2812 (src/status_led.*), jamais la lampe, ce qui voudrait dire emettre.
 
 ---
 

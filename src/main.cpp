@@ -121,7 +121,7 @@ void setup() {
   Serial.begin(115200);
   delay(400);
 
-  statusLedBegin();  // LED eteinte ; diagnostic : IO15 en entree (bogue B9)
+  statusLedBegin();  // WS2812 au noir, IO15 en entree (bogue B9)
   pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
 
   // Tant que le noeud n'est pas mis en service, la pile Matter repete une
