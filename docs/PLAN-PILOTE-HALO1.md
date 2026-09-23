@@ -8,6 +8,12 @@
 > - A3 = **(a)** (choix technique de Claude) : table gamma 2,0, reglable au banc.
 > - A4 = **(a)** (choix technique de Claude) : allumage et changement de lampes portes
 >   par la trame de luminosite affichee ; repli (b) si T2 echoue.
+> - Suite (23/09, firmware 0.3.0) : EP4 « Halo auto » **desactive pour l'instant**
+>   (`HALO1_EXPOSE_AUTO 0` par defaut, code garde, EP1 a EP3 inchanges) ; identite
+>   du noeud posee avant `Matter.begin()` (fabricant `Djoko-CLI`, produit `Pont
+>   ScreenBar Halo`, NodeLabel `Halo`, numero de serie `HALO1-<MAC>`, materiel 1
+>   `ESP32-C6 SuperMini + BM5602`) et version logicielle `0.3.0-<commit>` par le
+>   descripteur d'application (`src/app_desc.c`). Detail : README.
 
 # Plan final : pilote produit Halo 1 et couche Matter
 
@@ -840,7 +846,7 @@ Ils sont crees dans cet ordre, ce qui donne les numeros 1 a 4 sur un noeud neuf.
 | 1 | `MatterColorTemperatureLight mainLight` | OnOff = `t.power` ; CurrentLevel suit `t.bright` ; ColorTemperatureMireds suit `t.temp` ; PhysicalMin/MaxMireds = 153/370 via `setAttributeVal` (comme l'actuel 163-168) |
 | 2 | `MatterOnOffLight frontLamp` (ou Plugin si `HALO1_SELECTORS_AS_LIGHTS 0`) | OnOff = `t.power && (t.lamps & F_FRONT)` |
 | 3 | `MatterOnOffLight backLamp` (idem) | OnOff = `t.power && (t.lamps & F_BACK)` |
-| 4 | `MatterOnOffPlugin autoButton` (`HALO1_EXPOSE_AUTO`) | passe a on sur ecriture, repasse a off apres l'impulsion (1 s par defaut, `matter impulsion <300..15000>` en NVS `halo1/impulsion`) ; un A de la telecommande entendu fait la meme impulsion, sans rien emettre (E.5) |
+| 4 | `MatterOnOffPlugin autoButton` (`HALO1_EXPOSE_AUTO`, a 0 par defaut depuis le 23/09 : EP4 absent) | passe a on sur ecriture, repasse a off apres l'impulsion (1 s par defaut, `matter impulsion <300..15000>` en NVS `halo1/impulsion`) ; un A de la telecommande entendu fait la meme impulsion, sans rien emettre (E.5) |
 
 On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), la prise maitre et la luminosite arriere.
 

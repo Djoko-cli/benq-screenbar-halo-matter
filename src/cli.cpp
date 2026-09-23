@@ -88,9 +88,13 @@ static void cmdHelp() {
   Serial.println("  lampe on|off|sync     allumer, eteindre, tout renvoyer (memes regles que Matter)");
   Serial.println("  lampe lum|temp|mode   luminosite 4C..FE, temperature 0..100, avant|arriere|deux");
   Serial.println("  led [test|stop]       LED d'etat : motif en cours ; test = chaque motif a tour de role");
-  Serial.println("  matter                etat Matter, code d'appairage");
+  Serial.println("  matter                etat Matter, code d'appairage, identite et versions du noeud");
 #ifndef DIAG_ONLY
+#if HALO1_EXPOSE_AUTO
   Serial.println("  matter impulsion [ms] duree de l'impulsion d'EP4 'Halo auto' (300..15000, NVS)");
+#else
+  Serial.println("  matter impulsion      sans objet : EP4 'Halo auto' desactive (HALO1_EXPOSE_AUTO 0)");
+#endif
 #if MATTER_NET_THREAD
   Serial.println("  matter reprise        relance maintenant la reprise des abonnements sauves (banc)");
   Serial.println("  matter reprise auto [0|1]  relance seule apres un redemarrage : Thread + SRP prets");
@@ -299,8 +303,8 @@ static void cmdMatterThread(const char *what, char *val) {
 #endif
 
 // 'matter' : etat du pont. 'matter impulsion [ms]' : duree de l'impulsion
-// d'EP4 (bouton A), gardee en NVS. Build Thread : 'matter reprise', 'med',
-// 'maxint' (cmdMatterThread).
+// d'EP4 (bouton A), gardee en NVS ; sans EP4 (HALO1_EXPOSE_AUTO 0), un message
+// le dit. Build Thread : 'matter reprise', 'med', 'maxint' (cmdMatterThread).
 static void cmdMatter(char *arg) {
   char *val = splitWord(arg);
   if (!*arg) {
@@ -320,6 +324,11 @@ static void cmdMatter(char *arg) {
     Serial.println(kUsage);
     return;
   }
+#if !HALO1_EXPOSE_AUTO
+  (void)val;
+  Serial.println("EP4 'Halo auto' desactive (HALO1_EXPOSE_AUTO 0) : pas d'impulsion a regler.");
+  Serial.println("Le remettre : -DHALO1_EXPOSE_AUTO=1 dans platformio.ini (README). 'lampe auto' reste.");
+#else
   if (*val) {
     uint32_t v = 0;
     bool saved = false;
@@ -331,6 +340,7 @@ static void cmdMatter(char *arg) {
   }
   Serial.printf("Impulsion d'EP4 'Halo auto' : %u ms (defaut %u)\n", matterAutoPulseMs(),
                 (unsigned)HALO1_AUTO_PULSE_MS);
+#endif
 }
 
 static void cmdWifi(char *arg) {

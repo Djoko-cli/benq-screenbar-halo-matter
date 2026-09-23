@@ -14,6 +14,7 @@
 // ===========================================================================
 
 #include <Arduino.h>
+#include <esp_app_desc.h>
 #include <esp_system.h>
 #include <esp_log.h>
 #include <stdarg.h>
@@ -134,7 +135,12 @@ void setup() {
 
   Serial.print("  cause du dernier demarrage : ");
   Serial.println(resetReasonText());
-  Serial.printf("firmware %s\n", FW_VERSION);
+  // Meme chaine que le "Programme interne" d'Apple Home : celle du descripteur
+  // d'application (src/app_desc.c). Une autre valeur la-bas = surcharge absente.
+  Serial.printf("firmware %s\n", FW_VERSION_FULL);
+  if (strcmp(esp_app_get_description()->version, FW_VERSION_FULL))
+    Serial.printf("!! descripteur d'application : %s (src/app_desc.c pas lie ?)\n",
+                  esp_app_get_description()->version);
 
   if (!halo.begin()) {
     Serial.println();

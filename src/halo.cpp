@@ -1236,7 +1236,7 @@ void BenqHalo::printState(Print &out) const {
 void BenqHalo::printInfo(Print &out) {
   out.println();
   out.println("=== BenQ ScreenBar Halo -> Matter ===");
-  out.printf("  firmware      : %s\n", FW_VERSION);
+  out.printf("  firmware      : %s\n", FW_VERSION_FULL);
   // La version brute est affichee meme quand le module est absent : c'est elle
   // qui distingue un probleme de MISO d'un probleme d'alimentation.
   uint32_t version = radio.chipVersion();
