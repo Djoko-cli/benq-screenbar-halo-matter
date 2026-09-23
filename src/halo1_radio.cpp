@@ -9,6 +9,8 @@ static constexpr uint8_t kStdRt1 = 0x73;                          // ARD 2000 us
 static constexpr uint8_t kHalo1Dm1 = ADDR_LEN_4 | DATARATE_125K;  // 0x82
 // Verifications ratees de suite avant de demander la relance du module.
 static constexpr uint8_t kMaxVerifyFails = 3;
+// Garde d'antenne tenue au plus ce temps apres CE=1 : MAX_RT mesure a 11,4-11,5 ms.
+static constexpr uint32_t kGuardHoldUs = 13000;
 
 // ---------------------------------------------------------------------------
 //  Sequences prouvees : l'ancien configStdAutoAck de halo.cpp, decoupe.
@@ -208,6 +210,13 @@ Halo1Radio::TxReport Halo1Radio::sendOne(const uint8_t *pay, uint8_t len, uint32
     while ((uint32_t)(micros() - t0) < 30000) {
       irq = r.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
       if (irq & (IRQ_TX_DS | IRQ_MAX_RT)) break;
+      // MAX_RT tombe avant kGuardHoldUs : au-dela, l'echange est deja perdu et
+      // la garde ne protege plus rien. Rendue ici, elle n'est pas tenue 30 ms
+      // (Timeout), avec Thread et lwIP suspendus derriere elle.
+      if (held && (uint32_t)(micros() - t0) >= kGuardHoldUs) {
+        held->leave();
+        held = nullptr;
+      }
       delayMicroseconds(20);
     }
     us = micros() - t0;
