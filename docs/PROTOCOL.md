@@ -1267,3 +1267,18 @@ cran, 87 kHz de plage), valeurs analogiques par defaut contre recommandees.
 **Ce qui bloque maintenant** : obtenir une trame B exacte. Nos radios decodent
 proprement nos propres emissions et assez bien celles de la lampe ; c'est le
 signal de la telecommande qu'elles digerent mal.
+
+## Premiere lecture de la charge (ecoute de la telecommande, 23/09)
+
+Capture `logs/ecoute-tele2.log` (outil `ecoute 4FF0FD63 5`), gestes : minimum,
+maximum, un cran bas, eteindre/rallumer, temperature, autres boutons (sans
+pauses). Lecture provisoire, a confirmer une par une par `txack` :
+
+| charge | observe | lecture provisoire |
+|---|---|---|
+| `C4 xx` | xx balaie `4C` (minimum tenu) a `FE` (maximum tenu) avec la molette | luminosite, lampe allumee |
+| `44 xx` / `C4 xx` alternes, meme xx | pendant eteindre/rallumer | bit 7 du 1er octet = marche/arret ? |
+| `C2 xx` | xx balaie `00` a `64` (0 a 100) | temperature de couleur en pourcentage ? |
+| `83 xx`, `C3 xx` | meme xx que `C2` | variantes de `C2` (marche/arret ?) |
+| `FF 00`, `FE 00`, `FD 00` | en debut et entre les groupes de gestes | reveil / etat ? |
+| `E0 01`, `E0 02`, `FA A8`, `83 35`, `85 A7`, `91 00`, `89 58`, `89 E0` | « autres boutons » | inconnus |
