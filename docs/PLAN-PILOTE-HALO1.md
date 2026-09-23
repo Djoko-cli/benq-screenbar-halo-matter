@@ -188,6 +188,13 @@ Plan plan(const State &target, const State &believed, uint8_t dirty);
 uint8_t dueFields(const State &target, uint8_t fields);
 
 uint8_t nextAuto(uint8_t last);            // 0 ou 255 -> 1, sinon last + 1
+// Appuis A entendus de la telecommande (D.6) : nouvel appui si premiere trame
+// depuis reset(), numero change, ou trame precedente a >= 1 s (avant ou apres).
+struct AutoPressFilter {
+  static constexpr uint32_t kRepeatMs = 1000;
+  bool feed(uint8_t value, uint32_t nowMs);  // true : nouvel appui
+  void reset();                              // autre commande de la telecommande
+};
 uint8_t crc8(const uint8_t *p, size_t n);  // poly 0x07, init 0 : blob NVS
 int selfTest(char *msg, size_t n);         // 0 = ok, sinon nb d'echecs (1er dans msg)
 }  // namespace halo1
@@ -205,12 +212,18 @@ namespace halo1 {
 constexpr uint16_t kMiredCold = 153;  // temp 0x00 (le plus froid) ; ~6536 K NOMINAL, non mesure
 constexpr uint16_t kMiredWarm = 370;  // temp 0x64 (le plus chaud) ; ~2703 K NOMINAL, non mesure
 
+constexpr uint8_t kMatterLevelFloor = 4;  // plus petit niveau RAPPORTE (Apple Home, E.2)
+
 void mapInit(float gamma);            // table 254 entrees ; gamma 1.0 = formule lineaire exacte
 float mapGamma();
-uint8_t rawFromLevel(uint8_t level);  // 0..254 -> 0x4C..0xFE (0 traite comme 1)
-uint8_t levelFromRaw(uint8_t raw);    // plus petit L tel que rawFromLevel(L) >= raw
+uint8_t rawFromLevel(uint8_t level);  // 0..254 -> 0x4C..0xFE (0..kMatterLevelFloor -> 0x4C)
+// Niveau rapporte : plus petit L >= kMatterLevelFloor tel que rawFromLevel(L) >= raw.
+uint8_t levelFromRaw(uint8_t raw);
 uint8_t tempFromMired(uint16_t m);    // ((clamp(m,153,370) - 153) * 100 + 108) / 217
 uint16_t miredFromTemp(uint8_t t);    // 153 + (min(t,100) * 217 + 50) / 100
+// Affichage stable (E.2), jamais un niveau sous kMatterLevelFloor.
+uint8_t displayLevel(uint8_t attr, uint8_t bright);
+uint16_t displayMired(uint16_t attr, uint8_t temp);
 
 enum : uint8_t { IN_POWER = 1, IN_FRONT = 2, IN_BACK = 4, IN_LEVEL = 8, IN_MIREDS = 16, IN_AUTO = 32 };
 struct MatterIntents {  // derniere valeur gagne dans la fenetre de coalescence
@@ -754,13 +767,14 @@ Un accuse de la lampe entendu (longueur 0) pendant `Backoff` fait `retryAt_ = no
 | CrcBad | `rxCrcBad++` |
 | LampAck (len 0, NO_ACK 1) | `rxLampAcks++` ; relance d'une reprise en attente (D.5) |
 | Service (FF/FE/FD 00 a NO_ACK=0, FA xx a NO_ACK=1) | `rxService++`, `remoteAt_ = now` |
-| Reserved (91 xx, 89 xx : favori) | `rxReserved++`, `remoteAt_ = now` |
+| Reserved (91 xx, 89 xx : favori) | `rxReserved++`, `remoteAt_ = now`, `remoteAuto_.reset()` |
 | Invalid | `rxInvalid++` |
 | Auto | voir ci-dessous |
-| Temp / Bright | `rxState++`, `remoteAt_ = now`, `onRemotePayload` |
+| Temp / Bright | `rxState++`, `remoteAt_ = now`, `remoteAuto_.reset()`, `onRemotePayload` |
 
 Trame **Auto** :
 - `rxAuto++`, `remoteAt_ = now`, `lastAuto_ = valeur` ;
+- compteur d'appuis : `remoteAutoPresses_++` si `remoteAuto_.feed(valeur, now)` (`AutoPressFilter`, B.2). La telecommande emet chaque appui en 3 copies du meme numero a ~100 ms : une copie (meme numero, moins de 1 s avant ou apres la precedente) ne compte pas. Une trame Temp, Bright ou favori entre deux A fait repartir le numero a 01 (PROTOCOL.md) : `remoteAuto_.reset()`, et le A suivant compte. Le pont reflete chaque changement de `remoteAutoCount()` par une impulsion d'EP4 (E.5), sans rien emettre ; nos propres trames A ne passent jamais par `onAir` ;
 - si notre tranche AUTO a le meme numero et 0 accuse, on lui en donne un nouveau : `nextAuto(valeur)` ;
 - `confirmed_ &= ~FLD_BRIGHT` ;
 - **aucun changement de marche ou de lampes**.
@@ -772,7 +786,7 @@ Trame **Auto** :
 - si la consigne a change, `version_++` ; si l'etat cru a change, sauvegarde programmee ;
 - `replan()`.
 
-Pas de filtre de doublons : les trames sont absolues et `applyState` ne signale un changement que s'il y en a un.
+Pas de filtre de doublons pour les trames d'etat : elles sont absolues et `applyState` ne signale un changement que s'il y en a un.
 
 Nos propres trames ne sont jamais entendues : un seul emetteur, en PTX pendant l'emission.
 
@@ -834,9 +848,9 @@ On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), l
 
 **Luminosite.** Table construite au demarrage (`mapInit(HALO1_LEVEL_GAMMA)`) :
 - `raw(L) = 0x4C + round(178 × ((L-1)/253)^γ)` pour L = 1..254, et `raw(0) = raw(1)`.
-- **Plancher `kMatterLevelFloor = 3`** (terrain du 23/09) : Apple Home affiche CurrentLevel en pourcentage entier ; le niveau 1 y devient 0 %, et une lumiere allumee a 0 % s'affiche au maximum (lampe a 0x4C, reglee a la molette, montree pleine). 3 donne 1,2 %, soit 1 % arrondi ou tronque. `raw(0..3) = 0x4C` quel que soit γ (rien ne change a γ = 2, ou les niveaux 1..14 donnent deja 0x4C), et aucun niveau sous 3 n'est jamais rapporte.
-- Avec γ = 1, formule entiere exacte au-dessus du plancher : `raw(L) = 0x4C + ((L-1)*178 + 126)/253`, inverse `L(r) = 1 + ((r-0x4C)*253 + 89)/178`. L'aller-retour est l'identite pour toute valeur atteinte depuis le plancher ; seule 0x4D (niveau 2 avant le plancher) ne l'est plus.
-- Inverse general (niveau rapporte) : `levelFromRaw(r)` = plus petit L ≥ 3 tel que `raw(L) ≥ r`.
+- **Plancher `kMatterLevelFloor = 4`** (terrain du 23/09) : Apple Home affiche CurrentLevel en pourcentage entier ; le niveau 1 y devient 0 %, et une lumiere allumee a 0 % s'affiche au maximum (lampe a 0x4C, reglee a la molette, montree pleine). Sa formule n'est pas connue : `L/254`, ou `(L-1)/253` si la plage part de MinLevel = 1, arrondi ou tronque. 3 tomberait a 0 % en `(L-1)/253` tronque (0,79 %) ; 4 donne au moins 1 % dans les quatre cas (1,57 % et 1,19 %). `raw(0..4) = 0x4C` quel que soit γ (rien ne change a γ = 2, ou les niveaux 1..14 donnent deja 0x4C), et aucun niveau sous 4 n'est jamais rapporte.
+- Avec γ = 1, formule entiere exacte au-dessus du plancher : `raw(L) = 0x4C + ((L-1)*178 + 126)/253`, inverse `L(r) = 1 + ((r-0x4C)*253 + 89)/178`. L'aller-retour est l'identite pour toute valeur atteinte depuis le plancher ; seules 0x4D et 0x4E (niveaux 3 et 4 avant le plancher) ne le sont plus : elles se rapportent au niveau 5 (0x4F).
+- Inverse general (niveau rapporte) : `levelFromRaw(r)` = plus petit L ≥ 4 tel que `raw(L) ≥ r`.
 - Points a γ=2 (verifies) : L64 = 0x57, L127 = 0x78, L138 = 0x80, L171 = 0x9C, L191 = 0xB0, L254 = 0xFE.
 - 15 valeurs brutes du haut sont inaccessibles depuis Matter (pas de 2). La telecommande peut les atteindre.
 
@@ -848,10 +862,10 @@ On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), l
 - Les Kelvin reels ne sont pas mesures.
 
 **Affichage stable.** Au moment de refleter :
-- `L_affiche = (L_attribut ≥ 3 && raw(L_attribut) == t.bright) ? L_attribut : levelFromRaw(t.bright)` ;
+- `L_affiche = (L_attribut ≥ 4 && raw(L_attribut) == t.bright) ? L_attribut : levelFromRaw(t.bright)` ;
 - meme regle pour les mireds (sans plancher).
 
-C'est idempotent, et la valeur qu'un controleur a ecrite ne « saute » jamais vers une voisine, sauf sous le plancher : 1 ou 2 (0x4C) s'affichent 3.
+C'est idempotent, et la valeur qu'un controleur a ecrite ne « saute » jamais vers une voisine, sauf sous le plancher : 1 a 3 (0x4C) s'affichent 4.
 
 ### E.3 Callbacks et boite d'intentions
 
@@ -915,7 +929,7 @@ Cas testes :
    - Sinon : `r = resolveMatter(lamp.target(), in, lamp.memoryLamps())`.
      - Si `r.fields`, `lamp.request(r.target, r.fields)`.
      - Si `r.fireAuto && lamp.pressAuto()`, `sAutoPulseAt = now`.
-   - **A de la telecommande** (`HALO1_EXPOSE_AUTO`) : si `lamp.remoteAutoCount()` a change (appuis entendus dans `onAir`, les 3 copies d'un appui comptees une fois), meme impulsion d'EP4, que le reflet met a on. Rien n'est emis, aucune intention : notre ecriture d'EP4 est ecartee par `ownEcho()`.
+   - **A de la telecommande** (`HALO1_EXPOSE_AUTO`) : si `lamp.remoteAutoCount()` a change (appuis entendus dans `onAir`, les 3 copies d'un appui comptees une fois, D.6), meme impulsion d'EP4, que le reflet met a on. Rien n'est emis, aucune intention : notre ecriture d'EP4 est ecartee par `ownEcho()`. L'impulsion part de la montee reellement ecrite (ou d'EP4 deja a on), pas de l'appui entendu : la boite d'intentions (jusqu'a 400 ms), le verrou de la pile (CASE) ou un echec d'ecriture la retardent, et un echec est retente au passage suivant. Montee pas faite 3 s apres l'appui : abandon (compteur « non reflete(s) » de `matter`).
      - Dans tous les cas, `sForceReflect = true` : on realigne sur la consigne resolue, par exemple EP4 repasse a off tout de suite si A est refuse.
 2. **Reflet**, seulement si la boite est vide et si `sForceReflect` ou (`lamp.version() != sSeenVersion` et `now - sLastReflect ≥ 250`), ou si l'impulsion auto est echue :
    - `st = esp_matter::lock::chip_stack_lock(portMAX_DELAY)` ; si FAILED, on retente au passage suivant ;
@@ -941,7 +955,7 @@ Cas testes :
 3. `lamp`, la radio et la NVS pilote ne sont utilises que depuis la tache loop.
 4. Matter affiche la consigne. Elle ne change hors ecriture Matter que sur une trame de la telecommande, un abandon ou une commande CLI.
 5. On ne reflete jamais tant que la boite contient des intentions : un curseur en cours ne revient pas en arriere.
-6. EP1 OnOff = `t.power`, EP2 = `power && front`, EP3 = `power && back`, EP4 vaut false sauf pendant l'impulsion (1 s par defaut, `matter impulsion`). CurrentLevel jamais sous 3.
+6. EP1 OnOff = `t.power`, EP2 = `power && front`, EP3 = `power && back`, EP4 vaut false sauf pendant l'impulsion (1 s par defaut, `matter impulsion`). CurrentLevel jamais sous 4.
 
 Une option, hors v1 : Identify fait clignoter la LED de IO15, jamais la lampe, ce qui voudrait dire emettre.
 

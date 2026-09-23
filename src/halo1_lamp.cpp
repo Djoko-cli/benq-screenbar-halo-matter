@@ -18,11 +18,6 @@ static constexpr uint8_t kBlobVersion = 1;
 static constexpr uint32_t kPersistAfterTxMs = 500;
 // Module perdu (L3) : nouvel essai de relance toutes les 60 s.
 static constexpr uint32_t kLostRetryMs = 60000;
-// Un appui sur A de la telecommande = 3 copies du meme numero a ~100 ms
-// (btn-A4.log : E0 01 x3 en 200 ms). Meme numero moins de 1 s apres la trame
-// precedente : meme appui. Un nouvel appui change de numero ; la telecommande
-// ne repart a 01 qu'apres une pause bien plus longue.
-static constexpr uint32_t kRemoteAutoRepeatMs = 1000;
 
 // ---------------------------------------------------------------------------
 //  Textes
@@ -108,7 +103,7 @@ void Halo1Lamp::begin(BC5602 &chip, bool listen, RestartFn restart) {
   const uint32_t now = millis();
   // Comme si la derniere trame de la telecommande et la derniere emission
   // etaient anciennes : ni attente, ni sauvegarde retardee au demarrage.
-  remoteAt_ = lastTxEndAt_ = remoteAutoAt_ = now - 60000;
+  remoteAt_ = lastTxEndAt_ = now - 60000;
   radio.begin(chip, addrReg_);  // aucun acces SPI
   // Rien n'est emis : ecoute passive (jamais d'accuse) ou veille.
   radio.request(listen ? Mode::Rx : Mode::Sleep, now);
@@ -584,6 +579,7 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
     case Kind::Reserved:  // 91 xx, 89 xx : favori
       stats.rxReserved++;
       remoteAt_ = now;
+      remoteAuto_.reset();  // autre commande : le numero A repart a 01
       trace("[lampe] RX tele PID %u %02X %02X : favori", f.pid, p.flags, p.value);
       break;
     case Kind::Invalid:
@@ -595,10 +591,9 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
       // A est inconnu ('60 01' observe).
       stats.rxAuto++;
       remoteAt_ = now;
-      const bool press = p.value != remoteAutoValue_ || (uint32_t)(now - remoteAutoAt_) >= kRemoteAutoRepeatMs;
+      // 3 copies par appui : comptees une fois (AutoPressFilter).
+      const bool press = remoteAuto_.feed(p.value, now);
       if (press) remoteAutoPresses_++;  // reflete dans Matter par le pont (EP4)
-      remoteAutoValue_ = p.value;
-      remoteAutoAt_ = now;
       noteAuto(p.value, now);
       trace("[lampe] RX tele PID %u %02X %02X -> A numero %u%s", f.pid, p.flags, p.value, p.value,
             press ? "" : " (copie)");
@@ -607,6 +602,7 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
     default:  // Temp, Bright
       stats.rxState++;
       remoteAt_ = now;
+      remoteAuto_.reset();  // autre commande : le numero A repart a 01
       onRemotePayload(p, now);
       describe(believed_, st, sizeof(st));
       trace("[lampe] RX tele PID %u %02X %02X -> %s", f.pid, p.flags, p.value, st);

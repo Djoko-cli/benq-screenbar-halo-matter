@@ -227,6 +227,18 @@ Plan plan(const State &target, const State &believed, uint8_t dirty) {
 
 uint8_t nextAuto(uint8_t last) { return (last == 0 || last == 255) ? 1 : (uint8_t)(last + 1); }
 
+bool AutoPressFilter::feed(uint8_t value, uint32_t nowMs) {
+  // Ecart signe : une trame a plus de kRepeatMs reste un nouvel appui, sauf a
+  // moins d'une seconde d'un multiple de 49,7 jours (retour de millis()).
+  const int32_t age = (int32_t)(nowMs - at_);
+  const int32_t win = (int32_t)kRepeatMs;
+  const bool press = fresh_ || value != value_ || age >= win || age <= -win;
+  fresh_ = false;
+  value_ = value;
+  at_ = nowMs;
+  return press;
+}
+
 uint8_t crc8(const uint8_t *p, size_t n) {
   uint8_t c = 0;
   while (n--) {

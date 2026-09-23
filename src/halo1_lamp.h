@@ -140,9 +140,9 @@ class Halo1Lamp {
   Phase phase_ = Phase::Idle;
   uint32_t version_ = 1, nextTxAt_ = 0, retryAt_ = 0, remoteAt_ = 0, pendingSince_ = 0,
            lastTxEndAt_ = 0, persistFirst_ = 0, persistDue_ = 0, lastAckAt_ = 0, restartAt_ = 0;
-  // Derniere trame A de la telecommande (numero, instant) et appuis comptes.
-  uint32_t remoteAutoPresses_ = 0, remoteAutoAt_ = 0;
-  uint8_t remoteAutoValue_ = 0;
+  // Appuis A de la telecommande comptes, copies ecartees par remoteAuto_.
+  uint32_t remoteAutoPresses_ = 0;
+  halo1::AutoPressFilter remoteAuto_;
   uint16_t rawGapMs_ = 0;
   bool listening_ = false, trace_ = false, persistDirty_ = false, holding_ = false, lost_ = false,
        acked_ = false;

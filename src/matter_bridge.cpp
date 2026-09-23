@@ -180,11 +180,19 @@ static bool sAutoPulse = false;    // EP4 a on : impulsion du bouton A en cours
 static bool sForceReflect = true;  // realigner Matter sur la consigne au prochain passage
 #if HALO1_EXPOSE_AUTO
 static uint32_t sSeenRemoteAuto = 0;  // lamp.remoteAutoCount() deja reflete
-static bool sAutoRaise = false;       // impulsion d'un A de la telecommande : EP4 a mettre a on
+// A de la telecommande entendu, EP4 pas encore mis a on : l'impulsion n'a pas
+// commence (sAutoPulseAt = instant de l'appui entendu). Elle part de la montee
+// reellement ecrite (reflect), que la boite d'intentions, le verrou de la pile
+// ou un echec d'ecriture peuvent retarder. Au-dela de kAutoRaiseMaxWaitMs,
+// l'appui n'est plus reflete : une fenetre de coalescence (400 ms) et un
+// echange CASE (quelques centaines de ms) y tiennent largement, et un reflet
+// plus tardif tromperait plus qu'il n'informerait.
+static bool sAutoRaise = false;
+static constexpr uint32_t kAutoRaiseMaxWaitMs = 3000;
 #endif
 static struct {
-  uint32_t windows, bootIgnored, autoFired, autoRefused, autoHeard, reflects, writes, writeFails, lockBusy,
-      logDropped;
+  uint32_t windows, bootIgnored, autoFired, autoRefused, autoHeard, autoLost, reflects, writes, writeFails,
+      lockBusy, logDropped;
 } sStats = {};
 
 // ===========================================================================
@@ -200,6 +208,8 @@ static struct {
 
 static const char *const kNvsNs = "halo1";
 static const char *const kNvsPulseKey = "impulsion";
+static_assert(HALO1_AUTO_PULSE_MS >= kMatterPulseMinMs && HALO1_AUTO_PULSE_MS <= kMatterPulseMaxMs,
+              "HALO1_AUTO_PULSE_MS hors de kMatterPulseMinMs..kMatterPulseMaxMs");
 static uint16_t sAutoPulseMs = HALO1_AUTO_PULSE_MS;
 
 static void loadAutoPulse() {
@@ -395,14 +405,22 @@ static bool reflect(uint32_t now) {
   // Mis a on par un controleur, ou ici une fois pour un A de la telecommande
   // (sAutoRaise). Notre ecriture repasse par onAuto, mais dans la tache loop :
   // ownEcho() l'ecarte, rien n'est emis. Remis a off par un controleur pendant
-  // l'impulsion, il y reste.
+  // l'impulsion, il y reste. L'impulsion d'un A entendu part d'ici, de la
+  // montee reelle (ou d'EP4 deja a on) ; echec : nouvel essai au passage suivant.
+  const bool raising = sAutoRaise;
   if (syncAttr(autoButton, OnOff::Id, OnOff::Attributes::OnOff::Id,
-               [&](uint16_t cur) { return (uint16_t)(sAutoPulse && (cur || sAutoRaise)); }))
+               [&](uint16_t cur) { return (uint16_t)(sAutoPulse && (cur || sAutoRaise)); })) {
+    if (raising) sAutoPulseAt = now;
     sAutoRaise = false;
+  }
 #endif
   chip::DeviceLayer::PlatformMgr().UnlockChipStack();
   sSeenVersion = lamp.version();
+#if HALO1_EXPOSE_AUTO
+  sForceReflect = sAutoRaise;  // montee d'EP4 ratee : a refaire
+#else
   sForceReflect = false;
+#endif
   sLastReflect = now;
   sStats.reflects++;
   return true;
@@ -505,7 +523,7 @@ void matterBridgePoll() {
   if (heard != sSeenRemoteAuto) {
     sSeenRemoteAuto = heard;
     sAutoPulse = sAutoRaise = true;
-    sAutoPulseAt = now;
+    sAutoPulseAt = now;  // debut de l'attente de la montee ; l'impulsion part de celle-ci
     sForceReflect = true;
     sStats.autoHeard++;
     if (lamp.tracing()) bridgeLog("[matter] A de la telecommande -> impulsion EP4 (%u ms)", sAutoPulseMs);
@@ -519,11 +537,23 @@ void matterBridgePoll() {
   // et le retour a zero de millis() (49,7 jours) ne peut pas le rouvrir.
   if (sBootGuard && (uint32_t)(now - sBootMs) >= HALO1_BOOT_IGNORE_MS + HALO1_COALESCE_MAX_MS)
     sBootGuard = false;
-  const bool pulseOver = sAutoPulse && (uint32_t)(now - sAutoPulseAt) >= sAutoPulseMs;
+  const uint32_t pulseAge = now - sAutoPulseAt;
+#if HALO1_EXPOSE_AUTO
+  // Montee pas encore ecrite : l'impulsion n'a pas commence, seule l'attente
+  // est bornee (un EP4 casse ne garde pas l'impulsion pour toujours).
+  const bool pulseOver = sAutoPulse && pulseAge >= (sAutoRaise ? kAutoRaiseMaxWaitMs : (uint32_t)sAutoPulseMs);
+#else
+  const bool pulseOver = sAutoPulse && pulseAge >= sAutoPulseMs;
+#endif
   if (pulseOver) {
     sAutoPulse = false;
 #if HALO1_EXPOSE_AUTO
-    sAutoRaise = false;  // EP4 jamais mis a on apres la fin de l'impulsion
+    if (sAutoRaise) {  // EP4 jamais mis a on apres la fin de l'impulsion
+      sAutoRaise = false;
+      sStats.autoLost++;
+      if (lamp.tracing()) bridgeLog("[matter] A de la telecommande non reflete : EP4 pas ecrit en %lu ms",
+                                    (unsigned long)kAutoRaiseMaxWaitMs);
+    }
 #endif
   }
   const bool changed =
@@ -610,8 +640,9 @@ void matterPrintStatus(Print &out) {
              (unsigned long)sStats.autoRefused);
 #if HALO1_EXPOSE_AUTO
   out.printf("  bouton A (EP4)  : impulsion %u ms ('matter impulsion <%u..%u>', NVS), %lu A de la telecommande "
-             "reflete(s)\n",
-             sAutoPulseMs, kMatterPulseMinMs, kMatterPulseMaxMs, (unsigned long)sStats.autoHeard);
+             "entendu(s), %lu non reflete(s)\n",
+             sAutoPulseMs, kMatterPulseMinMs, kMatterPulseMaxMs, (unsigned long)sStats.autoHeard,
+             (unsigned long)sStats.autoLost);
 #else
   out.printf("  bouton A (EP4)  : absent (HALO1_EXPOSE_AUTO 0), impulsion %u ms\n", sAutoPulseMs);
 #endif
