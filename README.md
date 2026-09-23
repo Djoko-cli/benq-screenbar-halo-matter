@@ -250,12 +250,15 @@ sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
 | bleu clignotant (2 Hz) | pas encore mis en service : ajouter l'accessoire depuis l'app |
 | orange lent (1 s allumee, 1 s eteinte) | mis en service, mais reseau absent (Thread perdu ; Wi-Fi pour `esp32c6supermini`) |
 | eteinte, breve lueur blanche toutes les 10 s | tout va bien (signe de vie) ; une lueur aussi au retour du reseau |
+| rouge fixe | module radio en panne : relances automatiques sans effet (voir plus bas), ou module perdu ; dure jusqu'a la guerison |
 | eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
-| rouge, 3 clignements | lampe injoignable (ou module radio perdu) : le pilote abandonne la consigne |
+| rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne (aussi quand le module radio est perdu ou en panne) |
 | arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
 
-Priorite : arc-en-ciel > rouge > vert > etat du reseau. Au banc, `led test`
-joue chaque motif a tour de role (16 s) et `led` dit le motif en cours. Si le
+Priorite : arc-en-ciel > rouge x3 > rouge fixe > vert > etat du reseau (les
+noirs des trois clignements restent visibles sur le rouge fixe). Au banc,
+`led test` joue chaque motif a tour de role (18 s) et `led` dit le motif en
+cours et l'etat du module radio. Si le
 vert et le rouge sont inverses, la WS2812 de la carte n'est pas en GRB :
 `-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` dans `platformio.ini`.
 
@@ -268,6 +271,22 @@ allume sur le banc. Parmi les autres cibles, seule `esp32dev` fait clignoter sa
 LED simple (IO2) avec les memes motifs, sans la lueur ; sur les DevKit C3 et S3,
 `PIN_STATUS_LED` (IO8, IO48) est la broche de leur WS2812, non declaree : pas de
 voyant visible.
+
+**Relance automatique du module radio.** Le 24/09, une pointe de pied a
+coulisse metallique posee sur le quartz du BM5602 l'a bloque 70 min : tous les
+envois en delai, un deluge de trames au CRC faux en ecoute, alors que sa
+configuration se relisait juste ; seul `rfinit` l'a gueri. Le pilote relance
+donc seul le module (`halo.begin()`, ~300 ms) sur deux symptomes de puce :
+3 envois de suite sans TX_DS ni MAX_RT (delai de 30 ms), ou, en ecoute, au
+moins 100 trames en 10 s dont au moins 90 % au CRC faux (l'incident en donnait
+~230 a 99,8 % ; la molette de la telecommande, ~9 par seconde au CRC juste).
+Une lampe debranchee (MAX_RT, silence) ne fait jamais relancer. Une relance au
+plus par minute ; apres 3 relances de suite sans guerison (un accuse, ou une
+trame au CRC juste hors deluge), si le symptome revient, le module est
+**EN PANNE** : rouge fixe, un essai toutes les 10 min. Chaque relance ecrit une
+ligne `[lampe] BM5602 : ...` sur la console ; `lampe` montre l'etat,
+`lampe stats` les relances par cause et les dernieres, datees. Detail et
+seuils : [docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
 
 ### Certification : ce qui marche et ce qui demande une étape en plus
 
@@ -306,11 +325,11 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `lampe temp 0..100` / `lampe mired 153..370` | temperature : 0 froid, 100 chaud / en mireds |
 | `lampe auto` | bouton A (refuse lampe eteinte) |
 | `lampe sync` | renvoie tout ce qui est connu |
-| `lampe trace 0\|1` / `lampe stats` | journal par evenement / compteurs |
+| `lampe trace 0\|1` / `lampe stats` | journal par evenement / compteurs, dont les relances automatiques du module par cause |
 | `lampe adresse [8 hexa]` | adresse de la lampe (ordre d'ecriture), en NVS |
 | `lampe help` | toutes les commandes `lampe` (reglages et banc) |
-| `led` | LED d'etat : motif en cours, couleur affichee |
-| `led test` / `led stop` | joue chaque motif de la LED a tour de role (16 s), sans bloquer / l'arrete |
+| `led` | LED d'etat : motif en cours, couleur affichee, etat du module radio |
+| `led test` / `led stop` | joue chaque motif de la LED a tour de role (18 s), sans bloquer / l'arrete |
 | `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
 | `regs` | dump des registres du BC5602 |
 | `rfinit` | re-teste le module apres correction du cablage, sans reflasher |
@@ -343,6 +362,7 @@ src/halo.{h,cpp}          demarrage du module, outils de banc (couche Halo 2 neu
 src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
 src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
 src/halo1_radio.{h,cpp}   sequences BC5602 prouvees, reconfiguration non bloquante
+src/halo1_watch.{h,cpp}   quand relancer le module sur symptome de puce (logique pure, testee sur l'hote)
 src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telecommande
 src/cli_lampe.cpp         commandes 'lampe ...'
 src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne, Identify
@@ -352,7 +372,7 @@ src/cli.{h,cpp}           console série de rétro-ingénierie
 src/main.cpp              assemblage, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/WIRING.md            câblage et pièges matériels
-tools/test_halo1.sh       tests hote du protocole Halo 1 et de la LED d'etat, sans carte
+tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module et de la LED d'etat, sans carte
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 ```
 

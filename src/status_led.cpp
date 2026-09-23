@@ -9,10 +9,12 @@ namespace statusled {
 // Orange : le vert d'une WS2812 parait bien plus fort que son rouge.
 static constexpr Rgb kBlue{0, 0, kMax}, kOrange{kMax, kMax / 4, 0}, kGreen{0, kMax, 0}, kRed{kMax, 0, 0};
 
-// Ordre du tableau du README ; les motifs bornes (vert, rouge) finissent sur du
-// noir, qui separe les pas.
+// Ordre du tableau du README ; les motifs bornes (vert, rouge x3) finissent sur
+// du noir, qui separe les pas. Le rouge fixe suit la lueur (noir a sa fin) et
+// precede le vert : colle au rouge x3 ou au rouge de depart de l'arc-en-ciel,
+// il ne s'en distinguerait pas.
 const TestStep kTest[kTestSteps] = {
-    {Pattern::Unpaired, 3000},  {Pattern::Offline, 4000},     {Pattern::Online, 2000},
+    {Pattern::Unpaired, 3000},  {Pattern::Offline, 4000},     {Pattern::Online, 2000},   {Pattern::RadioFault, 2000},
     {Pattern::Delivered, 1000}, {Pattern::Unreachable, 2000}, {Pattern::Identify, 4000},
 };
 
@@ -40,6 +42,7 @@ Rgb render(Pattern p, uint32_t t) {
       return wheel((uint16_t)(phase * 768 / kRainbowMs));
     }
     case Pattern::Unreachable: return t < kUnreachableMs && (t / kRedHalfMs) % 2 == 0 ? kRed : Rgb{};
+    case Pattern::RadioFault: return kRed;  // fixe : le seul motif qui ne clignote pas
     case Pattern::Delivered: return t < kDeliveredMs ? kGreen : Rgb{};
     case Pattern::Unpaired: return (t / kUnpairedHalfMs) % 2 == 0 ? kBlue : Rgb{};
     case Pattern::Offline: return (t / kOfflineHalfMs) % 2 == 0 ? kOrange : Rgb{};
@@ -66,6 +69,7 @@ const char *patternName(Pattern p) {
   switch (p) {
     case Pattern::Identify: return "identification (arc-en-ciel)";
     case Pattern::Unreachable: return "lampe injoignable (rouge x3)";
+    case Pattern::RadioFault: return "module radio en panne (rouge fixe)";
     case Pattern::Delivered: return "consigne livree (eclat vert)";
     case Pattern::Unpaired: return "pas mis en service (bleu clignotant)";
     case Pattern::Offline: return "reseau absent (orange lent)";
@@ -93,6 +97,11 @@ void Logic::delivered(uint32_t now) {
 void Logic::unreachable(uint32_t now) {
   red_ = true;
   redAt_ = now;
+}
+
+void Logic::setFault(bool on, uint32_t now) {
+  if (on && !fault_) faultAt_ = now;
+  fault_ = on;
 }
 
 void Logic::startTest(uint32_t now) {
@@ -124,6 +133,10 @@ Pattern Logic::pick(uint32_t now, uint32_t &t) {
   if (red_) {
     t = now - redAt_;
     return Pattern::Unreachable;
+  }
+  if (fault_) {
+    t = now - faultAt_;
+    return Pattern::RadioFault;
   }
   if (green_) {
     t = now - greenAt_;
@@ -255,6 +268,7 @@ void statusLedPoll() {
     sLed.setNet(!matterIsCommissioned() ? Net::Unpaired : !matterIsConnected() ? Net::Offline : Net::Online, now);
   }
   sLed.setIdentify(matterIdentifying(), now);
+  sLed.setFault(lamp.moduleFault(), now);
   const uint32_t delivered = lamp.deliveredCount(), giveUps = lamp.giveUpCount();
   if (delivered != sSeenDelivered) {
     sSeenDelivered = delivered;
@@ -305,8 +319,9 @@ void statusLedCommand(const char *arg) {
 #else
   Serial.printf("  affiche   : %s\n", sShownOn ? "allumee" : "eteinte");
 #endif
-  Serial.printf("  pilote    : %lu consigne(s) livree(s), %lu abandon(s) depuis le demarrage\n",
-                (unsigned long)sSeenDelivered, (unsigned long)sSeenGiveUps);
+  Serial.printf("  pilote    : %lu consigne(s) livree(s), %lu abandon(s) depuis le demarrage ; module radio %s\n",
+                (unsigned long)sSeenDelivered, (unsigned long)sSeenGiveUps,
+                lamp.moduleFault() ? "EN PANNE ('lampe')" : "ok");
 #endif
 }
 
