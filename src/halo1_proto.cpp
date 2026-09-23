@@ -448,6 +448,11 @@ int selfTest(char *msg, size_t n) {
                  !plan(r.target, State(), r.fields).bright,
              "niveau lampe eteinte");
     in = MatterIntents();
+    in.has = IN_POWER | IN_LEVEL;  // EP1 off : niveau ecrit par la pile, ecarte
+    in.level = 1;
+    r = resolveMatter(on, in, F_LAMPS);
+    c.expect(!r.target.power && r.fields == FLD_FLAGS && r.target.bright == on.bright, "EP1 off + niveau");
+    in = MatterIntents();
     in.has = IN_POWER | IN_AUTO;  // A avec EP1 on : garde-fou de groupe
     in.power = true;
     c.expect(!resolveMatter(on, in, F_LAMPS).fireAuto, "A avec EP1 on");
