@@ -111,32 +111,48 @@ void Halo1Lamp::begin(BC5602 &chip, bool listen, RestartFn restart) {
 
 void Halo1Lamp::tick() {
   const uint32_t now = millis();
-  if (!radio.present()) {
-    // L3 : la relance a echoue, le module ne repond plus.
-    if (lost_ && restart_ && (uint32_t)(now - restartAt_) >= kLostRetryMs) restartModule(now);
+  if (!radio.present() || (stuck_ && !relaunched_)) {
+    // L3 : relance ratee (module muet) ou sans effet (configuration toujours
+    // rejetee). Pilote inactif, nouvel essai de relance toutes les 60 s.
+    if (lost()) {
+      if (busy()) giveUp();  // une consigne arrivee pendant la perte ne partirait jamais
+      if (restart_ && (uint32_t)(now - restartAt_) >= kLostRetryMs) restartModule(now);
+    }
     return;
   }
   radio.service(now);
+  if (relaunched_ && radio.stats.fullConfigs != relaunchConfigs_) {
+    relaunched_ = false;  // configuration verifiee : la relance a gueri la puce
+    if (stuck_) notice("[lampe] BM5602 retrouve : configuration verifiee");
+    stuck_ = false;
+  }
   if (radio.restartWanted()) {  // L2 : 3 verifications ratees de suite
     restartModule(now);
-    if (!radio.present()) return;
+    if (!radio.present() || (stuck_ && !relaunched_)) return;
   }
   traceRadio();
   if (phase_ == Phase::Backoff && (int32_t)(now - retryAt_) >= 0) phase_ = Phase::Idle;
-  if (phase_ == Phase::Idle && anyActive()) {
-    // On ne se bat pas avec la telecommande : pas de rafale juste apres l'une
-    // de ses trames, sauf pour une demande qui attend depuis trop longtemps.
-    if ((uint32_t)(now - remoteAt_) < HALO1_REMOTE_HOLDOFF_MS &&
-        (uint32_t)(now - pendingSince_) < HALO1_REMOTE_HOLDOFF_MAX_MS) {
-      if (!holding_) {
-        holding_ = true;
-        stats.holdoffs++;
-        trace("[lampe] attente : la telecommande vient de parler");
-      }
+  if (phase_ == Phase::Idle) {
+    if (!anyActive()) {
+      pendingSince_ = 0;  // un reglage differe seul n'attend rien
     } else {
-      phase_ = Phase::Burst;
-      nextTxAt_ = now;
-      rr_ = 0;  // luminosite d'abord quand les deux tranches sont actives
+      // Tranche armee sans demande (reglage differe libere par une trame de la
+      // telecommande) : l'attente compte a partir d'ici.
+      markPending(now);
+      // On ne se bat pas avec la telecommande : pas de rafale juste apres l'une
+      // de ses trames, sauf pour une demande qui attend depuis trop longtemps.
+      if ((uint32_t)(now - remoteAt_) < HALO1_REMOTE_HOLDOFF_MS &&
+          (uint32_t)(now - pendingSince_) < HALO1_REMOTE_HOLDOFF_MAX_MS) {
+        if (!holding_) {
+          holding_ = true;
+          stats.holdoffs++;
+          trace("[lampe] attente : la telecommande vient de parler");
+        }
+      } else {
+        phase_ = Phase::Burst;
+        nextTxAt_ = now;
+        rr_ = 0;  // luminosite d'abord quand les deux tranches sont actives
+      }
     }
   }
   if (phase_ != Phase::Idle || !anyActive()) holding_ = false;  // une attente par demande
@@ -159,7 +175,9 @@ void Halo1Lamp::tick() {
     }
   }
   selMem_.update(target_, now, HALO1_SELECTION_STABLE_MS);
-  maybePersist(now);
+  // Horloge fraiche : un paquet emis dans ce tour a note sa fin (et l'echeance
+  // de sauvegarde) apres 'now'.
+  maybePersist(millis());
 }
 
 void Halo1Lamp::settleRadio() {
@@ -181,20 +199,47 @@ bool Halo1Lamp::waitIdle(uint32_t maxMs) {
 }
 
 // L2 : relance complete du module (halo.begin(), ~300 ms bloquant, rare), puis
-// reconfiguration. Echec : L3, pilote inactif, nouvel essai toutes les 60 s.
+// reconfiguration. Relance ratee, ou sans effet (aucune configuration verifiee
+// depuis la precedente) : L3, pilote inactif, nouvel essai toutes les 60 s.
 void Halo1Lamp::restartModule(uint32_t now) {
   restartAt_ = now;
+  if (relaunched_ && radio.stats.fullConfigs == relaunchConfigs_) {
+    // halo.begin() n'y peut rien : relancer en boucle bloquerait loop() ~300 ms
+    // toutes les ~130 ms, sans jamais rendre la radio prete. Pas de
+    // restartDone() : la radio reste inerte (demande de relance levee) et garde
+    // la configuration rejetee, que 'lampe regs' montre.
+    relaunched_ = false;
+    if (!stuck_) {  // une annonce par panne, pas une par essai
+      char msg[144];
+      uint8_t c[3];
+      if (radio.readConfig(c))
+        snprintf(msg, sizeof(msg),
+                 "[lampe] BM5602 : configuration rejetee apres relance (RFCH %02X DM1 %02X RT1 %02X, attendu 05 82 "
+                 "73) : nouvel essai toutes les 60 s",
+                 c[0], c[1], c[2]);
+      else
+        snprintf(msg, sizeof(msg), "[lampe] BM5602 : configuration rejetee apres relance : nouvel essai toutes les 60 s");
+      notice(msg);
+    }
+    stuck_ = true;
+    if (busy()) giveUp();
+    return;
+  }
   const bool ok = restart_ && restart_();
   radio.restartDone();
   if (ok) {
     stats.restarts++;
     if (lost_) notice("[lampe] BM5602 retrouve");
     lost_ = false;
+    // stuck_ reste leve jusqu'a une configuration verifiee (tick).
+    relaunched_ = true;
+    relaunchConfigs_ = radio.stats.fullConfigs;
     trace("[lampe] RADIO module relance");
     return;
   }
   if (!lost_) notice("[lampe] BM5602 perdu : nouvel essai de relance toutes les 60 s");
   lost_ = true;
+  stuck_ = relaunched_ = false;  // module muet : sa configuration ne se juge plus
   if (busy()) giveUp();
 }
 
@@ -282,9 +327,10 @@ const char *Halo1Lamp::sendRaw(Payload p, bool force, uint8_t packets, uint16_t 
 
 void Halo1Lamp::believe(Payload p) {
   const uint32_t now = millis();
-  const Kind k = kindOf(p);
-  if (k == Kind::Auto) noteAuto(p.value, now);
-  else if (k == Kind::Temp || k == Kind::Bright) onRemotePayload(p, now);
+  if (kindOf(p) == Kind::Auto) noteAuto(p.value, now);
+  // Sans emettre (D.2) : une tranche deja active suit la nouvelle consigne, mais
+  // un reglage differe reste a livrer jusqu'a la prochaine consigne.
+  else onRemotePayload(p, now, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -299,19 +345,19 @@ bool Halo1Lamp::anyActive() const {
 
 bool Halo1Lamp::busy() const { return anyActive() || phase_ == Phase::Backoff; }
 
-void Halo1Lamp::replan(uint32_t now, bool credit) {
+void Halo1Lamp::replan(uint32_t now, bool credit, bool arm) {
   // Deux passes au plus : une tranche abandonnee apres un accuse met a jour
   // l'etat cru, dont la trame d'extinction reprend la temperature.
   for (uint8_t pass = 0; pass < 2; pass++) {
     const State before = believed_;
     const Plan p = plan(target_, believed_, dirty_);
-    setSlot(SLOT_BRIGHT, p.bright, p.pb, now, credit);
-    setSlot(SLOT_TEMP, p.temp, p.pt, now, credit);
+    setSlot(SLOT_BRIGHT, p.bright, p.pb, now, credit, arm);
+    setSlot(SLOT_TEMP, p.temp, p.pt, now, credit, arm);
     if (believed_ == before) break;
   }
 }
 
-void Halo1Lamp::setSlot(uint8_t id, bool want, Payload p, uint32_t now, bool credit) {
+void Halo1Lamp::setSlot(uint8_t id, bool want, Payload p, uint32_t now, bool credit, bool arm) {
   Slot &s = slots_[id];
   if (!want) {
     if (!s.active) return;
@@ -320,6 +366,7 @@ void Halo1Lamp::setSlot(uint8_t id, bool want, Payload p, uint32_t now, bool cre
     stats.cancelled++;
     return;
   }
+  if (!s.active && !arm) return;  // 'lampe croire' : rien de neuf ne part
   if (s.active && s.pay == p) return;  // meme charge : on garde les compteurs
   if (s.active) {
     // Un curseur qui bouge : la valeur finale obtient toujours sa rafale complete.
@@ -341,17 +388,16 @@ int8_t Halo1Lamp::pickSlot() {
   if (t) return SLOT_TEMP;
   Slot &a = slots_[SLOT_AUTO];
   if (!a.active) return -1;
-  if (!a.attempts) {
-    // Eteinte depuis l'appui : A n'est pas envoye (effet inconnu lampe eteinte).
-    if (!target_.power) {
-      a.active = false;
-      stats.autoIgnoredOff++;
-      trace("[lampe] A %u abandonne : lampe eteinte", a.pay.value);
-      return -1;
-    }
-    // Drapeaux refaits avec les lampes de la consigne, meme numero (Q8).
-    a.pay = makeAuto(true, target_.lamps, a.pay.value);
+  // Eteinte depuis l'appui, meme au milieu de sa rafale : A n'est plus envoye
+  // (effet inconnu lampe eteinte).
+  if (!target_.power) {
+    a.active = false;
+    stats.autoIgnoredOff++;
+    trace("[lampe] A %u abandonne : lampe eteinte", a.pay.value);
+    return -1;
   }
+  // Premier paquet : drapeaux refaits avec les lampes de la consigne, meme numero (Q8).
+  if (!a.attempts) a.pay = makeAuto(true, target_.lamps, a.pay.value);
   return SLOT_AUTO;
 }
 
@@ -429,7 +475,10 @@ void Halo1Lamp::complete(uint8_t id, uint32_t now) {
     // trame, appliquee comme une trame de la telecommande.
     s.active = false;
     trace("[lampe] brut %02X %02X : %u/%u accuses", p.flags, p.value, s.acks, s.attempts);
-    if (s.acks) believe(p);
+    if (s.acks) {  // replanification comprise (D.4), contrairement a 'lampe croire'
+      if (kindOf(p) == Kind::Auto) noteAuto(p.value, now);
+      else onRemotePayload(p, now);
+    }
     return;
   }
   const uint8_t need = s.repeats < tuning.minAcks ? s.repeats : tuning.minAcks;
@@ -554,7 +603,7 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
   }
 }
 
-void Halo1Lamp::onRemotePayload(Payload p, uint32_t now) {
+void Halo1Lamp::onRemotePayload(Payload p, uint32_t now, bool arm) {
   const Kind k = kindOf(p);
   if (k != Kind::Temp && k != Kind::Bright) return;
   // Nos paquets deja accuses (rafale en cours, trame recue a la place d'un
@@ -569,7 +618,7 @@ void Halo1Lamp::onRemotePayload(Payload p, uint32_t now) {
   const uint8_t f = (uint8_t)(FLD_FLAGS | (k == Kind::Bright ? FLD_BRIGHT : FLD_TEMP));
   dirty_ &= (uint8_t)~f;
   confirmed_ |= f;
-  replan(now, false);
+  replan(now, false, arm);
 }
 
 void Halo1Lamp::noteAuto(uint8_t value, uint32_t now) {
@@ -656,8 +705,9 @@ void Halo1Lamp::schedulePersist(uint32_t now) {
 // prendre quelques dizaines de ms.
 void Halo1Lamp::maybePersist(uint32_t now) {
   if (!persistDirty_ || busy() || phase_ == Phase::Burst) return;
-  if ((uint32_t)(now - lastTxEndAt_) < kPersistAfterTxMs) return;
-  if ((int32_t)(now - persistDue_) < 0 && (uint32_t)(now - persistFirst_) < HALO1_PERSIST_MAX_MS) return;
+  // Differences signees : une date posterieure a 'now' compte comme recente.
+  if ((int32_t)(now - lastTxEndAt_) < (int32_t)kPersistAfterTxMs) return;
+  if ((int32_t)(now - persistDue_) < 0 && (int32_t)(now - persistFirst_) < (int32_t)HALO1_PERSIST_MAX_MS) return;
   saveState();
 }
 
@@ -717,9 +767,12 @@ void Halo1Lamp::printStatus(Print &out) const {
   char a[48], b[48], fa[32], fb[32];
   out.println();
   out.println("=== Lampe Halo 1 (pilote) ===");
-  if (!radio.present())
-    out.println(lost_ ? "  BM5602 PERDU : nouvel essai de relance toutes les 60 s"
-                      : "  BM5602 absent : pilote inactif ('rfinit', puis 'lampe')");
+  if (lost())
+    out.println(stuck_ ? "  BM5602 PERDU : configuration rejetee meme apres relance ('lampe regs'), "
+                         "nouvel essai toutes les 60 s"
+                       : "  BM5602 PERDU : nouvel essai de relance toutes les 60 s");
+  else if (!radio.present())
+    out.println("  BM5602 absent : pilote inactif ('rfinit', puis 'lampe')");
   const uint8_t *r = addrReg_, *air = radio.air();
   out.printf("  adresse     : %02X %02X %02X %02X (sur l'air %02X %02X %02X %02X), canal %u, 125 kbps\n", r[0],
              r[1], r[2], r[3], air[0], air[1], air[2], air[3], (unsigned)kChannel);
@@ -794,4 +847,5 @@ void Halo1Lamp::clearStats() {
   stats = Stats{};
   radio.stats = Halo1Radio::Stats{};
   seenSilence_ = seenTxReconf_ = seenVerify_ = 0;
+  relaunchConfigs_ = 0;  // relance en cours : toujours aucune configuration verifiee depuis
 }
