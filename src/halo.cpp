@@ -3866,6 +3866,13 @@ void BenqHalo::txAck(Print &out, const uint8_t addrReg[4], uint8_t channel, cons
              verdict, irq, rt2, status, (unsigned long)us);
     out.println(line);
     Serial.flush();
+    // Apres un echec, reconfiguration complete. Mesure a l'appui (banc du
+    // 23/09) : apres un premier MAX_RT, les essais suivants echouaient en 64 us,
+    // file d'emission pleine (STATUS 21) et compteur de pertes qui montait --
+    // l'effacement de l'indicateur et le vidage de la file ne suffisaient pas.
+    // Jamais apres un succes : le PID doit avancer d'un essai reussi au suivant,
+    // sans quoi le destinataire ecarte la trame comme un doublon.
+    if (!(irq & IRQ_TX_DS)) configStdAutoAck(radio, addrReg, channel, dataRate_, false);
     if (gapMs) delay(gapMs);
   }
   radio.command(CMD_LIGHT_SLEEP);
