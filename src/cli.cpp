@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "halo.h"
+#include "halo1_lamp.h"
 #include "swd.h"
 
 // Definie dans main.cpp.
@@ -82,6 +83,9 @@ static void cmdHelp() {
   Serial.println("=== Commandes ===");
   Serial.println("  help                  cette aide");
   Serial.println("  info                  materiel, configuration et etat de la lampe");
+  Serial.println("  lampe [etat]          pilote Halo 1 : consigne, etat cru, radio ('lampe help')");
+  Serial.println("  lampe on|off|sync     allumer, eteindre, tout renvoyer (memes regles que Matter)");
+  Serial.println("  lampe lum|temp|mode   luminosite 4C..FE, temperature 0..100, avant|arriere|deux");
   Serial.println("  matter                etat Matter, code d'appairage");
   Serial.println("  debug                 bascule les traces RF");
   Serial.println("  regs                  dump des registres du BC5602");
@@ -234,18 +238,34 @@ static void cmdWifi(char *arg) {
 //  Dispatch
 // ---------------------------------------------------------------------------
 
+// Commandes qui ne touchent pas au BM5602. Toutes les autres (txack, ecoute,
+// rfinit, regs, xo, cc*, swd...) peuvent changer sa configuration ou le trim
+// du quartz : le pilote Halo 1 reconfigure alors la puce au prochain usage.
+static bool radioFree(const char *cmd) {
+  static const char *const kFree[] = {"lampe", "help", "?", "matter", "debug", "chiplog",
+                                      "cause", "wifi", "decommission", "reboot"};
+  for (const char *k : kFree)
+    if (!strcmp(cmd, k)) return true;
+  return false;
+}
+
 static void handleLine(char *line) {
   while (*line == ' ') line++;
   if (!*line) return;
   char *arg = splitWord(line);
+  // Un outil de banc ne doit pas trouver la puce au milieu d'un reset du
+  // pilote : elle y est en SPI 3 fils et ne repond pas aux lectures.
+  const bool touchesRadio = !radioFree(line);
+  if (touchesRadio) lamp.settleRadio();
 
   if (!strcmp(line, "help") || !strcmp(line, "?")) cmdHelp();
   else if (!strcmp(line, "info")) {
     halo.printInfo(Serial);
+    lamp.printStatus(Serial);
 #ifndef DIAG_ONLY
     netPrintStatus(Serial);
 #endif
-  }
+  } else if (!strcmp(line, "lampe")) cmdLampe(arg);
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "matter")) matterPrintStatus(Serial);
 #endif
@@ -961,12 +981,17 @@ static void handleLine(char *line) {
   }
 #endif
   else if (!strcmp(line, "reboot")) {
+    lamp.persistNow();  // etat cru de la lampe, sans attendre l'echeance
     Serial.println("Redemarrage...");
     delay(100);
     ESP.restart();
   } else {
     Serial.printf("Commande inconnue : \"%s\". Tape 'help'.\n", line);
   }
+  // La puce a pu etre reconfiguree : reconfiguration complete au prochain usage
+  // par le pilote. Sans risque : la CLI tourne dans la meme tache que tick(),
+  // et une rafale interrompue reprend (PID a 0, trames absolues).
+  if (touchesRadio) lamp.invalidateRadio();
 }
 
 // ---------------------------------------------------------------------------
