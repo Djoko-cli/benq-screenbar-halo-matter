@@ -27,7 +27,9 @@ class Halo1Radio {
   enum : uint8_t { WHY_MODE, WHY_SILENCE, WHY_TX, WHY_VERIFY };
   struct TxReport {
     Verdict v; uint8_t irq1, rt2, status; uint16_t us;
-    uint8_t fLen; uint8_t fPay[4];  // trame recue a la place de l'accuse (AckForeign)
+    // Trame recue a la place de l'accuse (AckForeign). fLen = PKT4 brut, jusqu'a
+    // 32 : fPay n'est rempli que si 1 <= fLen <= 4.
+    uint8_t fLen; uint8_t fPay[4];
   };
   struct Tuning {
     uint16_t resetWaitMs = HALO1_RESET_WAIT_MS;  // 40 : chemin prouve
@@ -39,7 +41,10 @@ class Halo1Radio {
   struct Stats {
     uint32_t fullConfigs, silenceReconf, txReconf, verifyFail, rearms, rxRaw, lightSwitches;
   };
-  struct Snapshot {  // pris avant chaque reconfiguration de silence, d'echec TX ou de verification
+  // Pris avant chaque reconfiguration de silence, d'echec TX ou de verification.
+  // Un silence qui suit un silence remplace le precedent : au calme, il en vient
+  // un toutes les ~540 ms, qui chasserait sinon les instantanes d'echec.
+  struct Snapshot {
     uint32_t atMs; uint8_t why, sta1, irq1, status, mask, ce, cfg1, rfch, dm1, pkt1, enaa,
         dpl1, dpl2, rxpw0, rt1;
   };
@@ -57,7 +62,12 @@ class Halo1Radio {
   Mode mode() const { return mode_; }
   void service(uint32_t nowMs);                        // acheve un reset apres resetWaitMs
   bool restartWanted() const { return restartWanted_; }
-  void restartDone() { restartWanted_ = false; verifyFails_ = 0; mode_ = Mode::Unknown; }
+  void restartDone() {  // apres halo.begin(), qui a reecrit IO1
+    restartWanted_ = false; verifyFails_ = 0; spi3Wire_ = false; mode_ = Mode::Unknown;
+  }
+  // Lecture SPI possible : faux entre un reset et la configuration qui le suit
+  // (SPI 3 fils, bc5602.cpp), y compris si invalidate() a coupe ce reset.
+  bool readable() const { return present() && !spi3Wire_; }
   // Exige ready(Tx), sinon FifoRefused sans toucher a la puce. Bloquant : <= 30 ms
   // d'attente active (1,6-1,7 ms mesures). Apres tout verdict autre que
   // Ack/AckForeign : lance une reconfiguration vers Tx.
@@ -65,7 +75,7 @@ class Halo1Radio {
   // Exige ready(Rx). Une iteration de la boucle de sniffStd ; true = raw[8] rempli.
   bool pollRx(uint32_t nowMs, uint8_t raw[8]);
   uint8_t snapshots(Snapshot *out, uint8_t max) const;  // du plus recent au plus ancien
-  bool readConfig(uint8_t out[3]);  // RFCH, DM1, RT1 relus
+  bool readConfig(uint8_t out[3]);  // RFCH, DM1, RT1 relus ; false si !readable()
 
   Tuning tuning;
   Stats stats{};
@@ -84,6 +94,7 @@ class Halo1Radio {
   uint32_t resetAt_ = 0, lastArm_ = 0, lastFrame_ = 0, lastFull_ = 0;
   uint8_t verifyFails_ = 0;
   bool restartWanted_ = false;
+  bool spi3Wire_ = false;  // reset envoye, IO1 pas encore reecrit : aucune lecture
   Snapshot snaps_[kSnaps] = {};
   uint8_t snapIdx_ = 0, snapN_ = 0;
 };
