@@ -1,4 +1,5 @@
-// Tests hote du protocole Halo 1 et des correspondances Matter (sans carte).
+// Tests hote du protocole Halo 1, des correspondances Matter et de la LED
+// d'etat (sans carte).
 // Lancer : sh tools/test_halo1.sh
 //
 // Vecteurs et tables : docs/PLAN-PILOTE-HALO1.md (H/C2, D.3, E.2, E.4) et
@@ -11,6 +12,7 @@
 #include "halo1_map.h"
 #include "halo1_proto.h"
 #include "matter_resume.h"
+#include "status_led.h"
 
 using namespace halo1;
 
@@ -1142,6 +1144,181 @@ static void testResumePlanner() {
 }
 
 // ---------------------------------------------------------------------------
+//  LED d'etat (status_led.h) : motifs, priorites, intensite, rythme d'ecriture
+// ---------------------------------------------------------------------------
+
+static bool rgbIs(statusled::Rgb c, unsigned r, unsigned g, unsigned b) { return c.r == r && c.g == g && c.b == b; }
+static bool dark(statusled::Rgb c) { return rgbIs(c, 0, 0, 0); }
+
+// Changements de couleur vus par la LED sur [from, to[ en tours de 1 ms : ce
+// que statusLedPoll() ecrirait (elle n'ecrit que les changements).
+static unsigned writesOver(statusled::Logic &l, uint32_t from, uint32_t to) {
+  unsigned n = 0;
+  statusled::Rgb last = l.frame(from).c;
+  for (uint32_t t = from + 1; t != to; t++) {
+    const statusled::Rgb c = l.frame(t).c;
+    if (c != last) n++;
+    last = c;
+  }
+  return n;
+}
+
+static void testStatusLed() {
+  using namespace statusled;
+  using P = Pattern;
+
+  // Motifs de l'etat du reseau.
+  CHECK(rgbIs(render(P::Unpaired, 0), 0, 0, kMax), "bleu au depart");
+  CHECK(dark(render(P::Unpaired, kUnpairedHalfMs)), "bleu eteint a la demi-periode");
+  CHECK(rgbIs(render(P::Unpaired, 2 * kUnpairedHalfMs + 10), 0, 0, kMax), "bleu rallume");
+  const Rgb orange = render(P::Offline, kOfflineHalfMs - 1);
+  CHECK(orange.r == kMax && orange.g > 0 && orange.g < kMax / 2 && orange.b == 0, "orange %u %u %u", orange.r,
+        orange.g, orange.b);
+  CHECK(dark(render(P::Offline, kOfflineHalfMs)) && !dark(render(P::Offline, 2 * kOfflineHalfMs)), "orange lent");
+  CHECK(dark(render(P::Online, 0)), "lueur : part du noir");
+  CHECK(rgbIs(render(P::Online, kGlowMs / 2), kGlowMax, kGlowMax, kGlowMax), "lueur : sommet a 8");
+  CHECK(dark(render(P::Online, kGlowMs)) && dark(render(P::Online, kGlowPeriodMs - 1)), "eteinte entre deux lueurs");
+  CHECK(rgbIs(render(P::Online, kGlowPeriodMs + kGlowMs / 2), kGlowMax, kGlowMax, kGlowMax), "lueur suivante a 10 s");
+
+  // Evenements bornes : vert 150 ms, rouge trois fois, puis noir.
+  CHECK(rgbIs(render(P::Delivered, 0), 0, kMax, 0) && rgbIs(render(P::Delivered, kDeliveredMs - 1), 0, kMax, 0),
+        "eclat vert");
+  CHECK(dark(render(P::Delivered, kDeliveredMs)), "vert fini");
+  unsigned blinks = 0;
+  bool was = false;
+  for (uint32_t t = 0; t < 3 * kUnreachableMs; t++) {
+    const Rgb c = render(P::Unreachable, t);
+    CHECK(dark(c) || rgbIs(c, kMax, 0, 0), "rouge seulement, t %u", (unsigned)t);
+    if (!dark(c) && !was) blinks++;
+    was = !dark(c);
+  }
+  CHECK(blinks == kRedBlinks, "%u clignements rouges au lieu de 3", blinks);
+
+  // Arc-en-ciel : intensite constante, un tour en kRainbowMs, par pas de 40 ms.
+  unsigned distinct = 0;
+  Rgb prev = render(P::Identify, 0);
+  bool sawR = false, sawG = false, sawB = false;
+  for (uint32_t t = 0; t < kRainbowMs; t++) {
+    const Rgb c = render(P::Identify, t);
+    CHECK(c.r + c.g + c.b == kMax, "arc-en-ciel t %u : %u %u %u", (unsigned)t, c.r, c.g, c.b);
+    if (t % kStepMs) CHECK(c == prev, "arc-en-ciel change hors d'un pas, t %u", (unsigned)t);
+    if (c != prev) distinct++;
+    sawR |= c.r == kMax;
+    sawG |= c.g == kMax;
+    sawB |= c.b == kMax;
+    prev = c;
+  }
+  CHECK(distinct >= 40 && sawR && sawG && sawB, "arc-en-ciel : %u couleurs, R%u V%u B%u", distinct, sawR, sawG, sawB);
+  CHECK(render(P::Identify, kRainbowMs) == render(P::Identify, 0), "un tour en 2 s");
+
+  // Intensite : jamais plus de 24 par canal, 8 pour la lueur.
+  const P all[] = {P::Identify, P::Unreachable, P::Delivered, P::Unpaired, P::Offline, P::Online};
+  for (P p : all) {
+    const unsigned cap = p == P::Online ? kGlowMax : kMax;
+    for (uint32_t t = 0; t < 25000; t += 7) {
+      const Rgb c = render(p, t);
+      CHECK(c.r <= cap && c.g <= cap && c.b <= cap, "%s t %u : %u %u %u", patternName(p), (unsigned)t, c.r, c.g, c.b);
+    }
+    CHECK(patternName(p) && *patternName(p), "nom du motif %u", (unsigned)p);
+  }
+
+  // LED simple : pas de lueur, Identify clignote vite, le reste suit la couleur.
+  for (uint32_t t = 0; t < 25000; t += 13) {
+    CHECK(!renderMono(P::Online, t), "LED simple allumee en ligne, t %u", (unsigned)t);
+    CHECK(renderMono(P::Unpaired, t) == !dark(render(P::Unpaired, t)), "LED simple, bleu t %u", (unsigned)t);
+  }
+  CHECK(renderMono(P::Identify, 0) && !renderMono(P::Identify, kIdentifyMonoHalfMs), "LED simple : Identify");
+
+  // Priorites : Identify > rouge > vert > reseau.
+  {
+    Logic l;
+    const uint32_t t0 = 5000;
+    l.setNet(Net::Online, t0);
+    CHECK(l.frame(t0).p == P::Online, "en ligne");
+    l.delivered(t0 + 100);
+    CHECK(l.frame(t0 + 100).p == P::Delivered, "vert par-dessus le reseau");
+    l.unreachable(t0 + 120);
+    CHECK(l.frame(t0 + 120).p == P::Unreachable, "rouge par-dessus le vert");
+    l.setIdentify(true, t0 + 130);
+    CHECK(l.frame(t0 + 130).p == P::Identify, "Identify par-dessus tout");
+    CHECK(l.frame(t0 + 130).c == render(P::Identify, 0), "arc-en-ciel depuis son debut");
+    l.setIdentify(true, t0 + 500);  // deja en cours : la roue ne repart pas
+    CHECK(l.frame(t0 + 500).c == render(P::Identify, 370), "Identify continu");
+    l.setIdentify(false, t0 + 600);
+    CHECK(l.frame(t0 + 600).p == P::Unreachable, "rouge restant apres Identify");
+    CHECK(l.frame(t0 + 120 + kUnreachableMs).p == P::Online, "rouge fini, vert deja fini : reseau");
+    l.delivered(t0 + 2000);
+    CHECK(l.frame(t0 + 2000).p == P::Delivered && l.frame(t0 + 2000 + kDeliveredMs).p == P::Online, "vert seul");
+    l.unreachable(t0 + 3000);
+    l.unreachable(t0 + 3900);  // nouvel abandon : trois clignements de plus
+    CHECK(l.frame(t0 + 3000 + kUnreachableMs).p == P::Unreachable, "rouge relance");
+    CHECK(l.frame(t0 + 3900 + kUnreachableMs).p == P::Online, "rouge relance fini");
+  }
+
+  // Phase du reseau : repart a chaque changement, pas quand l'etat se repete.
+  {
+    Logic l;
+    l.setNet(Net::Offline, 1000);
+    l.setNet(Net::Unpaired, 7000);
+    CHECK(l.frame(7000).p == P::Unpaired && rgbIs(l.frame(7000).c, 0, 0, kMax), "bleu des le changement");
+    l.setNet(Net::Unpaired, 7100);
+    CHECK(dark(l.frame(7000 + kUnpairedHalfMs).c), "meme etat : phase gardee");
+    l.setNet(Net::Online, 9000);
+    CHECK(rgbIs(l.frame(9000 + kGlowMs / 2).c, kGlowMax, kGlowMax, kGlowMax), "lueur au passage en ligne");
+  }
+
+  // 'led test' : chaque motif a tour de role, puis retour a la normale.
+  {
+    Logic l;
+    l.setNet(Net::Online, 0);
+    const uint32_t t0 = 20000;
+    l.startTest(t0);
+    uint32_t at = t0, total = 0;
+    for (const TestStep &s : kTest) {
+      CHECK(s.ms >= 1000, "pas de test trop court");
+      CHECK(l.frame(at).p == s.p && l.frame(at + s.ms - 1).p == s.p, "test : %s", patternName(s.p));
+      CHECK(l.frame(at).c == render(s.p, 0), "test : %s depuis son debut", patternName(s.p));
+      at += s.ms;
+      total += s.ms;
+    }
+    CHECK(total == testTotalMs(), "duree du test");
+    CHECK(l.testing() && l.frame(at).p == P::Online && !l.testing(), "fin du test");
+    l.startTest(at + 10);
+    l.setIdentify(true, at + 20);
+    CHECK(l.frame(at + 20).p == P::Identify, "Identify pendant le test");
+    l.setIdentify(false, at + 30);
+    l.stopTest();
+    CHECK(l.frame(at + 30).p == P::Online && !l.testing(), "led stop");
+  }
+
+  // Retour a zero de millis() : un evenement court le franchit, et un echu ne
+  // revient pas 49,7 jours plus tard.
+  {
+    Logic l;
+    l.setNet(Net::Online, 0xFFFFF000u);
+    l.delivered(0xFFFFFFF0u);
+    CHECK(l.frame(0x00000010u).p == P::Delivered, "vert a cheval sur le retour a zero");
+    CHECK(l.frame(0x00000200u).p == P::Online, "vert fini apres le retour a zero");
+    CHECK(l.frame(0xFFFFFFF0u + 20).p == P::Online, "vert echu ne revient pas");
+  }
+
+  // Rythme d'ecriture : seulement les changements de couleur, jamais a chaque
+  // tour de loop() (1 kHz).
+  {
+    Logic l;
+    l.setNet(Net::Online, 0);
+    const unsigned online = writesOver(l, 0, 20000);
+    CHECK(online >= 4 && online <= 2 * 2 * kGlowMax + 2, "en ligne : %u ecritures en 20 s", online);
+    l.setNet(Net::Unpaired, 20000);
+    const unsigned blue = writesOver(l, 20000, 22000);
+    CHECK(blue == 2000 / kUnpairedHalfMs - 1, "bleu : %u ecritures en 2 s", blue);
+    l.setIdentify(true, 30000);
+    const unsigned rainbow = writesOver(l, 30000, 30000 + kRainbowMs);
+    CHECK(rainbow <= kRainbowMs / kStepMs, "arc-en-ciel : %u ecritures en 2 s", rainbow);
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 int main() {
   testLevelMap();  // en premier : gamma par defaut avant tout mapInit
@@ -1161,6 +1338,7 @@ int main() {
   testSelectionMemory();
   testBenchT2();
   testResumePlanner();
+  testStatusLed();
 
   // L'auto-test embarque passe, quel que soit le gamma en place.
   const float gammas[] = {2.0f, 1.0f, 0.5f, 3.7f};

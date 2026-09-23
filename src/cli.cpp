@@ -12,6 +12,7 @@
 
 #include "halo.h"
 #include "halo1_lamp.h"
+#include "status_led.h"
 #include "swd.h"
 
 // Definie dans main.cpp.
@@ -86,6 +87,7 @@ static void cmdHelp() {
   Serial.println("  lampe [etat]          pilote Halo 1 : consigne, etat cru, radio ('lampe help')");
   Serial.println("  lampe on|off|sync     allumer, eteindre, tout renvoyer (memes regles que Matter)");
   Serial.println("  lampe lum|temp|mode   luminosite 4C..FE, temperature 0..100, avant|arriere|deux");
+  Serial.println("  led [test|stop]       LED d'etat : motif en cours ; test = chaque motif a tour de role");
   Serial.println("  matter                etat Matter, code d'appairage");
 #ifndef DIAG_ONLY
   Serial.println("  matter impulsion [ms] duree de l'impulsion d'EP4 'Halo auto' (300..15000, NVS)");
@@ -350,7 +352,7 @@ static void cmdWifi(char *arg) {
 // du quartz : le pilote Halo 1 reconfigure alors la puce au prochain usage.
 static bool radioFree(const char *cmd) {
   static const char *const kFree[] = {"lampe", "help", "?", "matter", "debug", "chiplog",
-                                      "cause", "wifi", "decommission", "reboot"};
+                                      "cause", "wifi", "led", "decommission", "reboot"};
   for (const char *k : kFree)
     if (!strcmp(cmd, k)) return true;
   return false;
@@ -373,6 +375,7 @@ static void handleLine(char *line) {
     netPrintStatus(Serial);
 #endif
   } else if (!strcmp(line, "lampe")) cmdLampe(arg);
+  else if (!strcmp(line, "led")) statusLedCommand(arg);
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "matter")) cmdMatter(arg);
 #endif

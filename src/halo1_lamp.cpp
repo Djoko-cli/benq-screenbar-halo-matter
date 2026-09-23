@@ -501,6 +501,7 @@ void Halo1Lamp::complete(uint8_t id, uint32_t now) {
     dirty_ &= (uint8_t)~coveredBy(p, target_);
   }
   replan(now);
+  if (!anyActive()) delivered_++;  // derniere trame de la consigne : LED d'etat
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +548,7 @@ void Halo1Lamp::giveUp() {
   failures_ = 0;
   link_ = Halo1Link::Lost;
   stats.giveUps++;
+  giveUps_++;
   phase_ = Phase::Idle;
   pendingSince_ = 0;
   notice("[lampe] injoignable : consigne abandonnee");

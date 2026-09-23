@@ -25,8 +25,8 @@
   composants dessus et dessous) ;
 - USB-C sur un petit cote, **antenne ceramique/PCB a l'autre petit cote** (a
   confirmer sur la carte reelle) ;
-- boutons **BOOT (IO9)** et **RESET** pres de l'USB ; LED d'etat utilisee par le
-  firmware sur **IO15** ; LED WS2812 sur IO8 (non utilisee) ;
+- boutons **BOOT (IO9)** et **RESET** pres de l'USB ; LED d'etat du firmware :
+  la **WS2812 sur IO8** (la LED simple d'IO15 reste eteinte) ;
 - connecteur exterieur gauche, pas de 2,54 mm, dans cet ordre :
   `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
   **IO21 et IO22 sont des trous interieurs** : ne pas les utiliser.
@@ -52,8 +52,8 @@
 | SDIO (7) | MOSI | **IO20** |
 
 A **ne pas** cabler dans la version finale : GIO1, GIO3, GIO4 (GIO3 -> IO3 ne servait
-qu'aux diagnostics), IO10 (second module du banc), les fils du CC2500. IO15 (LED)
-et IO9 (BOOT) sont sur la carte : rien a souder, seulement a rendre accessibles
+qu'aux diagnostics), IO10 (second module du banc), les fils du CC2500. La WS2812
+(IO8) et IO9 (BOOT) sont sur la carte : rien a souder, seulement a rendre accessibles
 (section 5).
 
 **Decouplage : OPTIONNEL.** Toutes les mesures du projet ont ete faites SANS
@@ -99,9 +99,10 @@ antennes est la seule parade materielle**. Regles :
 - **USB-C** : ouverture ajustee au connecteur de la carte (mesure reelle + 0,3 mm),
   la prise doit pouvoir s'enfoncer entierement ; prevoir le passage et un petit
   arret de traction pour le cable. Le boitier doit rester **reflashable par l'USB**.
-- **LED d'etat IO15** visible : fenetre fine ou guide de lumiere. Signification :
-  clignotement rapide = pas encore appaire, lent = appaire mais pas connecte,
-  eteinte = tout va bien.
+- **LED d'etat (WS2812, IO8)** visible : fenetre fine ou guide de lumiere au-dessus
+  de la WS2812 (pas de la LED d'IO15). Signification : bleu clignotant = pas encore
+  appaire, orange lent = pas de reseau, eteinte avec une breve lueur blanche toutes
+  les 10 s = tout va bien (detail : README, « LED d'etat »).
 - **Bouton BOOT (IO9)** accessible par un trou d'epingle : **appui de 5 s = retrait
   de Matter** (decommission). Trou RESET optionnel.
 - Maintien des cartes sans colle sur les antennes : berceaux, nervures, clips ;

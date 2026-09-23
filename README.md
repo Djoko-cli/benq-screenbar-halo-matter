@@ -179,6 +179,31 @@ Echo, ou le module *Matter Server* de Home Assistant.
 Un appui long (5 s) sur le bouton **BOOT**, ou la commande `decommission`,
 retire toutes les fabriques pour ré-appairer de zéro.
 
+### 3. LED d'etat
+
+Le voyant du produit est la LED RGB (WS2812) de la carte, sur IO8, dans les
+builds `esp32c6thread` et `esp32c6supermini`. Intensite basse, puisqu'elle vit
+sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
+
+| LED | Signification |
+|---|---|
+| bleu clignotant (2 Hz) | pas encore mis en service : ajouter l'accessoire depuis l'app |
+| orange lent (1 s allumee, 1 s eteinte) | mis en service, mais reseau absent (Thread perdu ; Wi-Fi pour `esp32c6supermini`) |
+| eteinte, breve lueur blanche toutes les 10 s | tout va bien (signe de vie) ; une lueur aussi au retour du reseau |
+| eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
+| rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne |
+| arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
+
+Priorite : arc-en-ciel > rouge > vert > etat du reseau. Au banc, `led test`
+joue chaque motif a tour de role (16 s) et `led` dit le motif en cours. Si le
+vert et le rouge sont inverses, la WS2812 de la carte n'est pas en GRB :
+`-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` dans `platformio.ini`.
+
+La petite LED d'IO15 reste eteinte en build produit : un seul voyant. Le build
+diagnostic ne pilote aucune LED (IO15 en entree : sur la carte de capture, elle
+porte GDO2 du CC2500). Les cibles sans WS2812 declaree (`PIN_RGB_STATUS_LED`)
+font clignoter leur LED simple avec les memes motifs, sans la lueur.
+
 ### Certification : ce qui marche et ce qui demande une étape en plus
 
 Le firmware utilise les **certificats de test du SDK Matter** :
@@ -202,7 +227,7 @@ la CSA et une certification — hors de portée d'un projet perso.
 | Commande | Effet |
 |---|---|
 | `info` | materiel, configuration radio, etat du pilote |
-| `matter` | etat Matter, code d'appairage, compteurs du pont |
+| `matter` | etat Matter, code d'appairage, compteurs du pont, demandes Identify |
 | `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS |
 | `matter reprise` | (Thread) relance tout de suite la reprise des abonnements sauves d'Apple Home |
 | `matter reprise auto [0\|1]` | (Thread) relance seule apres un redemarrage : Thread + SRP prets depuis 10 s, pas avant 50 s (plus le plancher sauve), pour chaque abonne sauve sans abonnement actif ; session CASE d'abord (un echec ne coute rien a la pile), reprise ensuite ; puis 30 s, 60 s, 5 min apres chaque echec, et un coup d'oeil toutes les 5 min tant qu'un abonnement est actif (NVS) |
@@ -219,6 +244,8 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `lampe trace 0\|1` / `lampe stats` | journal par evenement / compteurs |
 | `lampe adresse [8 hexa]` | adresse de la lampe (ordre d'ecriture), en NVS |
 | `lampe help` | toutes les commandes `lampe` (reglages et banc) |
+| `led` | LED d'etat : motif en cours, couleur affichee |
+| `led test` / `led stop` | joue chaque motif de la LED a tour de role (16 s), sans bloquer / l'arrete |
 | `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
 | `regs` | dump des registres du BC5602 |
 | `rfinit` | re-teste le module apres correction du cablage, sans reflasher |
@@ -251,13 +278,14 @@ src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
 src/halo1_radio.{h,cpp}   sequences BC5602 prouvees, reconfiguration non bloquante
 src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telecommande
 src/cli_lampe.cpp         commandes 'lampe ...'
-src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne
+src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne, Identify
+src/status_led.{h,cpp}    LED d'etat : motifs et priorites (logique pure, testee sur l'hote)
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
-src/main.cpp              assemblage, LED d'état, bouton de decommissioning
+src/main.cpp              assemblage, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/WIRING.md            câblage et pièges matériels
-tools/test_halo1.sh       tests hote du protocole Halo 1, sans carte
+tools/test_halo1.sh       tests hote du protocole Halo 1 et de la LED d'etat, sans carte
 ```
 
 ## Crédits

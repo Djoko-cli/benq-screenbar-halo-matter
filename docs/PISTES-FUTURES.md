@@ -41,7 +41,7 @@ Maison garde l'etat demande ~10 s apres un appui dans l'app, alors que les
 rapports de la carte s'affichent en 1 s. Chercher une astuce (tache separee
 proposee le 23/09).
 
-## Signature LED du produit (validee, a implementer)
+## Signature LED du produit (implementee le 23/09 : src/status_led.*, README « LED d'etat »)
 
 WS2812 (IO8) : bleu clignotant = pas appaire ; orange lent = pas de Thread ;
 eteinte + breve lueur blanche toutes les 10 s = OK ; flash vert = ordre envoye ;
