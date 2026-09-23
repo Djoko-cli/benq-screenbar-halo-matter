@@ -15,6 +15,7 @@
 
 #include <Arduino.h>
 #include <esp_app_desc.h>
+#include <esp_ota_ops.h>
 #include <esp_system.h>
 #include <esp_log.h>
 #include <stdarg.h>
@@ -136,11 +137,24 @@ void setup() {
   Serial.print("  cause du dernier demarrage : ");
   Serial.println(resetReasonText());
   // Meme chaine que le "Programme interne" d'Apple Home : celle du descripteur
-  // d'application (src/app_desc.c). Une autre valeur la-bas = surcharge absente.
+  // d'application (src/app_desc.c). Deux controles : le symbole lie, que lit la
+  // pile Matter, et le descripteur en tete de l'image flashee, que lisent le
+  // chargeur d'amorcage et esptool. Le premier differe si app_desc.c n'est pas
+  // lie, le second aussi s'il n'est plus place en tete de .flash.appdesc.
   Serial.printf("firmware %s\n", FW_VERSION_FULL);
   if (strcmp(esp_app_get_description()->version, FW_VERSION_FULL))
     Serial.printf("!! descripteur d'application : %s (src/app_desc.c pas lie ?)\n",
                   esp_app_get_description()->version);
+  {
+    esp_app_desc_t flashed;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_err_t err = running ? esp_ota_get_partition_description(running, &flashed) : ESP_ERR_NOT_FOUND;
+    if (err != ESP_OK)
+      Serial.printf("!! descripteur de l'image flashee illisible (%s)\n", esp_err_to_name(err));
+    else if (strncmp(flashed.version, FW_VERSION_FULL, sizeof(flashed.version)))
+      Serial.printf("!! descripteur de l'image flashee : %.*s (src/app_desc.c plus en tete de l'image ?)\n",
+                    (int)sizeof(flashed.version), flashed.version);
+  }
 
   if (!halo.begin()) {
     Serial.println();

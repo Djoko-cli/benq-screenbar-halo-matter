@@ -35,9 +35,10 @@ Matter (boutons sans etat) : Maison pourrait declencher des automatisations sur
 un appui, comme avec un interrupteur Hue. Le pilote entend deja ces trames (A :
 `E0/E1 nn` ; favori : salve contenant `91`/`89`).
 
-## Retour rapide de « Halo auto » apres un appui dans l'app
+## Retour rapide de « Halo auto » apres un appui dans l'app (en attente)
 
-Maison garde l'etat demande ~10 s apres un appui dans l'app, alors que les
+En attente tant qu'EP4 est desactive (`HALO1_EXPOSE_AUTO 0` depuis la 0.3.0,
+decision du 23/09) : a reprendre s'il est remis. Maison garde l'etat demande ~10 s apres un appui dans l'app, alors que les
 rapports de la carte s'affichent en 1 s. Chercher une astuce (tache separee
 proposee le 23/09).
 

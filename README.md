@@ -30,6 +30,16 @@ Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
 - Rien n'est emis vers la lampe au demarrage : le noeud reprend l'etat sauve,
   et seul un ordre (Matter ou `lampe ...`) fait emettre.
 
+> **Passage a la 0.3.0 depuis EP1..EP4** (Halo, avant, arriere, auto) : flasher
+> par-dessus le meme environnement (`pio run -e esp32c6thread -t upload` pour le
+> noeud Thread d'Apple Home), sans `-t erase` ni `decommission` : l'appairage
+> est garde, seul EP4 disparait.
+>
+> **Depuis l'ancienne disposition des endpoints** (alimentation, lumiere avant,
+> halo arriere, capteur, mode auto) : il faut remettre le noeud en service.
+> Retirer l'accessoire de chaque app, lancer `decommission` (ou appui long sur
+> BOOT), puis l'ajouter a nouveau avec le code d'appairage (`matter`).
+
 ### EP4 "Halo auto" : desactive pour l'instant
 
 Depuis la 0.3.0 (decision du 23/09), `HALO1_EXPOSE_AUTO` vaut 0 par defaut :
@@ -45,7 +55,8 @@ terrain.
 
 Pour le **remettre**, ajouter `-DHALO1_EXPOSE_AUTO=1` aux `build_flags` de
 l'environnement (par exemple `[env:esp32c6thread]` dans `platformio.ini`), ou
-changer la valeur par defaut dans `src/config.h`, puis reflasher. EP4 revient
+changer la valeur par defaut dans `src/config.h`, puis reflasher le meme
+environnement (`pio run -e esp32c6thread -t upload`, sans effacement). EP4 revient
 avec le meme numero, sa duree d'impulsion sauvee en NVS (`halo1/impulsion`) est
 reprise, et l'app le montre comme un nouvel accessoire a ranger.
 
@@ -71,17 +82,14 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
   (`esp_app_desc`), que `src/app_desc.c` remplace : sans lui, c'etait le commit
   du lib-builder d'Arduino (`6671d0b`). `FW_VERSION` se regle dans
   `platformio.ini` (`build_src_flags`) ; le commit vient de `tools/git_rev.py`,
-  suivi de `-dirty` si un fichier suivi etait modifie a la compilation.
+  suivi de `-dirty` si un fichier suivi etait modifie a la compilation, ou si
+  un fichier non suivi trainait dans `src/`, `include/` ou `lib/`.
 - `matter` affiche ces valeurs telles que la pile les rapporte (lignes
-  `identite` et `versions`), et signale toute valeur refusee. Le demarrage
-  affiche `firmware 0.3.0-<commit>` ; sans carte, `esptool.py --chip esp32c6
-  image-info .pio/build/<env>/firmware.bin` montre la meme (`App version`).
-
-> **Mise a jour depuis une version precedente** : la disposition des endpoints
-> a change (avant : alimentation, lumiere avant, halo arriere, capteur, mode
-> auto). Il faut remettre le noeud en service : retirer l'accessoire de chaque
-> app, lancer `decommission` (ou appui long sur BOOT), puis l'ajouter a nouveau
-> avec le code d'appairage (`matter`).
+  `identite` et `versions`), sauf le NodeLabel (valeur demandee, non relue),
+  et signale toute valeur refusee. Le demarrage affiche
+  `firmware 0.3.0-<commit>` et alerte si le descripteur lu dans l'image flashee
+  differe. Sans carte, la meme version (`App version`) se lit avec :
+  `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 
 ## Matériel
 
@@ -168,8 +176,14 @@ Voir [docs/WIRING.md](docs/WIRING.md). En résumé, sur ESP32-C6 SuperMini
 pio run -t upload -t monitor
 ```
 
-La cible par défaut est `esp32c6supermini`. Les autres se sélectionnent avec
-`-e` : `esp32c3`, `esp32s3`, `esp32dev`.
+La cible par défaut est `esp32c6supermini` (Matter sur Wi-Fi). Les autres se
+sélectionnent avec `-e` : `esp32c6thread` (Matter sur Thread), `esp32c3`,
+`esp32s3`, `esp32dev`.
+
+> Un nœud appairé en Thread (Apple Home) se reflashe avec
+> `pio run -e esp32c6thread -t upload -t monitor`. La commande sans `-e` y
+> mettrait le build Wi-Fi : l'appairage reste en NVS, mais le nœud devient
+> injoignable jusqu'au retour du build Thread.
 
 Si la carte boucle au démarrage juste après le flash, c'est la mémoire flash du
 clone qui n'aime pas le mode QIO : ajoute `board_build.flash_mode = dio` dans
