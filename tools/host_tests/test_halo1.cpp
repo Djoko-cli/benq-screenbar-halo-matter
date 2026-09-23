@@ -10,6 +10,7 @@
 
 #include "halo1_map.h"
 #include "halo1_proto.h"
+#include "matter_resume.h"
 
 using namespace halo1;
 
@@ -1021,6 +1022,83 @@ static void testBenchT2() {
 }
 
 // ---------------------------------------------------------------------------
+//  Calendrier de relance des abonnements (src/matter_resume.h)
+// ---------------------------------------------------------------------------
+
+// Premier instant (pas de 100 ms) ou due() repond oui, entre from et to ; 0 sinon.
+static uint32_t firstDue(ResumePlanner &p, uint32_t from, uint32_t to, uint32_t start) {
+  for (uint32_t t = from; (uint32_t)(to - t) <= (uint32_t)(to - from); t += 100)
+    if (p.due(t, start)) return t;
+  return 0;
+}
+
+static void testResumePlanner() {
+  const uint32_t base = 0xFFFF0000u;  // millis() repasse par zero pendant l'essai
+  {
+    ResumePlanner p;
+    p.subscriptions(0, base + 1000);
+    CHECK(!p.due(base + 4000, base), "reseau pas pret : aucune tentative");
+    p.network(true, base + 5000);  // pret a +5 s : attendre +50 s (tentative de la pile)
+    CHECK(firstDue(p, base + 5000, base + 120000, base) == base + 50000, "premiere tentative a +50 s : %lu",
+          (unsigned long)(firstDue(p, base + 5000, base + 120000, base) - base));
+    p.fired();
+    CHECK(!p.due(base + 50100, base) && p.waiting, "tentative en cours : rien d'autre");
+    // Echecs : 30 s, 60 s, puis 5 min apres chaque fin.
+    const uint32_t gaps[] = {30000, 60000, 300000, 300000};
+    uint32_t t = base + 95000;  // fin de la 1re (recherche d'adresse de 45 s)
+    for (uint32_t g : gaps) {
+      p.finished(1, t);
+      CHECK(!p.due(t + g - 100, t), "pas avant %lu ms", (unsigned long)g);
+      CHECK(p.due(t + g, base), "a %lu ms apres la fin", (unsigned long)g);
+      CHECK(p.holdLeftMs(t + g) == 0, "attente finie");
+      p.fired();
+      t += g + 45000;
+    }
+    CHECK(p.tries == 5, "5 tentatives dans l'episode : %u", p.tries);
+    // Abonnement repris : episode clos, plus rien ; perdu : nouvel episode.
+    p.finished(1, t);
+    p.subscriptions(1, t + 1000);
+    CHECK(p.tries == 0 && !p.due(t + 400000, base), "abonnement actif : rien");
+    p.subscriptions(0, t + 500000);
+    CHECK(!p.due(t + 509900, base), "perte : pas avant 10 s");
+    CHECK(p.due(t + 510000, base), "perte : relance apres 10 s");
+    p.fired();
+    p.finished(0, t + 511000);  // rien a relancer
+    CHECK(!p.due(t + 511000 + 299900, base) && p.due(t + 511000 + 300000, base), "rien a relancer : 5 min");
+  }
+  {
+    ResumePlanner p;  // reseau pret tard : 10 s de stabilisation, pas plus
+    p.subscriptions(0, 1000);
+    p.network(true, 70000);
+    CHECK(firstDue(p, 70000, 100000, 0) == 80000, "pret a 70 s : tentative a 80 s");
+    // Reseau perdu puis retrouve : compteur a zero, stabilisation a refaire.
+    p.fired();
+    p.finished(1, 90000);
+    p.network(false, 100000);
+    CHECK(!p.due(200000, 0), "reseau perdu : rien");
+    p.network(true, 200000);
+    CHECK(p.tries == 0 && !p.hold, "reseau retrouve : nouvel episode");
+    CHECK(firstDue(p, 200000, 260000, 0) == 210000, "retrouve a 200 s : tentative a 210 s");
+    p.network(true, 205000);  // meme etat : readySince ne bouge pas
+    CHECK(p.readySince == 200000, "releve suivant sans effet");
+  }
+  {
+    ResumePlanner p;  // comptage pas encore fait : rien
+    p.network(true, 0);
+    CHECK(!p.due(100000, 0), "abonnements inconnus : rien");
+    p.subscriptions(2, 100000);
+    CHECK(!p.due(200000, 0), "abonnements actifs : rien");
+  }
+  {
+    ResumePlanner p;  // des semaines plus tard : les attentes franchies restent acquises
+    p.subscriptions(0, 0);
+    p.network(true, 0);
+    CHECK(p.due(60000, 0), "a 60 s");
+    CHECK(p.due(0x90000000u, 0) && p.due(0x10000000u, 0), "apres 24,8 jours puis le retour a zero");
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 int main() {
   testLevelMap();  // en premier : gamma par defaut avant tout mapInit
@@ -1039,6 +1117,7 @@ int main() {
   testRules();
   testSelectionMemory();
   testBenchT2();
+  testResumePlanner();
 
   // L'auto-test embarque passe, quel que soit le gamma en place.
   const float gammas[] = {2.0f, 1.0f, 0.5f, 3.7f};

@@ -89,6 +89,15 @@ static void cmdHelp() {
   Serial.println("  matter                etat Matter, code d'appairage");
 #ifndef DIAG_ONLY
   Serial.println("  matter impulsion [ms] duree de l'impulsion d'EP4 'Halo auto' (300..15000, NVS)");
+#if MATTER_NET_THREAD
+  Serial.println("  matter reprise        relance maintenant la reprise des abonnements sauves (banc)");
+  Serial.println("  matter reprise auto [0|1]  relance seule apres un redemarrage : Thread + SRP prets");
+  Serial.println("                        depuis 10 s, pas avant 50 s, aucun abonnement actif (NVS)");
+  Serial.println("  matter med [0|1|2]    type Thread au PROCHAIN demarrage (NVS) : 0 routeur, 1 MED des");
+  Serial.println("                        l'init, 2 MED apres Matter.begin() (ancien : une attache de plus)");
+  Serial.println("  matter maxint [s]     intervalle max des abonnements neufs : 0 = celui d'Apple,");
+  Serial.println("                        60..3600 = plafond (NVS)");
+#endif
 #endif
   Serial.println("  debug                 bascule les traces RF");
   Serial.println("  regs                  dump des registres du BC5602");
@@ -227,24 +236,90 @@ static void cmdHalo2Retired(bool pairing) {
 }
 
 #ifndef DIAG_ONLY
+// Entier decimal seul (espaces de fin toleres) ; false sinon.
+static bool parseUnsigned(const char *s, uint32_t *v) {
+  char *end = nullptr;
+  const long x = strtol(s, &end, 10);
+  while (end && *end == ' ') end++;
+  if (end == s || !end || *end || x < 0) return false;
+  *v = (uint32_t)x;
+  return true;
+}
+
+#if MATTER_NET_THREAD
+static void nvsWarn(bool saved) {
+  if (!saved) Serial.println("!! ecriture NVS ratee : valeur perdue au prochain demarrage");
+}
+
+// 'matter reprise [auto [0|1]]', 'matter med [0|1|2]', 'matter maxint [s]'.
+static void cmdMatterThread(const char *what, char *val) {
+  bool saved = true;
+  uint32_t v = 0;
+  if (!strcmp(what, "reprise")) {
+    char *onOff = splitWord(val);
+    if (!*val) {
+      matterResumeNow(Serial);
+      return;
+    }
+    if (strcmp(val, "auto") || (*onOff && (!parseUnsigned(onOff, &v) || v > 1))) {
+      Serial.println("Usage : matter reprise [auto [0|1]]");
+      return;
+    }
+    if (*onOff) {
+      matterSetResumeAuto(v == 1, &saved);
+      nvsWarn(saved);
+    }
+    Serial.printf("Relance automatique des abonnements : %s\n", matterResumeAuto() ? "oui" : "non");
+  } else if (!strcmp(what, "med")) {
+    if (*val && (!parseUnsigned(val, &v) || !matterSetMedMode(v, &saved))) {
+      Serial.println("Usage : matter med [0|1|2]  (0 routeur, 1 MED des l'init, 2 MED apres Matter.begin())");
+      return;
+    }
+    if (*val) nvsWarn(saved);
+    static const char *const kText[kMatterMedModes] = {"routeur", "MED des l'init", "MED apres Matter.begin()"};
+    Serial.printf("Type Thread au prochain demarrage : %u = %s%s\n", matterMedMode(), kText[matterMedMode()],
+                  *val ? " ('reboot' pour l'appliquer)" : "");
+  } else {  // maxint
+    if (*val && (!parseUnsigned(val, &v) || !matterSetMaxIntervalCap(v, &saved))) {
+      Serial.printf("Usage : matter maxint [0 | %u..%u]  (secondes ; 0 = intervalle du controleur)\n",
+                    kMatterMaxIntMinS, kMatterMaxIntMaxS);
+      return;
+    }
+    if (*val) nvsWarn(saved);
+    if (matterMaxIntervalCap())
+      Serial.printf("Intervalle max des abonnements neufs plafonne a %u s\n", matterMaxIntervalCap());
+    else
+      Serial.println("Intervalle max des abonnements : celui du controleur");
+  }
+}
+#endif
+
 // 'matter' : etat du pont. 'matter impulsion [ms]' : duree de l'impulsion
-// d'EP4 (bouton A), gardee en NVS.
+// d'EP4 (bouton A), gardee en NVS. Build Thread : 'matter reprise', 'med',
+// 'maxint' (cmdMatterThread).
 static void cmdMatter(char *arg) {
   char *val = splitWord(arg);
   if (!*arg) {
     matterPrintStatus(Serial);
     return;
   }
+#if MATTER_NET_THREAD
+  if (!strcmp(arg, "reprise") || !strcmp(arg, "med") || !strcmp(arg, "maxint")) {
+    cmdMatterThread(arg, val);
+    return;
+  }
+  static const char *const kUsage = "Usage : matter [impulsion [ms] | reprise [auto [0|1]] | med [0|1|2] | maxint [s]]";
+#else
+  static const char *const kUsage = "Usage : matter [impulsion [ms]]";
+#endif
   if (strcmp(arg, "impulsion")) {
-    Serial.println("Usage : matter [impulsion [ms]]");
+    Serial.println(kUsage);
     return;
   }
   if (*val) {
-    char *end = nullptr;
-    const long v = strtol(val, &end, 10);
-    while (end && *end == ' ') end++;
+    uint32_t v = 0;
     bool saved = false;
-    if (end == val || *end || v < 0 || !matterSetAutoPulseMs((uint32_t)v, &saved)) {
+    if (!parseUnsigned(val, &v) || !matterSetAutoPulseMs(v, &saved)) {
       Serial.printf("Usage : matter impulsion <%u..%u> (ms)\n", kMatterPulseMinMs, kMatterPulseMaxMs);
       return;
     }
