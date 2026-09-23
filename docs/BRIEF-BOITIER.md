@@ -167,7 +167,11 @@ ici. Le boitier compact va donc rapprocher les antennes. Protocole :
 
 ## 7. Ce que tu dois demander a Majid avant de modeliser
 
-Au pied a coulisse (en mm, au dixieme) :
+Au pied a coulisse (en mm, au dixieme) -- **carte debranchee, et de preference
+avec un pied a coulisse en plastique** : le 24/09, la pointe d'un pied a coulisse
+metallique restee aimantee sur le quartz du BM5602 a mis la radio dans un etat
+anormal (plus aucune emission terminee, bruit en reception) pendant 70 minutes,
+jusqu'a une reinitialisation complete du module :
 - SuperMini : longueur, largeur, epaisseur du PCB, hauteur max des composants
   dessus et dessous, position et dimensions de l'USB-C, position des boutons BOOT
   et RESET et des LED, position de la zone d'antenne ;
