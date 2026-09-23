@@ -131,8 +131,9 @@ void Halo1Lamp::tick() {
     if (!radio.present() || (stuck_ && !relaunched_)) return;
   } else if (restart_) {
     // L2 sur symptome de puce (incident du 24/09, halo1_watch.h) : delais TX en
-    // serie, deluge de CRC faux en ecoute ; jamais une lampe muette. Au milieu
-    // d'une rafale aussi : ses paquets restants partent de la puce relancee.
+    // serie, deluge de CRC faux ou surdite en ecoute ; jamais une lampe muette.
+    // Au milieu d'une rafale aussi : ses paquets restants partent de la puce
+    // relancee.
     // Seul tick() relance : un outil de banc tourne dans la CLI, sans tick(),
     // puis invalide la radio et efface les preuves (invalidateRadio).
     const Relaunch why = watch_.due(now);
@@ -181,10 +182,20 @@ void Halo1Lamp::tick() {
     if (listening_) {
       radio.request(Mode::Rx, now);
       uint8_t raw[8];
-      if (radio.ready(Mode::Rx) && radio.pollRx(now, raw)) {
-        const AirFrame f = decodeAir(raw, radio.air());
-        watch_.rxFrame(f.crcOk, now);  // deluge de CRC faux : symptome de puce
-        onAir(f, now);
+      if (radio.ready(Mode::Rx)) {
+        const bool got = radio.pollRx(now, raw);
+        // Surdite (symptome de puce) : rearmements sur OMST != RX en rafale ;
+        // les periodiques disent que la puce est en RX (guerison apres elle).
+        const Halo1Radio::Stats &rs = radio.stats;
+        const uint32_t off = rs.rearmsOffRx - seenOffRx_, all = rs.rearms - seenRearms_;
+        seenOffRx_ = rs.rearmsOffRx;
+        seenRearms_ = rs.rearms;
+        watch_.rxRearms(off, all >= off ? all - off : 0, now);
+        if (got) {
+          const AirFrame f = decodeAir(raw, radio.air());
+          watch_.rxFrame(f.crcOk, now);  // deluge de CRC faux : symptome de puce
+          onAir(f, now);
+        }
       }
     } else {
       radio.request(Mode::Sleep, now);
@@ -298,6 +309,14 @@ void Halo1Lamp::announceRelaunch(Relaunch cause) {
                (unsigned)f.frames, (unsigned long)f.ms, (unsigned)f.bad, n);
       break;
     }
+    case Relaunch::RxDeaf: {
+      const ChipWatch::Deaf &d = watch_.lastDeaf();
+      snprintf(msg, sizeof(msg),
+               "[lampe] BM5602 : ecoute sourde (%lu rearmements hors RX en %lu ms au plus) : relance automatique du "
+               "module (%u depuis la derniere guerison)",
+               (unsigned long)d.rearms, (unsigned long)d.ms, n);
+      break;
+    }
     default:
       snprintf(msg, sizeof(msg),
                "[lampe] BM5602 : configuration rejetee 3 fois de suite : relance automatique du module (%u depuis la "
@@ -320,7 +339,9 @@ void Halo1Lamp::noteFault() {
              (unsigned)watch_.unrecovered(), relaunchText(watch_.symptom()),
              (unsigned long)(ChipWatch::kBackoffMs / 60000));
   else
-    snprintf(msg, sizeof(msg), "[lampe] BM5602 retabli : accuse, ou trame au CRC juste hors deluge, depuis la relance");
+    snprintf(msg, sizeof(msg),
+             "[lampe] BM5602 retabli : accuse, trame au CRC juste hors deluge, ou ecoute revenue en RX apres une "
+             "relance pour surdite");
   notice(msg);
 }
 
@@ -911,10 +932,10 @@ void Halo1Lamp::printStatus(Print &out) const {
              kModes[(uint8_t)radio.mode()], (unsigned long)rs.fullConfigs, (unsigned long)rs.silenceReconf,
              (unsigned long)rs.txReconf, (unsigned long)rs.verifyFail, (unsigned long)rs.rearms);
   out.printf("  surveil.    : %u delai(s) de suite (relance a %u), fenetre d'ecoute %u trames dont %u CRC faux "
-             "(deluge : %u dont %u %%), %lu relance(s) auto",
+             "(deluge : %u dont %u %%), %lu rearm. hors RX sur 10 s (sourde a %u), %lu relance(s) auto",
              (unsigned)watch_.timeoutRun(), (unsigned)ChipWatch::kTimeoutRun, (unsigned)watch_.windowFrames(),
              (unsigned)watch_.windowBad(), (unsigned)ChipWatch::kNoiseMinFrames, (unsigned)ChipWatch::kNoiseBadPct,
-             (unsigned long)watch_.total());
+             (unsigned long)watch_.deafRearms(), (unsigned)ChipWatch::kDeafMinRearms, (unsigned long)watch_.total());
   // La derniere relance reste lisible ici meme si sa ligne sur la console a ete
   // perdue (tampon serie plein, traceDropped).
   ChipWatch::Entry last;
@@ -961,10 +982,10 @@ void Halo1Lamp::printStats(Print &out) const {
              (unsigned long)s.traceDropped, (unsigned long)s.restarts);
   // Relances automatiques (L2) par cause, et les dernieres, datees.
   const ChipWatch &w = watch_;
-  out.printf("  relances : %lu auto (%lu verif., %lu delais, %lu bruit), %u de suite sans guerison%s",
+  out.printf("  relances : %lu auto (%lu verif., %lu delais, %lu bruit, %lu sourde), %u de suite sans guerison%s",
              (unsigned long)w.total(), (unsigned long)w.count(Relaunch::Verify),
              (unsigned long)w.count(Relaunch::TxTimeout), (unsigned long)w.count(Relaunch::RxNoise),
-             (unsigned)w.unrecovered(), w.failed() ? " : EN PANNE" : "");
+             (unsigned long)w.count(Relaunch::RxDeaf), (unsigned)w.unrecovered(), w.failed() ? " : EN PANNE" : "");
   ChipWatch::Entry h[ChipWatch::kHistN];
   const uint8_t n = w.history(h, ChipWatch::kHistN);
   const uint32_t now = millis();
@@ -981,5 +1002,6 @@ void Halo1Lamp::clearStats() {
   radio.stats = Halo1Radio::Stats{};
   watch_.clearCounts();  // compteurs et historique ; ni l'attente ni l'etat EN PANNE
   seenSilence_ = seenTxReconf_ = seenVerify_ = 0;
+  seenRearms_ = seenOffRx_ = 0;  // ecarts passes a la surveillance : repartent des compteurs remis a zero
   relaunchConfigs_ = 0;  // relance en cours : toujours aucune configuration verifiee depuis
 }

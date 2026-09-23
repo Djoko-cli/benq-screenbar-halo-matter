@@ -71,9 +71,10 @@ class Halo1Lamp {
   // toutes les 60 s.
   bool lost() const { return (lost_ && !radio.present()) || (stuck_ && !relaunched_); }
   // Relance automatique sur symptome de puce (L2, halo1_watch.h) : delais TX en
-  // serie, deluge de CRC faux en ecoute. EN PANNE : 3 relances de suite sans
-  // guerison et le symptome revient ; un essai toutes les 10 min. La LED d'etat
-  // montre moduleFault() : en panne, ou perdu (L3).
+  // serie, deluge de CRC faux ou surdite (rearmements hors RX en rafale) en
+  // ecoute. EN PANNE : 3 relances de suite sans guerison et le symptome
+  // revient ; un essai toutes les 10 min. La LED d'etat montre moduleFault() :
+  // en panne, ou perdu (L3).
   const halo1::ChipWatch &watch() const { return watch_; }
   bool moduleFault() const { return lost() || watch_.failed(); }
 
@@ -141,7 +142,7 @@ class Halo1Lamp {
   void complete(uint8_t id, uint32_t now);
   void fail(uint8_t id, uint32_t now);
   void giveUp();
-  // cause : Verify (L2 sur verification), TxTimeout ou RxNoise (L2 sur
+  // cause : Verify (L2 sur verification), TxTimeout, RxNoise ou RxDeaf (L2 sur
   // symptome), None (nouvel essai L3, hors comptes).
   void restartModule(uint32_t now, halo1::Relaunch cause);
   void announceRelaunch(halo1::Relaunch cause);
@@ -188,6 +189,7 @@ class Halo1Lamp {
   TxLog log_[kLogN] = {};
   uint32_t txCount_ = 0;
   uint32_t seenSilence_ = 0, seenTxReconf_ = 0, seenVerify_ = 0;  // traces de la radio
+  uint32_t seenRearms_ = 0, seenOffRx_ = 0;  // rearmements deja passes a la surveillance
   halo1::ChipWatch watch_;
   bool faultSeen_ = false;  // watch_.failed() deja annonce
 };

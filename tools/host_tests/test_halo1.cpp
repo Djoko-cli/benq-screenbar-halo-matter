@@ -1175,6 +1175,25 @@ static void timeouts(halo1::ChipWatch &w, unsigned n) {
   for (unsigned i = 0; i < n; i++) w.txVerdict(halo1::TxSeen::Timeout);
 }
 
+// Ecoute pendant ms, un tour toutes les stepMs : offPerS rearmements hors RX et
+// inPerS periodiques par seconde, repartis regulierement, puis due() comme
+// tick(). S'arrete a la premiere cause permise, t sur son instant (la ou le
+// pilote relancerait) ; sinon None, t avance de ms.
+static halo1::Relaunch listen(halo1::ChipWatch &w, uint32_t &t, uint32_t ms, uint32_t stepMs, uint32_t offPerS,
+                              uint32_t inPerS) {
+  uint32_t accOff = 0, accIn = 0;
+  for (uint32_t e = 0; e < ms; e += stepMs, t += stepMs) {
+    accOff += offPerS * stepMs;
+    accIn += inPerS * stepMs;
+    w.rxRearms(accOff / 1000, accIn / 1000, t);
+    accOff %= 1000;
+    accIn %= 1000;
+    const halo1::Relaunch c = w.due(t);
+    if (c != halo1::Relaunch::None) return c;
+  }
+  return halo1::Relaunch::None;
+}
+
 static void testChipWatch() {
   using W = ChipWatch;
   using R = Relaunch;
@@ -1478,8 +1497,221 @@ static void testChipWatch() {
           (unsigned long)at);
   }
 
+  // --- Ecoute sourde : rearmements sur OMST != RX (phase finale de l'incident) ---
+
+  // Seuil : 1000 dans la fenetre glissante, pas 999.
+  {
+    W w;
+    uint32_t t = 1000;
+    w.due(t);
+    w.rxRearms(999, 0, t);
+    CHECK(w.due(t) == R::None && w.deafRearms() == 999 && w.symptom() == R::None, "999 hors RX : rien");
+    w.rxRearms(1, 0, t + 5);
+    CHECK(w.due(t + 5) == R::RxDeaf && w.symptom() == R::RxDeaf, "1000 hors RX : relance");
+    CHECK(w.lastDeaf().rearms == 1000 && w.lastDeaf().ms == 5, "surdite retenue : %lu en %lu ms",
+          (unsigned long)w.lastDeaf().rearms, (unsigned long)w.lastDeaf().ms);
+  }
+  {
+    // Les periodiques ne comptent pas.
+    W w;
+    uint32_t t = 0;
+    w.rxRearms(999, 5000, t);
+    CHECK(w.due(t) == R::None && w.deafRearms() == 999, "999 hors RX + 5000 periodiques : rien");
+  }
+  {
+    // 999 puis 1 juste apres la fenetre : les premiers sont sortis.
+    W w;
+    uint32_t t = 20000;
+    w.due(t);
+    w.rxRearms(999, 0, t);
+    CHECK(w.due(t + W::kDeafWindowMs - 1) == R::None && w.deafRearms() == 999, "9,999 s : toujours 999");
+    w.rxRearms(1, 0, t + W::kDeafWindowMs);
+    CHECK(w.due(t + W::kDeafWindowMs) == R::None && w.deafRearms() == 1, "10 s plus tard : 1 seul");
+  }
+  {
+    // Etales sur plus de 10 s : 1000 a 91 par seconde (un toutes les 11 ms),
+    // puis 99 par seconde pendant 10 min : jamais 1000 en moins de 10 s.
+    W w;
+    uint32_t t = 3333;
+    for (unsigned i = 0; i < 1000; i++, t += 11) {
+      w.rxRearms(1, 0, t);
+      CHECK(w.due(t) == R::None, "1000 sur 11 s : rien (a %u)", i);
+    }
+    CHECK(listen(w, t, 600000, 10, 99, 0) == R::None && w.deafRearms() < 1000, "99 par seconde : rien (%lu)",
+          (unsigned long)w.deafRearms());
+    // 100 par seconde : 1000 en moins de 10 s, relance.
+    const uint32_t t0 = t;
+    CHECK(listen(w, t, 60000, 10, 100, 0) == R::RxDeaf && t - t0 <= W::kDeafWindowMs,
+          "100 par seconde : relance en %lu ms", (unsigned long)(t - t0));
+  }
+  {
+    // Rythme de l'incident (350 et 450 par seconde, un tour toutes les 2 ms,
+    // sans periodique), apres 9,5 s d'ecoute normale : la fenetre d'ecoute est
+    // presque close et la tranche entamee, la fenetre glissante voit tout de
+    // meme la surdite en moins de 3 s.
+    const uint32_t rates[] = {350, 450};
+    for (uint32_t rate : rates) {
+      W w;
+      uint32_t t = 0x30000000u;
+      w.forget(t);
+      CHECK(listen(w, t, 9500, 10, 0, 8) == R::None, "ecoute normale");
+      const uint32_t t0 = t;
+      CHECK(listen(w, t, 10000, 2, rate, 0) == R::RxDeaf, "%lu par seconde : relance", (unsigned long)rate);
+      CHECK(t - t0 <= 3000 && t - t0 >= 2000, "%lu par seconde : vue en %lu ms", (unsigned long)rate,
+            (unsigned long)(t - t0));
+      CHECK(w.lastDeaf().rearms >= W::kDeafMinRearms && w.lastDeaf().ms >= t - t0 &&
+                w.lastDeaf().ms <= t - t0 + W::kDeafSliceMs,
+            "%lu par seconde : %lu en %lu ms au plus", (unsigned long)rate, (unsigned long)w.lastDeaf().rearms,
+            (unsigned long)w.lastDeaf().ms);
+    }
+  }
+  {
+    // Ecoute normale pendant une heure : ~8 periodiques et un hors RX toutes les
+    // 5 s, des trames justes, un CRC faux par minute ; jamais rien.
+    W w;
+    uint32_t t = 0, fired = 0;
+    for (unsigned s = 0; s < 3600; s++) {
+      if (listen(w, t, 1000, 10, s % 5 == 0 ? 1 : 0, 8) != R::None) fired++;
+      w.rxFrame(s % 60 != 0, t);
+      if (w.due(t) != R::None) fired++;
+    }
+    CHECK(!fired && !w.failed() && w.total() == 0 && w.deafRearms() <= 2, "ecoute normale : %u relances, %lu hors RX",
+          (unsigned)fired, (unsigned long)w.deafRearms());
+  }
+  {
+    // Lampe debranchee : une commande toutes les 2 s, 5 MAX_RT, puis le retour
+    // en ecoute (2 hors RX a la reconfiguration, periodiques normaux) ; 10 min.
+    W w;
+    uint32_t t = 0x7FFFF000u, fired = 0;
+    for (unsigned i = 0; i < 300; i++) {
+      for (unsigned k = 0; k < 5; k++) w.txVerdict(T::MaxRt);
+      if (w.due(t) != R::None) fired++;
+      t += 500;  // la rafale, sans ecoute
+      w.rxRearms(2, 0, t);
+      if (listen(w, t, 1500, 10, 0, 8) != R::None) fired++;
+    }
+    CHECK(!fired && !w.failed() && w.total() == 0, "lampe debranchee : %u relances", (unsigned)fired);
+  }
+
+  // Avec les autres symptomes : delais avant bruit avant surdite ; une relance
+  // efface toutes les preuves.
+  {
+    W w;
+    uint32_t t = 5000;
+    w.due(t);
+    w.rxRearms(1500, 0, t);
+    timeouts(w, 3);
+    CHECK(w.due(t) == R::TxTimeout, "delais et surdite : delais d'abord");
+    w.relaunched(R::TxTimeout, t);
+    CHECK(w.symptom() == R::None && w.deafRearms() == 0 && w.timeoutRun() == 0, "relance : preuves effacees");
+  }
+  {
+    W w;
+    uint32_t t = 5000;
+    feedRx(w, t, 100, 20, 1000);
+    w.rxRearms(1500, 0, t);
+    CHECK(w.due(t) == R::RxNoise, "bruit et surdite : bruit d'abord");
+    w.relaunched(R::RxNoise, t);
+    CHECK(w.symptom() == R::None && w.deafRearms() == 0 && !w.noisy(), "relance : preuves effacees");
+  }
+  {
+    // Outil de banc : la surdite repart de zero.
+    W w;
+    uint32_t t = 100;
+    w.due(t);
+    w.rxRearms(900, 0, t);
+    w.forget(t);
+    w.rxRearms(200, 0, t + 10);
+    CHECK(w.due(t + 10) == R::None && w.deafRearms() == 200, "forget : surdite effacee");
+  }
+
+  // Limite partagee : une relance pour delais impose ses 60 s a la surdite, et
+  // inversement.
+  {
+    W w;
+    uint32_t t = 7000;
+    timeouts(w, 3);
+    CHECK(w.due(t) == R::TxTimeout, "relance pour delais");
+    w.relaunched(R::TxTimeout, t);
+    const uint32_t t1 = t;
+    CHECK(listen(w, t, 120000, 2, 450, 0) == R::RxDeaf && t == t1 + W::kGapMs,
+          "surdite juste apres : relance a 60 s (%lu ms)", (unsigned long)(t - t1));
+    w.relaunched(R::RxDeaf, t);
+    const uint32_t t2 = t;
+    timeouts(w, 3);
+    CHECK(w.due(t2 + 1000) == R::None && w.due(t2 + W::kGapMs) == R::TxTimeout, "delais apres la surdite : 60 s");
+    CHECK(w.count(R::RxDeaf) == 1 && w.count(R::TxTimeout) == 1 && w.total() == 2, "compteurs par cause");
+    W::Entry h[1];
+    CHECK(w.history(h, 1) == 1 && h[0].cause == R::RxDeaf && h[0].atMs == t2, "historique : sourde");
+  }
+
+  // EN PANNE sur surdite, puis guerison par une ecoute revenue en RX.
+  {
+    W w;
+    uint32_t t = 0x20000000u;
+    w.forget(t);
+    for (unsigned i = 0; i < 3; i++) {
+      CHECK(listen(w, t, W::kBackoffMs, 2, 450, 0) == R::RxDeaf, "surdite %u", i + 1);
+      w.relaunched(R::RxDeaf, t);
+    }
+    CHECK(listen(w, t, 10000, 2, 450, 0) == R::None && w.failed() && w.unrecovered() == 3,
+          "sourde apres 3 relances : EN PANNE");
+    const uint32_t last = t - 10000;  // 3e relance
+    CHECK(w.waitMs(t) == W::kBackoffMs - (t - last), "attente de 10 min");
+    CHECK(listen(w, t, W::kBackoffMs, 2, 450, 0) == R::RxDeaf && t == last + W::kBackoffMs && w.failed(),
+          "10 min : relance 4");
+    w.relaunched(R::RxDeaf, t);
+    // La relance guerit : piece calme, aucune trame, la puce dit RX.
+    CHECK(listen(w, t, W::kNoiseWindowMs - 10, 10, 0, 8) == R::None && w.failed(), "9,99 s : toujours en panne");
+    CHECK(listen(w, t, 20, 10, 0, 8) == R::None && !w.failed() && w.unrecovered() == 0,
+          "fenetre de 10 s en RX : guerison");
+    CHECK(w.gapMs() == W::kGapMs && w.count(R::RxDeaf) == 4, "retour a 60 s");
+  }
+  {
+    // Bornes de la guerison apres surdite : 10 hors RX au plus, 20 periodiques
+    // au moins, aucun CRC faux ; sans ecoute (diag), rien.
+    struct Case { uint32_t off, in; bool bad, heals; const char *what; };
+    const Case cases[] = {
+        {10, 20, false, true, "10 hors RX, 20 periodiques"},
+        {11, 80, false, false, "11 hors RX"},
+        {0, 19, false, false, "19 periodiques"},
+        {0, 80, true, false, "un CRC faux"},
+        {0, 0, false, false, "sans ecoute"},
+    };
+    for (const Case &k : cases) {
+      W w;
+      uint32_t t = 1000;
+      w.relaunched(R::RxDeaf, t);
+      w.rxRearms(k.off, k.in, t + 500);
+      if (k.bad) w.rxFrame(false, t + 600);
+      w.due(t + W::kNoiseWindowMs);
+      CHECK((w.unrecovered() == 0) == k.heals, "guerison apres surdite, %s : %u", k.what, (unsigned)w.unrecovered());
+    }
+  }
+  {
+    // Apres une autre cause, la meme ecoute calme ne guerit pas : les delais
+    // gardent leur limite.
+    const R others[] = {R::TxTimeout, R::RxNoise, R::Verify};
+    for (R c : others) {
+      W w;
+      uint32_t t = 1000;
+      w.relaunched(c, t);
+      listen(w, t, 30000, 10, 0, 8);
+      CHECK(w.unrecovered() == 1, "ecoute calme apres %s : pas de guerison", relaunchText(c));
+    }
+  }
+  {
+    // Surdite a cheval sur le retour a zero de millis().
+    W w;
+    uint32_t t = 0xFFFFF800u;
+    w.forget(t);
+    CHECK(listen(w, t, 10000, 2, 450, 0) == R::RxDeaf && t < 0x00001000u, "surdite a cheval : %08lX",
+          (unsigned long)t);
+  }
+
   CHECK(!strcmp(relaunchText(R::TxTimeout), "delais") && !strcmp(relaunchText(R::RxNoise), "bruit") &&
-            !strcmp(relaunchText(R::Verify), "verif.") && !strcmp(relaunchText(R::None), "-"),
+            !strcmp(relaunchText(R::Verify), "verif.") && !strcmp(relaunchText(R::RxDeaf), "sourde") &&
+            !strcmp(relaunchText(R::None), "-"),
         "textes des causes");
 }
 
