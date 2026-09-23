@@ -423,14 +423,15 @@ void BenqHalo::adoptReported() {
 // ---------------------------------------------------------------------------
 
 void BenqHalo::tick() {
-#ifdef DIAG_ONLY
-  // Build de diagnostic : AUCUNE activite radio de fond. Mesure a l'appui
-  // (audit du 23/09) : en mode normal, cette boucle appelait pollNow() toutes
-  // les 5 s, qui EMET une trame vers l'adresse enregistree -- elle a tourne
-  // toute la nuit en arriere-plan des mesures, et emettait vers la lampe sans
-  // qu'on l'ait demande. En diagnostic, la radio ne bouge que sur commande.
+  // Couche Halo 2 neutralisee dans TOUS les builds (plan du pilote Halo 1,
+  // etape C1) : AUCUNE activite radio de fond. Mesure a l'appui (audit du
+  // 23/09) : en mode normal, cette boucle appelait pollNow() toutes les 5 s,
+  // qui EMET une trame au format Halo 2 vers l'adresse enregistree -- elle a
+  // tourne toute la nuit en arriere-plan des mesures, et emettait vers la
+  // lampe sans qu'on l'ait demande. Or la lampe est un Halo 1 : ce protocole
+  // ne la concerne pas. La radio ne bouge plus que sur commande, jusqu'au
+  // pilote Halo 1 ; le code ci-dessous disparait a l'etape C6.
   return;
-#endif
   if (!radio.present()) return;
   uint32_t now = millis();
   switch (mode_) {
