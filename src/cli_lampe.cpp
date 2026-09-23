@@ -1,6 +1,7 @@
 // Commandes 'lampe ...' : le chemin produit du pilote Halo 1 (plan du pilote
 // Halo 1, G.2 et G.3). Les commandes d'etat passent par la consigne, comme
 // Matter, attendent le repos du pilote et affichent une ligne de bilan.
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,8 @@ static bool parseLong(const char *s, long &v, int base) {
 static bool parseHexExact(const char *s, uint8_t *out, size_t n) {
   if (strlen(s) != 2 * n) return false;
   for (size_t i = 0; i < n; i++) {
+    // Chiffres seulement : strtoul accepterait un signe ('+5A5' lu 05 A5).
+    if (!isxdigit((unsigned char)s[2 * i]) || !isxdigit((unsigned char)s[2 * i + 1])) return false;
     char pair[3] = {s[2 * i], s[2 * i + 1], 0};
     char *end = nullptr;
     out[i] = (uint8_t)strtoul(pair, &end, 16);
@@ -96,12 +99,11 @@ static const char *verdictText(Verdict v) {
 // ---------------------------------------------------------------------------
 
 struct Mark {
-  uint32_t tx, giveUps, preempted, packets, acks, requests;
+  uint32_t tx, giveUps, preempted, packets, acks;
 };
 
 static Mark mark() {
-  return Mark{lamp.txCount(), lamp.stats.giveUps, lamp.stats.preempted, lamp.stats.packets, lamp.stats.acks,
-              lamp.stats.requests};
+  return Mark{lamp.txCount(), lamp.stats.giveUps, lamp.stats.preempted, lamp.stats.packets, lamp.stats.acks};
 }
 
 // Une ligne : les paquets emis depuis la marque, regroupes par charge.
@@ -179,7 +181,7 @@ static void printBilan(const Mark &m, bool idle) {
 }
 
 static bool radioReady() {
-  if (lamp.radio.present()) return true;
+  if (lamp.radio.present() && !lamp.lost()) return true;
   Serial.println(lamp.lost() ? "BM5602 perdu : rien n'est emis (nouvel essai de relance toutes les 60 s)."
                              : "BM5602 absent : rien n'est emis ('rfinit', puis 'lampe').");
   return false;
@@ -221,7 +223,7 @@ static void cmdHelp() {
   Serial.println("  lampe sync              renvoie tout ce qui est connu");
   Serial.println("  lampe rampe <de> <a> <pas> <ms>  simule un curseur (de, a, pas en hexa)");
   Serial.println("  lampe brut <XXYY> [n 1..10] [ecart 5..2000] [force]  charge brute, n paquets");
-  Serial.println("  lampe croire <XXYY>     etat cru et consigne, sans emettre la trame");
+  Serial.println("  lampe croire <XXYY>     etat cru et consigne, sans rien emettre");
   Serial.println("  lampe rafale <n> [min] [max]  paquets par trame, accuses exiges, paquets au plus");
   Serial.println("  lampe ecart <5..2000>   ms entre deux paquets");
   Serial.println("  lampe ecoute 0|1        ecoute de fond de la telecommande (jamais d'accuse)");
@@ -336,19 +338,15 @@ static void cmdCroire(char *p) {
                   pay[0], pay[1], kindText(k));
     return;
   }
-  const Mark m = mark();
+  // Jamais d'emission (G.2) : un reglage differe reste a livrer et partira
+  // avec la prochaine consigne.
   lamp.believe(pl);
-  if (lamp.busy()) {
-    // Un reglage en attente sur un autre champ part avec les nouveaux drapeaux,
-    // comme apres une trame de la telecommande.
-    Serial.println("croire : un reglage en attente part avec les nouveaux drapeaux");
-    if (radioReady()) printBilan(m, lamp.waitIdle(kWaitMs));
-    return;
-  }
-  char a[48], b[48];
+  char a[48], b[48], f[32];
   Halo1Lamp::describe(lamp.believed(), a, sizeof(a));
   Halo1Lamp::describe(lamp.target(), b, sizeof(b));
-  Serial.printf("cru : %s ; consigne : %s (rien emis)\n", a, b);
+  Halo1Lamp::describeFields(lamp.dirty(), f, sizeof(f));
+  Serial.printf("cru : %s ; consigne : %s ; a livrer : %s (rien emis%s)\n", a, b, f,
+                lamp.busy() ? " ; la consigne deja en cours continue" : "");
 }
 
 static void cmdRafale(char *p) {
@@ -451,6 +449,12 @@ static void cmdRegs() {
   uint8_t c[3];
   if (!lamp.radio.readConfig(c)) {
     Serial.println("  relecture impossible : puce en SPI 3 fils (reset coupe), reessayer apres 'lampe attends 100'");
+  } else if (!lamp.radio.configured()) {
+    // Ecoute coupee (diag), ou juste apres un outil de banc : une mise en veille
+    // ne configure rien, un ECART ne voudrait rien dire.
+    Serial.printf("  RFCH %02X  DM1 %02X  RT1 %02X  : puce pas encore configuree par le pilote (valeurs de halo.begin "
+                  "ou du dernier outil), version puce 0x%06lX\n",
+                  c[0], c[1], c[2], (unsigned long)halo.radio.chipVersion());
   } else {
     const bool ok = c[0] == kChannel && c[1] == (bc5602::ADDR_LEN_4 | bc5602::DATARATE_125K) && c[2] == 0x73;
     Serial.printf("  RFCH %02X  DM1 %02X  RT1 %02X  (attendu 05 82 73 : %s), version puce 0x%06lX\n", c[0], c[1],

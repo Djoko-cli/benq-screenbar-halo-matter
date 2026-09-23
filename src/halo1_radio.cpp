@@ -79,7 +79,7 @@ void Halo1Radio::begin(BC5602 &chip, const uint8_t addrReg[4]) {
   verifyFails_ = 0;
   restartWanted_ = false;
   spi3Wire_ = false;  // halo.begin() a reecrit IO1
-  setAddress(addrReg);
+  setAddress(addrReg);  // + invalidate() : puce pas encore configuree par le pilote
 }
 
 void Halo1Radio::setAddress(const uint8_t addrReg[4]) {
@@ -133,6 +133,7 @@ void Halo1Radio::beginReset(Mode target, uint32_t nowMs, uint8_t why) {
   else if (why == WHY_TX) stats.txReconf++;
   halo1StdReset(*chip_);
   spi3Wire_ = true;
+  configured_ = false;
   // Horloge reelle, pas nowMs : l'appelant a pu bloquer depuis (envoi, entree
   // en RX), et les 40 ms comptent a partir du reset lui-meme.
   resetAt_ = millis();
@@ -143,6 +144,7 @@ void Halo1Radio::beginReset(Mode target, uint32_t nowMs, uint8_t why) {
 void Halo1Radio::finishReset(uint32_t nowMs) {
   halo1StdConfigure(*chip_, addrReg_, halo1::kChannel, DATARATE_125K, target_ == Mode::Rx);
   spi3Wire_ = false;  // IO1 reecrit en tete de configuration
+  configured_ = true;  // meme si la verification echoue : 'lampe regs' montre l'ecart
   if (!verify()) {
     stats.verifyFail++;
     if (++verifyFails_ >= kMaxVerifyFails) {

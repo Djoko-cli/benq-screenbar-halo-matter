@@ -53,7 +53,7 @@ class Halo1Radio {
   void setAddress(const uint8_t addrReg[4]);           // + invalidate()
   const uint8_t *air() const { return air_; }
   bool present() const { return chip_ && chip_->present(); }
-  void invalidate() { mode_ = Mode::Unknown; }         // un outil CLI a touche la puce
+  void invalidate() { mode_ = Mode::Unknown; configured_ = false; }  // un outil CLI a touche la puce
   // Tx, Rx ou Sleep. Sleep : CE=0 et LIGHT_SLEEP, sans reset. Tx ou Rx depuis un
   // autre mode : reconfiguration complete (reset, puis configuration apres
   // resetWaitMs dans service()), ou bascule legere si tuning.lightSwitch.
@@ -63,11 +63,15 @@ class Halo1Radio {
   void service(uint32_t nowMs);                        // acheve un reset apres resetWaitMs
   bool restartWanted() const { return restartWanted_; }
   void restartDone() {  // apres halo.begin(), qui a reecrit IO1
-    restartWanted_ = false; verifyFails_ = 0; spi3Wire_ = false; mode_ = Mode::Unknown;
+    restartWanted_ = false; verifyFails_ = 0; spi3Wire_ = false; mode_ = Mode::Unknown; configured_ = false;
   }
   // Lecture SPI possible : faux entre un reset et la configuration qui le suit
   // (SPI 3 fils, bc5602.cpp), y compris si invalidate() a coupe ce reset.
   bool readable() const { return present() && !spi3Wire_; }
+  // La puce porte la configuration du pilote : halo1StdConfigure a tourne depuis
+  // le dernier reset, outil de banc ou relance. Sinon, RFCH/DM1/RT1 sont ceux de
+  // halo.begin() ou du dernier outil (une mise en veille ne configure rien).
+  bool configured() const { return configured_; }
   // Exige ready(Tx), sinon FifoRefused sans toucher a la puce. Bloquant : <= 30 ms
   // d'attente active (1,6-1,7 ms mesures). Apres tout verdict autre que
   // Ack/AckForeign : lance une reconfiguration vers Tx.
@@ -95,6 +99,7 @@ class Halo1Radio {
   uint8_t verifyFails_ = 0;
   bool restartWanted_ = false;
   bool spi3Wire_ = false;  // reset envoye, IO1 pas encore reecrit : aucune lecture
+  bool configured_ = false;
   Snapshot snaps_[kSnaps] = {};
   uint8_t snapIdx_ = 0, snapN_ = 0;
 };

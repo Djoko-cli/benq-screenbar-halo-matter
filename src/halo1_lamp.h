@@ -21,7 +21,8 @@ class Halo1Lamp {
   void begin(BC5602 &chip, bool listen, RestartFn restart);  // NVS -> cru = consigne ; N'EMET RIEN
   void tick();                    // <= ~35 ms au pire (un paquet), typiquement < 1 ms
   void invalidateRadio() { radio.invalidate(); }
-  // Acheve un reset en cours (40 ms au plus) : un outil de banc trouve alors la
+  // Acheve un reset en cours (une reconfiguration de 40 ms, jusqu'a 3 si la
+  // verification echoue ; 200 ms au plus) : un outil de banc trouve alors la
   // puce en SPI 4 fils, et non au milieu d'une reconfiguration.
   void settleRadio();
 
@@ -30,7 +31,9 @@ class Halo1Lamp {
   bool pressAuto();                                     // false si consigne eteinte
   void reassert() { request(target_, halo1::FLD_ALL); }
   const char *sendRaw(halo1::Payload p, bool force, uint8_t packets, uint16_t gapMs);  // nullptr = accepte
-  void believe(halo1::Payload p);  // comme une trame de la telecommande : cru + consigne
+  // Comme une trame de la telecommande (cru + consigne), SANS EMETTRE : un
+  // reglage differe reste a livrer jusqu'a la prochaine consigne.
+  void believe(halo1::Payload p);
 
   // --- lecture ---
   const halo1::State &target() const { return target_; }
@@ -42,7 +45,10 @@ class Halo1Lamp {
   bool busy() const;                             // tranche active ou attente de reprise
   Halo1Link link() const { return link_; }
   uint8_t lastAuto() const { return lastAuto_; }
-  bool lost() const { return lost_; }  // relance du module ratee (niveau L3)
+  // Niveau L3 : relance du module ratee (module muet), ou sans effet
+  // (configuration toujours rejetee). Rien n'est emis ; nouvel essai de relance
+  // toutes les 60 s.
+  bool lost() const { return (lost_ && !radio.present()) || (stuck_ && !relaunched_); }
 
   // Journal des derniers paquets emis, pour le bilan des commandes 'lampe'.
   enum : uint8_t { SLOT_BRIGHT, SLOT_TEMP, SLOT_AUTO, SLOT_RAW, SLOT_N };
@@ -97,9 +103,10 @@ class Halo1Lamp {
   bool anyActive() const;
   void markPending(uint32_t now);
   // credit : une tranche remplacee ou annulee apres un accuse passe dans l'etat
-  // cru (faux si ses accuses y sont deja, voir onRemotePayload).
-  void replan(uint32_t now, bool credit = true);
-  void setSlot(uint8_t id, bool want, halo1::Payload p, uint32_t now, bool credit);
+  // cru (faux si ses accuses y sont deja, voir onRemotePayload). arm : faux, une
+  // tranche inactive n'est jamais armee (believe() n'emet rien).
+  void replan(uint32_t now, bool credit = true, bool arm = true);
+  void setSlot(uint8_t id, bool want, halo1::Payload p, uint32_t now, bool credit, bool arm);
   int8_t pickSlot();
   void sendPacket(uint32_t now);
   void endBurst();
@@ -109,7 +116,7 @@ class Halo1Lamp {
   void giveUp();
   void restartModule(uint32_t now);
   void onAir(const halo1::AirFrame &f, uint32_t now);
-  void onRemotePayload(halo1::Payload p, uint32_t now);
+  void onRemotePayload(halo1::Payload p, uint32_t now, bool arm = true);
   void noteAuto(uint8_t value, uint32_t now);
   void applyBelieved(halo1::Payload p, uint32_t now, bool confirm);
   void schedulePersist(uint32_t now);
@@ -131,6 +138,11 @@ class Halo1Lamp {
   uint16_t rawGapMs_ = 0;
   bool listening_ = false, trace_ = false, persistDirty_ = false, holding_ = false, lost_ = false,
        acked_ = false;
+  // relaunched_ : relance reussie, aucune configuration verifiee depuis
+  // (radio.stats.fullConfigs valait relaunchConfigs_) ; une nouvelle demande de
+  // relance passe alors en L3 (stuck_) au lieu de relancer en boucle.
+  bool relaunched_ = false, stuck_ = false;
+  uint32_t relaunchConfigs_ = 0;
   Halo1Link link_ = Halo1Link::Unknown;
   uint8_t addrReg_[4] = {0x4F, 0xF0, 0xFD, 0x63};
   halo1::SelectionMemory selMem_;
