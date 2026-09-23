@@ -1622,8 +1622,13 @@ static const char *const kIdText[kIdCount] = {"fabricant",       "produit",     
 static uint8_t sIdRefused = 0;  // un bit par valeur refusee (kIdVendor...)
 
 static void applyIdentity() {
-  uint8_t mac[6] = {};
-  const bool macOk = esp_efuse_mac_get_default(mac) == ESP_OK;
+  // Sur le C6 (802.15.4), esp_efuse_mac_get_default() rend l'EUI-64 sur 8
+  // octets : avec un tampon de 6 il debordait de 2, et les 6 premiers octets
+  // (58E6C5FFFEDD) sont les memes sur toutes les cartes du lot (24/09).
+  // esp_read_mac(ESP_MAC_BASE) rend la MAC-48 d'usine, propre a la carte ;
+  // tampon de 8 par prudence.
+  uint8_t mac[8] = {};
+  const bool macOk = esp_read_mac(mac, ESP_MAC_BASE) == ESP_OK;
   if (macOk)
     snprintf(sSerial, sizeof(sSerial), "%s%02X%02X%02X%02X%02X%02X", MATTER_SERIAL_PREFIX, mac[0], mac[1], mac[2],
              mac[3], mac[4], mac[5]);
