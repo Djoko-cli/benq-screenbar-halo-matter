@@ -127,6 +127,8 @@ static void cmdHelp() {
   Serial.println("  ccfind [bits] [run] [n]  trouve une adresse SANS la connaitre, n captures cumulees");
   Serial.println("  ccfront [ms]          table de verite mesuree de PA_EN et RX_EN");
   Serial.println("  ccpres [ms]           le CC2500 entend-il la source ? distribution du RSSI");
+  Serial.println("  ccscan [s] [ms] [dBm]  energie par canal, 2400 a 2483 MHz (chasse a l'appairage)");
+  Serial.println("  cctrig [s] [n] [cs] [MHz] [agc]  fenetres brutes gardees si la porteuse y est vue");
   Serial.println("  cccrc [bits] [n] [lo] [hi]  trouve les trames par leur CRC, sans hypothese");
   Serial.println("  ccbit [seuil] [n]     duree reelle d'un bit, mesuree en mode asynchrone");
   Serial.println("  cccommun [seuil]      ce que deux salves ont en commun : aucune hypothese");
@@ -488,7 +490,7 @@ static void handleLine(char *line) {
     long thr = 0, ms = 2000;
     if (*arg) thr = strtol(arg, &end, 10);
     if (end && *end) ms = strtol(end, nullptr, 10);
-    if (thr < 0 || thr > 15) thr = 0;
+    if (thr < 0 || thr > 63) thr = 0;
     if (ms < 200 || ms > 30000) ms = 2000;
     ccCarrierDuty(Serial, (uint8_t)thr, (uint32_t)ms);
   } else if (!strcmp(line, "ccscore")) {
@@ -562,6 +564,32 @@ static void handleLine(char *line) {
     if (lo < 24 || lo > 400) lo = 60;
     if (hi < lo || hi > 400) hi = 200;
     ccCrcHunt(Serial, nb, (uint8_t)rep, (uint16_t)lo, (uint16_t)hi);
+  } else if (!strcmp(line, "cctrig")) {
+    // cctrig [secondes] [fenetres max] [echantillons porteuse min] [MHz]
+    char *end = nullptr;
+    long sec = 20, n = 12, cs = 200, mhz = 2405, agc = 0x38;
+    if (*arg) sec = strtol(arg, &end, 10);
+    if (end && *end) n = strtol(end, &end, 10);
+    if (end && *end) cs = strtol(end, &end, 10);
+    if (end && *end) mhz = strtol(end, &end, 10);
+    if (end && *end) agc = strtol(end, nullptr, 0);
+    if (agc < 0 || agc > 63) agc = 0x38;
+    if (sec < 2 || sec > 300) sec = 20;
+    if (n < 1 || n > 255) n = 12;  // 255 : tout un appairage (~5 fenetres/s)
+    if (cs < 1 || cs > 32768) cs = 200;
+    if (mhz < 2400 || mhz > 2483) mhz = 2405;
+    ccCsCapture(Serial, (uint32_t)sec, (uint8_t)n, (uint32_t)cs, (uint32_t)mhz, (uint8_t)agc);
+  } else if (!strcmp(line, "ccscan")) {
+    // ccscan [secondes] [palier ms par canal] [seuil dBm]
+    char *end = nullptr;
+    long sec = 20, dw = 15, thr = -75;
+    if (*arg) sec = strtol(arg, &end, 10);
+    if (end && *end) dw = strtol(end, &end, 10);
+    if (end && *end) thr = strtol(end, nullptr, 10);
+    if (sec < 2 || sec > 300) sec = 20;
+    if (dw < 2 || dw > 200) dw = 15;
+    if (thr < -100 || thr > -20) thr = -75;
+    ccChannelScan(Serial, (uint32_t)sec, (uint32_t)dw, (int)thr);
   } else if (!strcmp(line, "ccpres")) {
     uint32_t d = 20000;
     const long v = strtol(arg, nullptr, 10);
@@ -1685,6 +1713,92 @@ void ccFrontEnd(Print &out, uint32_t dwellMs) {
 //  etabli que la telecommande emet sur 2405 MHz, refaite ici avec un recepteur
 //  qui rend des dBm veritables.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  Energie par canal sur toute la bande (chasse a l'appairage, 23/09).
+//
+//  L'appairage de la Halo 1 ne passe ni par le lien normal (63 FD F0 4F,
+//  canal 5) ni par l'adresse d'appairage de la Halo 2 (E2 08 00 B0, canal 5) :
+//  0 trame. Avant de chercher une adresse, on cherche OU la telecommande parle.
+//  Balayage en boucle des canaux 0 a 83 (2400 + n MHz, la grille du BC5602),
+//  palier fixe sur chacun ; on compte les lectures de RSSI au-dessus du seuil.
+//  A comparer entre un passage au repos et un passage pendant la manip.
+// ---------------------------------------------------------------------------
+void ccChannelScan(Print &out, uint32_t seconds, uint32_t dwellMs, int thrDbm) {
+  constexpr uint8_t kChannels = 84;
+  out.println();
+  out.printf("=== Energie par canal, 2400-2483 MHz : %lu s, palier %lu ms, seuil %d dBm ===\n",
+             (unsigned long)seconds, (unsigned long)dwellMs, thrDbm);
+  Serial.flush();
+
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+  for (const auto &r : kCcRxConfig) radio2.writeRegister(r[0], r[1]);
+  radio2.setFrontEnd(false, true);  // LNA seul, mesure le 22/09
+
+  static uint32_t hits[kChannels], reads[kChannels], sweepsHit[kChannels];
+  static int peak[kChannels];
+  for (uint8_t c = 0; c < kChannels; c++) {
+    hits[c] = reads[c] = sweepsHit[c] = 0;
+    peak[c] = -128;
+  }
+
+  uint32_t sweeps = 0, lostRx = 0;
+  const uint32_t deadline = millis() + seconds * 1000UL;
+  uint32_t nextBeat = millis() + 5000;
+  while ((int32_t)(millis() - deadline) < 0) {
+    for (uint8_t c = 0; c < kChannels; c++) {
+      // FREQ = f / (26 MHz / 2^16) ; 2405 MHz donne bien 0x5C8000.
+      const uint32_t f = (uint32_t)(((uint64_t)(2400000UL + 1000UL * c) * 1000ULL * 65536ULL) / 26000000ULL);
+      radio2.strobe(cc2500::STROBE_SIDLE);
+      radio2.writeRegister(cc2500::REG_FREQ2, (uint8_t)((f >> 16) & 0xFF));
+      radio2.writeRegister(cc2500::REG_FREQ1, (uint8_t)((f >> 8) & 0xFF));
+      radio2.writeRegister(cc2500::REG_FREQ0, (uint8_t)(f & 0xFF));
+      radio2.strobe(cc2500::STROBE_SRX);  // MCSM0 : calibration automatique (~0,8 ms)
+      delayMicroseconds(1500);
+      if (radio2.marcState() != cc2500::MARC_RX) {
+        lostRx++;
+        radio2.strobe(cc2500::STROBE_SRX);
+        delayMicroseconds(1500);
+      }
+      bool hitThisSweep = false;
+      const uint32_t until = millis() + dwellMs;
+      while ((int32_t)(millis() - until) < 0) {
+        const int dbm = (int)((int8_t)radio2.readStatus(cc2500::STA_RSSI)) / 2 - 72;
+        reads[c]++;
+        if (dbm > peak[c]) peak[c] = dbm;
+        if (dbm >= thrDbm) {
+          hits[c]++;
+          hitThisSweep = true;
+        }
+      }
+      if (hitThisSweep) sweepsHit[c]++;
+      yield();
+    }
+    sweeps++;
+    if ((int32_t)(millis() - nextBeat) >= 0) {
+      nextBeat += 5000;
+      out.printf("  ... %lu balayage(s)\n", (unsigned long)sweeps);
+      Serial.flush();
+    }
+  }
+  radio2.strobe(cc2500::STROBE_SIDLE);
+
+  out.printf("  %lu balayage(s), %lu reprise(s) du RX.\n", (unsigned long)sweeps, (unsigned long)lostRx);
+  out.println("  canal  MHz   lectures>seuil  pour mille  balayages touches  pic dBm");
+  char lineBuf[120];
+  for (uint8_t c = 0; c < kChannels; c++) {
+    const uint32_t pm = reads[c] ? (uint32_t)((1000ULL * hits[c]) / reads[c]) : 0;
+    snprintf(lineBuf, sizeof(lineBuf), "  SCAN %2u  %4u  %8lu/%-8lu  %5lu      %4lu/%-4lu        %4d", (unsigned)c,
+             (unsigned)(2400 + c), (unsigned long)hits[c], (unsigned long)reads[c], (unsigned long)pm,
+             (unsigned long)sweepsHit[c], (unsigned long)sweeps, peak[c]);
+    out.println(lineBuf);
+  }
+  Serial.flush();
+}
+
 void ccPresence(Print &out, uint32_t phaseMs) {
   out.println();
   out.println("=== Le CC2500 entend-il la source sur 2405 MHz ? ===");
@@ -2644,7 +2758,10 @@ static void ccAsyncSetup(uint8_t csThr) {
   radio2.writeRegister(cc2500::REG_PKTCTRL0, 0x32);        // asynchrone
   radio2.writeRegister(cc2500::REG_IOCFG0, 0x0D);          // GDO0 = donnee brute
   radio2.writeRegister(cc2500::REG_IOCFG2, 0x0E);          // GDO2 = porteuse detectee
-  radio2.writeRegister(cc2500::REG_AGCCTRL1, (uint8_t)(csThr & 0x0F));
+  // 0..15 : seuil ABSOLU seul (quartet bas). Au-dela : valeur brute d'AGCCTRL1,
+  // pour le seuil RELATIF (bits 5:4 : +6/+10/+14 dB de saut de RSSI) ; mesure
+  // du 23/09 : en absolu, meme +7 dB laisse 18 % de porteuse au repos.
+  radio2.writeRegister(cc2500::REG_AGCCTRL1, (uint8_t)(csThr <= 15 ? (csThr & 0x0F) : csThr));
   radio2.setFrontEnd(false, true);
   radio2.strobe(cc2500::STROBE_SRX);
   delay(10);
@@ -2763,6 +2880,99 @@ void ccAsyncCapture(Print &out, uint8_t count, uint32_t minRuns, uint32_t timeou
   }
   out.printf("  %u fenetre(s) gardee(s) sur %lu examinee(s), meilleur score %lu.\n", kept,
              (unsigned long)windows, (unsigned long)best);
+  radio2.strobe(cc2500::STROBE_SIDLE);
+}
+
+// ---------------------------------------------------------------------------
+//  Capture brute gardee sur DETECTION DE PORTEUSE, sans hypothese de debit.
+//
+//  ccasync ne garde que les fenetres riches en paliers « de la taille d'un bit
+//  a 125 kbit/s » : il ecarterait un appairage emis a un autre debit. Ici on
+//  echantillonne en meme temps la donnee brute (GDO0) et la porteuse detectee
+//  (GDO2, IOCFG2 = 0x0E) dans le MEME mot GPIO, et on garde toute fenetre ou la
+//  porteuse a ete vue assez longtemps. Sortie au format ASYNC/AS de ccasync
+//  (lisible par tools/audit/indep_pll/pll.py), plus la porteuse en lignes CSB.
+// ---------------------------------------------------------------------------
+static uint32_t ccCsRing[1024];
+void ccCsCapture(Print &out, uint32_t seconds, uint8_t maxWin, uint32_t minCs, uint32_t mhz, uint8_t agc) {
+  const uint8_t gdo0 = ccPins[4], gdo2 = ccPins[5];
+  out.println();
+  out.printf("=== Capture sur porteuse : %lu MHz, %lu s, %u fenetre(s) max, porteuse >= %lu echantillons, AGCCTRL1 0x%02X ===\n",
+             (unsigned long)mhz, (unsigned long)seconds, maxWin, (unsigned long)minCs, agc);
+  Serial.flush();
+  if (!radio2.begin(ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[6], ccPins[7])) {
+    out.println("  La puce ne repond pas.");
+    return;
+  }
+  ccAsyncSetup(agc);  // par defaut 0x38 : porteuse = saut de RSSI de +14 dB
+  if (mhz != 2405) {
+    const uint32_t f = (uint32_t)(((uint64_t)mhz * 1000000ULL * 65536ULL) / 26000000ULL);
+    radio2.strobe(cc2500::STROBE_SIDLE);
+    radio2.writeRegister(cc2500::REG_FREQ2, (uint8_t)((f >> 16) & 0xFF));
+    radio2.writeRegister(cc2500::REG_FREQ1, (uint8_t)((f >> 8) & 0xFF));
+    radio2.writeRegister(cc2500::REG_FREQ0, (uint8_t)(f & 0xFF));
+    radio2.strobe(cc2500::STROBE_SRX);
+    delay(5);
+  }
+  pinMode(gdo0, INPUT);
+  pinMode(gdo2, INPUT);
+  const uint32_t m0 = 1UL << gdo0, m2 = 1UL << gdo2;
+  const uint32_t cpuMhz = getCpuFrequencyMhz();
+  uint8_t kept = 0;
+  uint32_t windows = 0, bestCs = 0;
+  const uint32_t deadline = millis() + seconds * 1000UL;
+  uint32_t nextBeat = millis() + 5000;
+  while (kept < maxWin && (int32_t)(millis() - deadline) < 0) {
+    noInterrupts();
+    const uint32_t c0 = esp_cpu_get_cycle_count();
+    for (uint32_t w = 0; w < 1024; w++) {
+      uint32_t word = 0, cw = 0;
+      for (uint8_t k = 0; k < 32; k++) {
+        const uint32_t v = REG_READ(GPIO_IN_REG);
+        word = (word << 1) | ((v & m0) ? 1u : 0u);
+        cw = (cw << 1) | ((v & m2) ? 1u : 0u);
+      }
+      ccRing[w] = word;
+      ccCsRing[w] = cw;
+    }
+    const uint32_t c1 = esp_cpu_get_cycle_count();
+    interrupts();
+    windows++;
+    uint32_t cs = 0;
+    for (uint32_t w = 0; w < 1024; w++) cs += (uint32_t)__builtin_popcount(ccCsRing[w]);
+    if (cs > bestCs) bestCs = cs;
+    if ((windows & 0x1F) == 0 && radio2.marcState() != cc2500::MARC_RX) radio2.strobe(cc2500::STROBE_SRX);
+    if ((int32_t)(millis() - nextBeat) >= 0) {
+      nextBeat += 5000;
+      out.printf("  ... %lu fenetre(s), %u gardee(s), porteuse max %lu\n", (unsigned long)windows, kept,
+                 (unsigned long)bestCs);
+      Serial.flush();
+    }
+    if (cs < minCs) {
+      delay(1);
+      continue;
+    }
+    const uint32_t nsPerSample = (uint32_t)((uint64_t)(c1 - c0) * 1000ULL / cpuMhz / 32768ULL);
+    out.printf("ASYNC %u %lu %lu\n", kept, (unsigned long)nsPerSample, (unsigned long)cs);
+    out.printf("CSWIN %u t=%lu ms porteuse=%lu\n", kept, (unsigned long)millis(), (unsigned long)cs);
+    char lineBuf[96];
+    for (uint32_t k = 0; k < 1024; k += 8) {
+      size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "AS %u %4lu ", kept, (unsigned long)k);
+      for (uint32_t q = 0; q < 8; q++)
+        w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, "%08lX", (unsigned long)ccRing[k + q]);
+      out.println(lineBuf);
+    }
+    for (uint32_t k = 0; k < 1024; k += 8) {
+      size_t w = (size_t)snprintf(lineBuf, sizeof(lineBuf), "CSB %u %4lu ", kept, (unsigned long)k);
+      for (uint32_t q = 0; q < 8; q++)
+        w += (size_t)snprintf(lineBuf + w, sizeof(lineBuf) - w, "%08lX", (unsigned long)ccCsRing[k + q]);
+      out.println(lineBuf);
+    }
+    Serial.flush();
+    kept++;
+  }
+  out.printf("  %u fenetre(s) gardee(s) sur %lu, porteuse max %lu echantillons.\n", kept,
+             (unsigned long)windows, (unsigned long)bestCs);
   radio2.strobe(cc2500::STROBE_SIDLE);
 }
 

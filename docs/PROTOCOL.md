@@ -1399,3 +1399,99 @@ Acquis :
   premiere trame reveille le microcontroleur de la lampe, ou la lampe
   ecarte une trame dont le PID egale celui de la derniere recue. A etudier ;
   en attendant, emettre chaque commande trois fois comme la telecommande.
+
+Luminosite avec les deux lampes (`C5`, bits marche + avant + luminosite +
+arriere) :
+
+| test | charge | observe |
+|---|---|---|
+| 7 | `C5 60` | baisse legere, les deux lampes restent allumees |
+| 7b | `C5 4C` | minimum de la molette |
+| 7c/7d | `C5 20`, puis `4C`/`20` alternes toutes les 4 s | aucun changement visible |
+
+- La lampe **plafonne sous `4C`** : c'est son minimum reel, pas seulement
+  celui de la molette. Plage utile `4C`-`FE`.
+- Perception (utilisateur) : la courbe 0 -> 100 parait logarithmique ; avec
+  les deux lampes allumees, chacune eclaire moins que seule (puissance
+  partagee). Pour Matter : conversion non lineaire du niveau vers `4C`-`FE`.
+
+Favori et bits 3 / 4 :
+
+| test | charge | observe |
+|---|---|---|
+| 8 | salve du favori `83 35`, `85 A7`, `91 00`, (`89 E0` incertain) | arriere seule, luminosite plus forte : le favori se rejoue sans la telecommande |
+| 9a | `C3 35`, 4 s, `C9 58` | passage aux deux lampes, puis rien |
+| 9b/9c | `C9 E0` / `C9 00` alternes toutes les 4 s | rien (deux fois, lampe regardee) |
+| 10a/10b | `D1 01`, `D1 00`, `D1 64` toutes les 6 s | rien (deux fois, lampe regardee) |
+
+Bits 3 et 4 : **aucun effet visible**, deux lampes allumees, valeurs opposees.
+Reglages internes (cible ou etat du mode automatique ? memoire du favori ?),
+sans utilite pour la commande depuis Matter. Non poursuivi.
+
+### Appairage Halo 1 (23/09, format de trame desormais correct)
+
+Manipulation : maintenir **favori + switch de lampe ~5 s** ; toutes les LED
+de la telecommande clignotent. Appui long sur favori = enregistrer le preset
+**dans la telecommande** (LED en retour ; la lampe ne recoit que les trames
+d'etat du rappel).
+
+| capture | adresse, canal | pendant la manip |
+|---|---|---|
+| `logs/pair-1.log` | `63 FD F0 4F`, 5 (lien normal) | rien ; avant et apres, trafic normal |
+| `logs/pair-2.log` | `E2 08 00 B0`, 5 (appairage Halo 2) | 0 trame, 0 rejet en 40 s |
+
+- L'appairage de la Halo 1 ne passe ni par le lien normal, ni par l'adresse
+  d'appairage de la Halo 2 sur le canal 5 : autre adresse et/ou autre canal.
+  Seule voie restante : balayage au CC2500 (energie par canal, puis capture
+  brute). Non necessaire pour piloter la lampe ; laisse en option.
+- **L'adresse n'a pas change** : juste apres la manip, la molette emet sur
+  `63 FD F0 4F` (`85 A6` -> `85 FE`, pair-1.log, 36-40 s).
+- La trame de service `FA xx` (NO_ACK) valait `A8` partout avant, `F8` juste
+  apres la remise des piles et la manip (bits 6 et 4) : niveau de pile ou
+  drapeau, non tranche.
+
+**Adresse d'appairage Halo 1 TROUVEE** (23/09, CC2500, `logs/trig-2-appairage.log`,
+analyse `tools/pairing/ana.py`) :
+- Balayage d'energie (`ccscan`) : rien de net hors du canal 5 ; puis capture
+  brute sur 2405 MHz gardee sur detection de porteuse (`cctrig`, seuil
+  RELATIF +14 dB : en absolu, meme +7 dB laissait 18 % de porteuse au repos).
+- Temoin (molette, `trig-1-molette.log`) : l'analyse aveugle, sans connaitre
+  l'adresse, sort des trames au CRC juste `63 FD F0 4F` / `C4 D3`, `C4 CB`.
+- Pendant la manip favori + switch : trames standard, **125 kbps, canal 5,
+  adresse sur l'air `59 01 00 B0`** (a ecrire `B0 00 01 59`), longueur 2,
+  PID 0, NO_ACK 0, CRC juste. Charge en cycle, une par salve toutes les
+  ~200 ms : `5A 5A` -> `F5 C3` -> `CF 49` -> ... Chaque charge part jusqu'a 3
+  fois a ~1,85 ms d'ecart : ce sont des RETRANSMISSIONS faute d'accuse -- la
+  lampe, pas en mode appairage, ne repond pas.
+- Parente avec la Halo 2 : adresse d'appairage `E2 08 00 B0`, meme fin `00 B0`.
+- `F5 C3 CF 49` (identifiant de la telecommande ?) n'a aucun lien simple avec
+  `63 FD F0 4F` (XOR, inversions, complement, CRC-16 essayes). L'adresse de
+  lien vient peut-etre de la lampe, dans son accuse, pendant un vrai appairage.
+- Les « trames » `FFFF0000` longueur 0 vues a 1000 kbps sont des artefacts de
+  sur-echantillonnage (flux constant), a ignorer.
+
+**Appairage COMPLET capture** (23/09, procedure du manuel : lampe debranchee,
+switch + favori 5 s, capteur couvert, USB rebranche dans les 15 s ; BM5602 sur
+`59 01 00 B0` = `logs/pair-4-bm.log`, CC2500 brut = `logs/pair-4-cc.log`,
+liste `tools/pairing/frames.py logs/pair-4-cc.log 125 99.84`) :
+
+| t (s) | trafic |
+|---|---|
+| 0-2,2 et 5,7-8,0 | lien normal `63 FD F0 4F` : `FF 00`/`FE 00`/`FD 00` toutes les ~49 ms (manip en cours), puis `85 E2` x3 |
+| 8,5-14,6 | balise `59 01 00 B0` : `5A 5A`, `F5 C3`, `CF 49` toutes les 200 ms, 2-3 essais chacune, PID fige : pas d'accuse |
+| 14,76 | **premier accuse de la lampe** (USB rebranche) : longueur 0, PID 1, bit NO_ACK a 1 |
+| 14,8-17,7 | balise emise UNE fois par charge, PID qui avance : chaque trame est accusee (accuse vide, ~0,83 ms apres) |
+| 17,75 | fin : la telecommande s'arrete (appairage reussi) |
+
+- **L'accuse de la lampe est VIDE** : la lampe n'attribue rien. Elle apprend
+  l'identite de la telecommande dans la balise (coherent avec le manuel : une
+  telecommande, plusieurs lampes). L'adresse de lien `63 FD F0 4F` est donc
+  une fonction de `5A 5A / F5 C3 / CF 49` (ou de l'identifiant interne de la
+  telecommande) -- fonction non identifiee.
+- Consequence pratique : l'ESP32 peut RE-APPAIRER la lampe a l'adresse
+  connue en rejouant la balise (`59 01 00 B0`, canal 5, charges dans l'ordre,
+  accuse demande) pendant la fenetre d'appairage de la lampe.
+- **L'adresse survit a l'appairage** (`logs/pair-5-verif.log`) : juste apres,
+  la molette emet 121 trames sur `63 FD F0 4F` et le PID avance a chaque
+  trame (emission unique, donc accusee) ; la lampe obeit. Voyants eteints a
+  la fin de la manip : appairage reussi. Piste appairage CLOSE.
