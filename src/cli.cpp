@@ -122,7 +122,7 @@ static void cmdHelp() {
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
   Serial.println("  benq [ms] [octets]    reception Halo 1, lecture de 8 a 32 octets");
-  Serial.println("  xo [0..31]            trim du quartz du BM5602 : reglage fin de la porteuse");
+  Serial.println("  xo [0..31|0x1F|off]   trim du quartz du BM5602 : reglage fin de la porteuse");
   Serial.println("  tx6 <hex12> [n] [ms]  emettre une trame Halo 1 (adresse + 6 octets + CRC)");
   Serial.println("  txraw <hex> [n] [ms]  emettre des octets bruts apres l'adresse, CRC materiel coupe");
   Serial.println("  txack <adr> <canal> <charge> [n] [ms]  format standard, accuse automatique");
@@ -674,28 +674,41 @@ static void handleLine(char *line) {
       halo.txHalo1(Serial, pay, (uint16_t)n, (uint16_t)gap);
     }
   } else if (!strcmp(line, "xo")) {
-    // xo [0..31] : trim du quartz du BM5602, donc reglage fin de sa porteuse.
+    // xo [0..31 | 0x00..0x1F | off] : trim du quartz du BM5602, donc reglage
+    // fin de sa porteuse.
     // Mesure a l'appui : les erreurs binaires sur les trames de la telecommande
     // sont a 100 %% des 1 lus comme 0, toujours sur le dernier 1 avant une
     // transition -- la signature d'un seuil de decision decale, donc d'un
     // ecart de frequence porteuse. Le projet amont regle ce registre a 0x15.
+    // Correction de l'audit (B11) : la valeur se lit en base 0 ('xo 0x15'
+    // reglait le trim a 0), et 'off' ou -1 rendent la main ("ne pas toucher").
+    for (size_t n = strlen(arg); n && arg[n - 1] == ' ';) arg[--n] = 0;
+    long v = -2;  // -2 = saisie invalide
+    if (!strcmp(arg, "off")) {
+      v = -1;
+    } else if (*arg) {
+      char *end = nullptr;
+      v = strtol(arg, &end, 0);
+      if (end == arg || *end || v < -1 || v > 31) v = -2;
+    }
     if (!halo.radio.present()) {
       Serial.println("BM5602 absent.");
+    } else if (*arg && v == -2) {
+      Serial.println("Usage : xo [0..31 | 0x00..0x1F | off]");
     } else {
       const uint8_t saved = halo.radio.bank();
       halo.radio.setBank(0);
       uint8_t xo = halo.radio.readRegister(bc5602::B0_XO1 | bc5602::CMD_READ_REGISTER);
       if (*arg) {
-        const long v = strtol(arg, nullptr, 10);
-        if (v >= 0 && v <= 31) {
-          // Memorise pour etre reapplique apres chaque reset logiciel.
-          halo.setXoTrim((int16_t)v);
-          halo.radio.setBank(0);
-          xo = halo.radio.readRegister(bc5602::B0_XO1 | bc5602::CMD_READ_REGISTER);
-        }
+        // Memorise pour etre reapplique apres chaque reset logiciel, y compris
+        // par le pilote Halo 1 ; -1 : plus reapplique.
+        halo.setXoTrim((int16_t)v);
+        halo.radio.setBank(0);
+        xo = halo.radio.readRegister(bc5602::B0_XO1 | bc5602::CMD_READ_REGISTER);
       }
       halo.radio.setBank(saved);
       Serial.printf("XO1 = 0x%02X, XO_TRIM = %u\n", xo, (unsigned)(xo & 0x1F));
+      if (v == -1) Serial.println("Trim libre : le prochain reset logiciel le ramene a 0x10.");
     }
   } else if (!strcmp(line, "benq")) {
     // benq [ms] [octets lus, 8 a 32]

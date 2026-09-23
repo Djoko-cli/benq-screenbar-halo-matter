@@ -3,13 +3,11 @@
 #include <string.h>
 
 #include "driver/spi_slave.h"
+#include "halo1_radio.h"  // configStdAutoAck, et la declaration d'applyXoTrim
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 
 using namespace bc5602;
-
-// Defini plus bas, pres de configForLoopback ; utilise des sharedRadioConfig.
-static void applyXoTrim(BC5602 &r);
 
 BenqHalo halo;
 
@@ -2444,7 +2442,8 @@ static bool gApplyHoltekTuning = true;
 // chose que ce qu'on croit regler. -1 = ne pas toucher.
 static int16_t gXoTrim = -1;
 
-static void applyXoTrim(BC5602 &r) {
+// Partage avec halo1_radio.cpp : le pilote applique le meme trim.
+void applyXoTrim(BC5602 &r) {
   if (gXoTrim < 0) return;
   const uint8_t saved = r.bank();
   r.setBank(0);
@@ -3774,44 +3773,9 @@ void BenqHalo::txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t cou
 //  MAX_RT = echec apres les retransmissions. C'est une preuve radio objective,
 //  independante du sens de la charge.
 //
-//  Toute la configuration est rejouee apres le reset logiciel, qui efface les
-//  reglages analogiques et CFG1 (dont l'AGC, indispensable pour recevoir
-//  l'accuse).
+//  La configuration elle-meme (configStdAutoAck) est dans halo1_radio.cpp :
+//  le pilote Halo 1 rejoue exactement la meme sequence.
 // ---------------------------------------------------------------------------
-static void configStdAutoAck(BC5602 &r, const uint8_t addrReg[4], uint8_t channel, uint8_t rate,
-                             bool receiver) {
-  r.softwareReset();
-  delay(20);
-  r.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
-  r.registerConfigure(nullptr);
-  applyXoTrim(r);
-  r.setBank(0);
-  r.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, CFG1_AGC_EN);
-  r.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel);
-  r.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | rate));
-  r.writeCommandData(CMD_WRITE_PTX_ADDRESS, addrReg, 4);
-  // Preambule d'un octet, comme la telecommande.
-  const uint8_t cfo1 = r.readRegister(B0_CFO1 | CMD_READ_REGISTER);
-  r.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER, (uint8_t)(cfo1 & (uint8_t)~0x40));
-  uint8_t mask = r.readRegister(REG_MASK | CMD_READ_REGISTER);
-  mask = receiver ? (uint8_t)(mask | MASK_PRM_RX) : (uint8_t)(mask & (uint8_t)~MASK_PRM_RX);
-  r.writeRegister(REG_MASK | CMD_WRITE_REGISTER, mask);
-  r.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, PKT1_CRC_ENABLE);  // CRC16 init FFFF
-  // Pas de blanchiment : le CRC des trames reelles se verifie sans.
-  r.writeRegister(REG_PKT2 | CMD_WRITE_REGISTER,
-                  (uint8_t)(r.readRegister(REG_PKT2 | CMD_READ_REGISTER) & 0x7F));
-  r.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x01);   // DPL_P0
-  r.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x04);   // EN_DPL seul (ds.txt:853-869)
-  r.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x01);   // accuse automatique, pipe 0
-  // ARD 2000 us, ARC 3 (ds.txt:667-683). La valeur de reset, 250 us, est plus
-  // courte que le silence mesure avant l'accuse de la lampe (~200 us) suivi de
-  // l'accuse lui-meme : elle donnerait de faux MAX_RT.
-  r.writeRegister(REG_RT1 | CMD_WRITE_REGISTER, 0x73);
-  r.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
-  r.command(CMD_FLUSH_TX_FIFO);
-  r.command(CMD_FLUSH_RX_FIFO);
-  r.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
-}
 
 void BenqHalo::txAck(Print &out, const uint8_t addrReg[4], uint8_t channel, const uint8_t *payload,
                      uint8_t len, uint8_t trials, uint16_t gapMs) {
@@ -3957,11 +3921,7 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
 
   auto armer = [&]() {
     configStdAutoAck(radio, addrReg, channel, dataRate_, true);
-    radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);   // jamais d'accuse de notre part
-    radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);   // charge fixe
-    radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-    radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC verifie en logiciel
-    radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 8);     // 64 bits apres l'adresse
+    halo1PassiveOverrides(radio);  // jamais d'accuse, 64 bits lus apres l'adresse
     radio.enterRxMode();
   };
   armer();
@@ -4030,7 +3990,8 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
       radio.enterRxMode(300);
       lastArm = millis();
     } else if ((uint32_t)(millis() - lastArm) > 100) {
-      // Rearmement de securite, meme si l'etat affiche est RX.
+      // Rearmement de securite, meme si l'etat affiche est RX. enterRxMode
+      // rendant alors la main tout de suite, il se reduit a CE=0 + MASK.
       radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
       radio.enterRxMode();
       lastArm = millis();
