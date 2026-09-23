@@ -1610,6 +1610,7 @@ static_assert(sizeof(MATTER_VENDOR_NAME) - 1 <= kIdMax, "MATTER_VENDOR_NAME : 32
 static_assert(sizeof(MATTER_PRODUCT_NAME) - 1 <= kIdMax, "MATTER_PRODUCT_NAME : 32 caracteres au plus");
 static_assert(sizeof(MATTER_NODE_LABEL) - 1 <= kIdMax, "MATTER_NODE_LABEL : 32 caracteres au plus");
 static_assert(sizeof(MATTER_HW_VERSION_STRING) - 1 <= kIdHwStringMax, "MATTER_HW_VERSION_STRING : 64 au plus");
+static_assert(MATTER_HW_VERSION >= 0 && MATTER_HW_VERSION <= 0xFFFF, "MATTER_HW_VERSION : entier de 16 bits");
 
 // Prefixe + adresse MAC d'usine (eFuse) en 12 chiffres hexa : unique par carte.
 static char sSerial[sizeof(MATTER_SERIAL_PREFIX) + 12] = {};
@@ -1624,7 +1625,7 @@ static void applyIdentity() {
   uint8_t mac[6] = {};
   const bool macOk = esp_efuse_mac_get_default(mac) == ESP_OK;
   if (macOk)
-    snprintf(sSerial, sizeof(sSerial), MATTER_SERIAL_PREFIX "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2],
+    snprintf(sSerial, sizeof(sSerial), "%s%02X%02X%02X%02X%02X%02X", MATTER_SERIAL_PREFIX, mac[0], mac[1], mac[2],
              mac[3], mac[4], mac[5]);
   // Evaluees dans l'ordre (liste d'initialisation), toutes meme apres un refus.
   const bool ok[kIdCount] = {

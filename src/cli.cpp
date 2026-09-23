@@ -316,9 +316,15 @@ static void cmdMatter(char *arg) {
     cmdMatterThread(arg, val);
     return;
   }
+#if HALO1_EXPOSE_AUTO
   static const char *const kUsage = "Usage : matter [impulsion [ms] | reprise [auto [0|1]] | med [0|1|2] | maxint [s]]";
 #else
+  static const char *const kUsage = "Usage : matter [reprise [auto [0|1]] | med [0|1|2] | maxint [s]]";
+#endif
+#elif HALO1_EXPOSE_AUTO
   static const char *const kUsage = "Usage : matter [impulsion [ms]]";
+#else
+  static const char *const kUsage = "Usage : matter";
 #endif
   if (strcmp(arg, "impulsion")) {
     Serial.println(kUsage);
