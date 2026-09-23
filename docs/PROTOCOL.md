@@ -36,7 +36,19 @@ preambule 01010101 | adresse 63 FD F0 4F | PCF 9 bits | charge | CRC-16
   Halo 2, on ne peut pas lire l'etat de la lampe en l'interrogeant.
 - Canal 5 (2405 MHz), 125 kbps.
 
-**Emission : rien n'a encore fonctionne, et on comprend pourquoi.** Les essais
+**23/09 : LA LAMPE OBEIT.** Emission au format standard (`txack`), charge
+dynamique, CRC materiel, accuse automatique, canal 5, telecommande SANS piles :
+
+| adresse | charge | accuses | effet sur la lampe |
+|---|---|---|---|
+| `3C C1 F7 8F` (ancienne, decalee) -- temoin | `C4 FE` | **0 / 10** | aucun |
+| `4F F0 FD 63` (vraie, sur l'air `63 FD F0 4F`) | `C4 FE` | **10 / 10**, 1,6 ms chacun | luminosite du minimum au quasi-maximum |
+
+Adresse, format, CRC et chaine d'emission sont valides de bout en bout sur la
+vraie lampe. Premiere hypothese sur la charge, a verifier : `C4` = reglage de
+luminosite, octet suivant = `1` + niveau sur 7 bits (`FE` -> 126 sur 127).
+
+**Emission, avant le 23/09 : rien n'avait fonctionne, et on comprend pourquoi.** Les essais
 `tx6` (un accuse mal forme) puis `txraw` (bonne trame bit pour bit, mais avec
 l'adresse decalee, donc le mauvais preambule, et 1800 copies de meme PID que
 la lampe ecarte comme doublons) ne pouvaient pas marcher. Prochain essai :
