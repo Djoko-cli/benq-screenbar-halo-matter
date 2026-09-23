@@ -273,20 +273,24 @@ LED simple (IO2) avec les memes motifs, sans la lueur ; sur les DevKit C3 et S3,
 voyant visible.
 
 **Relance automatique du module radio.** Le 24/09, une pointe de pied a
-coulisse metallique posee sur le quartz du BM5602 l'a bloque 70 min : tous les
-envois en delai, un deluge de trames au CRC faux en ecoute, alors que sa
+coulisse metallique posee sur le quartz du BM5602 l'a bloque ~70 min : tous
+les envois en delai (186 de suite a la fin), l'ecoute sourde (aucune trame a
+la fin, apres ~96 000 trames au CRC faux depuis le demarrage), alors que sa
 configuration se relisait juste ; seul `rfinit` l'a gueri. Le pilote relance
-donc seul le module (`halo.begin()`, ~300 ms) sur deux symptomes de puce :
-3 envois de suite sans TX_DS ni MAX_RT (delai de 30 ms), ou, en ecoute, au
-moins 100 trames en 10 s dont au moins 90 % au CRC faux (l'incident en donnait
-~230 a 99,8 % ; la molette de la telecommande, ~9 par seconde au CRC juste).
-Une lampe debranchee (MAX_RT, silence) ne fait jamais relancer. Une relance au
-plus par minute ; apres 3 relances de suite sans guerison (un accuse, ou une
-trame au CRC juste hors deluge), si le symptome revient, le module est
-**EN PANNE** : rouge fixe, un essai toutes les 10 min. Chaque relance ecrit une
-ligne `[lampe] BM5602 : ...` sur la console ; `lampe` montre l'etat,
-`lampe stats` les relances par cause et les dernieres, datees. Detail et
-seuils : [docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
+donc seul le module (`halo.begin()`, ~300 ms, jusqu'a ~0,5 s si le quartz ou
+la calibration ne repondent pas) sur deux symptomes de puce : 3 envois de
+suite sans TX_DS ni MAX_RT (delai de 30 ms), ou, en ecoute, au moins 100
+trames en 10 s dont au moins 90 % au CRC faux (la molette de la telecommande
+en donne ~9 par seconde, au CRC juste). Une puce sourde sans envoi n'est vue
+qu'a la commande suivante (~0,4 s). Une lampe debranchee (MAX_RT, silence) ne
+fait jamais relancer. Une relance au plus par minute ; apres 3 relances de
+suite sans guerison (un accuse, ou une fenetre d'ecoute surtout au CRC juste),
+si le symptome revient, le module est **EN PANNE** : rouge fixe, un essai
+toutes les 10 min. Chaque relance ecrit des lignes `[lampe] BM5602 : ...` sur
+la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`
+montre l'etat et la derniere relance, `lampe stats` les relances par cause et
+les dernieres, datees. Detail et seuils :
+[docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
 
 ### Certification : ce qui marche et ce qui demande une étape en plus
 

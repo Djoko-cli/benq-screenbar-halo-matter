@@ -20,7 +20,10 @@ class Halo1Lamp {
  public:
   using RestartFn = bool (*)();  // relance complete du module (halo.begin())
   void begin(BC5602 &chip, bool listen, RestartFn restart);  // NVS -> cru = consigne ; N'EMET RIEN
-  void tick();                    // <= ~35 ms au pire (un paquet, + 26 ms de garde Thread), typiquement < 1 ms
+  // <= ~35 ms au pire (un paquet, + 26 ms de garde Thread), typiquement < 1 ms ;
+  // hors relance L2 (halo.begin() : ~300 ms, jusqu'a ~0,5 s si le quartz ou la
+  // calibration ne repondent pas ; sur symptome, une par minute au plus).
+  void tick();
   // Apres un outil de banc (CLI) : reconfiguration complete au prochain usage,
   // et la surveillance repart sans preuve (l'outil a pu tout changer).
   void invalidateRadio() {
@@ -155,7 +158,9 @@ class Halo1Lamp {
   void traceRadio();
   // rien si !trace_ ; perdu (traceDropped) plutot que d'attendre le port serie
   void trace(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-  void notice(const char *msg);  // toujours affiche, mais jamais bloquant
+  // Affiche meme sans trace, mais jamais bloquant : perdu (traceDropped) si le
+  // tampon serie est plein. 'lampe' garde la derniere relance.
+  void notice(const char *msg);
 
   halo1::State target_, believed_;
   uint8_t dirty_ = 0, confirmed_ = 0, lastAuto_ = 0, rr_ = 0, failures_ = 0;

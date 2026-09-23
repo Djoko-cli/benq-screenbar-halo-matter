@@ -1260,12 +1260,13 @@ static void testChipWatch() {
     CHECK(feedRx(w, t, 18 * 600, 1000 / 18, 500) == R::None, "molette brouillee a 50 %% : rien");
   }
   {
-    // Incident du 24/09 : ~23 trames par seconde, 99,8 % de CRC faux.
+    // Deluge dense synthetique : ~23 trames par seconde, 99,8 % de CRC faux
+    // (le rythme reel des ~96 000 CRC faux de l'incident n'est pas connu).
     W w;
     uint32_t t = 123456, at = 0;
     const uint32_t t0 = t;
-    CHECK(feedRx(w, t, 23 * 60, 1000 / 23, 998, &at) == R::RxNoise, "incident : deluge");
-    CHECK(at - t0 <= 5000, "incident : deluge vu en %lu ms", (unsigned long)(at - t0));
+    CHECK(feedRx(w, t, 23 * 60, 1000 / 23, 998, &at) == R::RxNoise, "deluge dense : relance");
+    CHECK(at - t0 <= 5000, "deluge dense : vu en %lu ms", (unsigned long)(at - t0));
   }
   {
     // L'alerte tombe avec une fenetre calme, ou si plus rien n'arrive.
@@ -1354,6 +1355,39 @@ static void testChipWatch() {
     CHECK(w.count(R::RxNoise) == 3, "3 relances pour bruit");
   }
   {
+    // Fenetre sous le seuil du deluge mais surtout fausse (puce malade qui
+    // bruite moins de 10 trames par seconde) : une trame juste n'y guerit pas ;
+    // une fenetre majoritairement juste, si.
+    W w;
+    uint32_t t = 0;
+    for (unsigned i = 0; i < 3; i++) {
+      w.relaunched(R::TxTimeout, t);
+      t += W::kGapMs;
+    }
+    CHECK(feedRx(w, t, 60, 150, 1000) == R::None, "60 fausses : pas de deluge");
+    feedRx(w, t, 1, 150, 0);
+    t += 20000;
+    w.due(t);
+    CHECK(w.unrecovered() == 3 && !w.noisy(), "60 fausses + 1 juste : pas de guerison");
+    timeouts(w, 3);
+    CHECK(w.due(t) == R::None && w.failed(), "symptome : EN PANNE malgre la trame juste");
+    feedRx(w, t, 2, 150, 1000);
+    feedRx(w, t, 3, 150, 0);
+    t += 20000;
+    w.due(t);
+    CHECK(!w.failed() && w.unrecovered() == 0, "3 justes sur 5 : guerison");
+  }
+  {
+    // Moitie juste, moitie fausse : pas encore une guerison.
+    W w;
+    uint32_t t = 0;
+    w.relaunched(R::TxTimeout, t);
+    feedRx(w, t, 4, 100, 500);
+    t += 20000;
+    w.due(t);
+    CHECK(w.unrecovered() == 1, "2 justes sur 4 : pas de guerison");
+  }
+  {
     // Fenetre calme SANS trame juste : pas de guerison (le silence ne prouve rien).
     W w;
     uint32_t t = 0;
@@ -1378,6 +1412,31 @@ static void testChipWatch() {
     timeouts(w, 3);
     CHECK(w.due(t + 30000) == R::None && w.due(t + W::kGapMs) == R::TxTimeout, "apres une relance sur verif. : 60 s");
     CHECK(w.count(R::Verify) == 1 && w.unrecovered() == 1, "verif. comptee");
+  }
+
+  // Essai L3 (held) : l'attente d'une relance, sans compte ; apres 3
+  // relances sans guerison, celle de 10 min.
+  {
+    W w;
+    uint32_t t = 3000;
+    w.forget(t);
+    w.held(t);
+    timeouts(w, 3);
+    CHECK(w.due(t + 1000) == R::None && w.waitMs(t + 1000) == W::kGapMs - 1000, "essai L3 : attente de 60 s");
+    CHECK(w.total() == 0 && w.unrecovered() == 0 && !w.history(nullptr, 0), "essai L3 : ni compte ni historique");
+    CHECK(w.due(t + W::kGapMs) == R::TxTimeout, "60 s apres l'essai L3 : relance");
+  }
+  {
+    W w;
+    uint32_t t = 0;
+    for (unsigned i = 0; i < 3; i++) {
+      w.relaunched(R::TxTimeout, t);
+      t += W::kBackoffMs;
+    }
+    w.held(t);
+    timeouts(w, 3);
+    CHECK(w.due(t + W::kGapMs) == R::None && w.failed(), "essai L3 en panne : pas de relance a 60 s");
+    CHECK(w.due(t + W::kBackoffMs) == R::TxTimeout && w.unrecovered() == 3, "essai L3 en panne : 10 min");
   }
 
   // Outil de banc : preuves effacees, attente et compteurs gardes.

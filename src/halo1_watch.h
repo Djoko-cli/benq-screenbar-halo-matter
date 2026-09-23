@@ -5,37 +5,48 @@
 //  Surveillance du BM5602 : quand relancer le module sur symptome (niveau L2)
 //
 //  Incident du 24/09 (carte produit, Thread) : une pointe de pied a coulisse
-//  metallique a touche le quartz du BM5602. Pendant 70 min : 1566 paquets sur
-//  1812 en DELAI (ni TX_DS ni MAX_RT en 30 ms), ~96 000 trames brutes en
-//  ecoute (~23 par seconde) dont 99,8 % de CRC faux (d'ordinaire : quelques
-//  unes par heure), STA1, IRQ1 et STATUS lus a 00, mais RFCH, DM1 et RT1
-//  relus conformes : la verification ne voyait rien (2 echecs, 0 relance) et
-//  la reconfiguration L1 ne guerissait pas. 'rfinit' (halo.begin() : attente
-//  du quartz, calibration) a gueri tout de suite.
+//  metallique a touche le quartz du BM5602, bloque ~70 min. Compteurs depuis
+//  le demarrage (13 min au moins avant) : 1566 paquets sur 1812 en DELAI
+//  (ni TX_DS ni MAX_RT en 30 ms), 96 403 trames brutes en ecoute dont 99,8 %
+//  de CRC faux (d'ordinaire : quelques unes par heure), sans date : on ne
+//  sait pas a quel rythme elles sont venues. Phase finale observee (trace
+//  des 2 dernieres minutes) : 186 DELAI de suite, 0 MAX_RT ; en ecoute, AUCUNE
+//  trame (reconfiguration de silence toutes les ~540 ms, le plus vite
+//  possible), 350 a 450 rearmements par seconde, presque tous sur OMST != RX
+//  (les periodiques en font 10 au plus ; ~7 par seconde en tout d'ordinaire),
+//  STA1, IRQ1 et STATUS lus a 00 ; mais RFCH, DM1 et RT1 relus conformes : la
+//  verification ne voyait rien (2 echecs, 0 relance) et la reconfiguration L1
+//  ne guerissait pas. 'rfinit' (halo.begin() : attente du quartz,
+//  calibration) a gueri tout de suite.
 //
 //  Deux symptomes de PUCE, jamais d'environnement :
 //  - kTimeoutRun delais de suite. Un accuse ou un MAX_RT remet la serie a
 //    zero : MAX_RT dit que la puce emet et attend l'accuse sans le recevoir
 //    (lampe debranchee), il ne fait JAMAIS relancer. FIFO refusee : neutre.
-//    Incident : 86 % de delais, donc une serie de 3 des la premiere commande.
+//    Incident : la serie de 3 tombe des la premiere commande (~0,4 s).
 //  - deluge de bruit en ecoute : dans une fenetre de kNoiseWindowMs, au moins
 //    kNoiseMinFrames trames brutes, dont au moins kNoiseBadPct % de CRC faux.
-//    Incident : ~230 trames par fenetre (seuil atteint en ~4-5 s), 99,8 % de
-//    CRC faux. Usage normal : la molette de la telecommande donne ~9 trames
-//    par seconde (et autant d'accuses de la lampe au plus), au CRC juste ; le
-//    CRC faux se compte en unites par heure. Il faudrait 90 CRC faux en 10 s,
-//    et une proportion que l'on ne voit qu'avec une puce malade.
+//    Il couvre une phase ou la puce malade recoit du bruit (les ~96 000 CRC
+//    faux de l'incident), pas la phase sourde : celle-ci n'est vue qu'a la
+//    commande suivante, par les delais. Usage normal : la molette de la
+//    telecommande donne ~9 trames par seconde (et autant d'accuses de la
+//    lampe au plus), au CRC juste ; le CRC faux se compte en unites par
+//    heure. Il faudrait 90 CRC faux en 10 s, et une proportion que l'on ne
+//    voit qu'avec une puce malade.
 //  Rien sur une lampe muette : la debrancher ne doit pas relancer en boucle.
 //
 //  Limites : une relance sur symptome au plus kGapMs apres la precedente,
-//  quelle qu'en soit la cause. Celle des verifications ratees n'attend pas (la
-//  radio reste inerte sans elle, et L3 arrete deja sa boucle), mais elle compte
-//  ici comme les autres. Apres kFruitless relances de suite sans signe de
-//  guerison, si le symptome revient : module EN PANNE, un essai toutes les
-//  kBackoffMs. Signe de guerison : un accuse, ou une trame au CRC juste dans
-//  une fenetre qui n'est pas un deluge (0,2 % du bruit de l'incident passait
-//  le CRC : environ une trame toutes les 20 s, qui aurait sinon remis le
-//  compte a zero a chaque essai). L'etat EN PANNE dure jusqu'a ce signe.
+//  quelle qu'en soit la cause, essai L3 compris (held). Celle des
+//  verifications ratees n'attend pas (la radio reste inerte sans elle, et L3
+//  arrete deja sa boucle), mais elle compte ici comme les autres. Apres
+//  kFruitless relances de suite sans signe de guerison, si le symptome
+//  revient : module EN PANNE, un essai toutes les kBackoffMs. Signe de
+//  guerison : un accuse, ou une fenetre d'ecoute close sans deluge et
+//  majoritairement au CRC juste. Une trame juste isolee ne suffit pas : un
+//  CRC-16 laisse passer du bruit, et une puce malade peut rester sous le
+//  seuil du deluge (60 fausses et une juste ne guerissent pas), ce qui
+//  remettrait sinon le compte a zero a chaque essai. L'etat EN PANNE dure
+//  jusqu'a ce signe.
 //
 //  Chaque relance efface les preuves (serie, fenetre) : le symptome doit etre
 //  vu de nouveau apres elle. Un outil de banc (forget) les efface aussi : il a
@@ -83,6 +94,12 @@ class ChipWatch {
   void relaunched(Relaunch cause, uint32_t nowMs);
   // Outil de banc, nouvel essai L3 : preuves effacees, limites et compteurs gardes.
   void forget(uint32_t nowMs);
+  // Essai L3 (halo.begin() hors symptome) : attente de gapMs() comme apres une
+  // relance, sans compte ni historique.
+  void held(uint32_t nowMs) {
+    holding_ = true;
+    lastAt_ = nowMs;
+  }
   void clearCounts();  // 'lampe stats raz' : compteurs et historique seulement
 
   bool failed() const { return failed_; }  // module EN PANNE

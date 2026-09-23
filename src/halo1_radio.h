@@ -55,7 +55,9 @@ class Halo1Radio {
     bool airGuard = true;      // garde d'antenne, si le build en fournit une ('lampe garde')
   };
   struct Stats {
-    uint32_t fullConfigs, silenceReconf, txReconf, verifyFail, rearms, rxRaw, lightSwitches;
+    // rearmsOffRx : ceux des rearmements faits sur OMST != RX (les autres sont
+    // periodiques). Incident du 24/09, puce sourde : ~450 par seconde.
+    uint32_t fullConfigs, silenceReconf, txReconf, verifyFail, rearms, rearmsOffRx, rxRaw, lightSwitches;
     // Garde d'antenne : paquets gardes, gardes refusees, attentes d'une emission
     // en cours (dont plafonnees a HALO1_AIR_GUARD_WAIT_US), plus longue attente.
     uint32_t guarded, guardRefused, guardWaits, guardCapped, guardMaxUs;
@@ -72,6 +74,7 @@ class Halo1Radio {
   void setAddress(const uint8_t addrReg[4]);           // + invalidate()
   const uint8_t *air() const { return air_; }
   bool present() const { return chip_ && chip_->present(); }
+  const BC5602 *chip() const { return chip_; }  // quartz et calibration apres une relance
   void invalidate() { mode_ = Mode::Unknown; configured_ = false; }  // un outil CLI a touche la puce
   // Tx, Rx ou Sleep. Sleep : CE=0 et LIGHT_SLEEP, sans reset. Tx ou Rx depuis un
   // autre mode : reconfiguration complete (reset, puis configuration apres
