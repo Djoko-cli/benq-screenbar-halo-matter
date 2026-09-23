@@ -3950,22 +3950,27 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
   out.println(line);
   Serial.flush();
 
-  configStdAutoAck(radio, addrReg, channel, dataRate_, true);
-  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);   // jamais d'accuse de notre part
-  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);   // charge fixe
-  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC verifie en logiciel
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 8);     // 64 bits apres l'adresse
-  radio.enterRxMode();
+  auto armer = [&]() {
+    configStdAutoAck(radio, addrReg, channel, dataRate_, true);
+    radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);   // jamais d'accuse de notre part
+    radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);   // charge fixe
+    radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+    radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC verifie en logiciel
+    radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 8);     // 64 bits apres l'adresse
+    radio.enterRxMode();
+  };
+  armer();
 
   // Adresse sur l'air : ordre inverse de l'ecriture.
   const uint8_t air[4] = {addrReg[3], addrReg[2], addrReg[1], addrReg[0]};
   uint32_t cmds = 0, acks = 0, bad = 0, spin = 0;
-  uint32_t lastArm = millis();
+  uint32_t lastArm = millis(), lastFrame = millis(), lastBeat = millis(), lastFull = millis();
+  uint32_t rearms = 0;
   const uint32_t until = millis() + ms;
   while ((int32_t)(millis() - until) < 0) {
     const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     if (irq & IRQ_RX_DR) {
+      lastFrame = millis();
       uint8_t b[8];
       radio.readFifo(b, 8, false);
       radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
@@ -4021,6 +4026,23 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
       radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
       radio.enterRxMode();
       lastArm = millis();
+    }
+    // Reconfiguration complete apres 500 ms sans trame. Mesure a l'appui (23/09) :
+    // en conditions reelles, l'ecoute s'est tue apres 13 trames et n'a plus
+    // rien recu pendant pres de deux minutes, malgre le rearmement.
+    if ((uint32_t)(millis() - lastFrame) > 500 && (uint32_t)(millis() - lastFull) > 500) {
+      armer();
+      lastArm = lastFull = millis();
+      rearms++;
+    }
+    // Ligne de vie : distingue une boucle figee d'une radio sourde.
+    if ((uint32_t)(millis() - lastBeat) >= 5000) {
+      lastBeat = millis();
+      snprintf(line, sizeof(line), "  ... %lu s, %lu commande(s), %lu accuse(s), %lu rejet(s), %lu reconfiguration(s)",
+               (unsigned long)((ms - (until - millis())) / 1000), (unsigned long)cmds, (unsigned long)acks,
+               (unsigned long)bad, (unsigned long)rearms);
+      out.println(line);
+      Serial.flush();
     }
     if ((spin++ & 0x3FF) == 0) delay(1);
   }
