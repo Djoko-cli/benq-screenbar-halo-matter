@@ -1,11 +1,13 @@
 #pragma once
 #include <Arduino.h>
 
-// Crée les endpoints Matter puis démarre la pile. À appeler après halo.begin()
-// pour que l'état initial des endpoints reflète la vraie lampe.
+// Cree les endpoints Matter de la lampe Halo 1 puis demarre la pile. A appeler
+// depuis setup() (la tache loop), apres lamp.begin() : les endpoints partent de
+// la consigne du pilote.
 void matterBridgeBegin();
 
-// Reflète l'état de la lampe vers Matter. À appeler depuis loop().
+// Applique les ordres Matter regroupes, puis reflete la consigne du pilote vers
+// Matter. A appeler depuis loop().
 void matterBridgePoll();
 
 void matterPrintStatus(Print &out);

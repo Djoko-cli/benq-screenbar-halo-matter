@@ -11,11 +11,31 @@ Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
 
 | Endpoint | Type Matter | Réglages |
 |---|---|---|
-| Alimentation | On/Off Plug-in Unit | marche/arrêt général |
-| Lumière avant | Color Temperature Light | marche/arrêt, 1–100 %, 2700–6500 K |
-| Halo arrière | Dimmable Light | marche/arrêt, 1–100 % |
-| Capteur de présence | On/Off Plug-in Unit | activation du capteur |
-| Mode auto | On/Off Plug-in Unit | déclencheur, se réarme seul |
+| EP1 "Halo" | Color Temperature Light | marche/arret, luminosite, temperature 153-370 mireds |
+| EP2 "Halo avant" | On/Off Light | lampe avant allumee (marche ET lampe avant) |
+| EP3 "Halo arriere" | On/Off Light | lampe arriere allumee (marche ET lampe arriere) |
+| EP4 "Halo auto" | On/Off Plug-in Unit | appui sur le bouton A (mode auto), revient seul a off apres 1 s |
+
+- Une trame radio ne porte qu'une valeur : les deux lampes partagent la
+  luminosite et la temperature, d'ou un seul curseur de chaque sur EP1.
+- Allumer EP1 retrouve la derniere selection de lampes, comme le bouton marche
+  de la telecommande. Eteindre EP2 puis EP3 eteint la lampe.
+- EP4 est ignore quand la lampe est eteinte, et quand il arrive avec un ordre
+  marche ou lampe (commande de piece, tuile regroupee) : dans Apple Home,
+  afficher les accessoires en tuiles separees.
+- Les noms se donnent dans l'app. Les Kelvin (~6500 a ~2700 K) sont nominaux,
+  non mesures.
+- Dans `src/config.h` : `HALO1_SELECTORS_AS_LIGHTS 0` expose EP2 et EP3 en
+  prises (un "eteins les lumieres" de piece n'y touche plus),
+  `HALO1_EXPOSE_AUTO 0` retire EP4.
+- Rien n'est emis vers la lampe au demarrage : le noeud reprend l'etat sauve,
+  et seul un ordre (Matter ou `lampe ...`) fait emettre.
+
+> **Mise a jour depuis une version precedente** : la disposition des endpoints
+> a change (avant : alimentation, lumiere avant, halo arriere, capteur, mode
+> auto). Il faut remettre le noeud en service : retirer l'accessoire de chaque
+> app, lancer `decommission` (ou appui long sur BOOT), puis l'ajouter a nouveau
+> avec le code d'appairage (`matter`).
 
 ## Matériel
 
@@ -254,7 +274,7 @@ platformio.ini            4 cibles ESP32, plateforme pioarduino, partitions huge
 src/config.h              broches, minuteries, limites de la lampe
 src/bc5602.{h,cpp}        pilote bas niveau du transceiver
 src/halo.{h,cpp}          protocole BenQ + machine à états non bloquante
-src/matter_bridge.{h,cpp} endpoints Matter et conversions d'unités
+src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
 src/main.cpp              assemblage, LED d'état, bouton de decommissioning
