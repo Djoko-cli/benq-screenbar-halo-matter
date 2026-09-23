@@ -8,7 +8,7 @@
 //
 //  Premier demarrage :
 //    1. moniteur serie a 115200 bauds
-//    2. 'find' pour trouver l'adresse de communication de la lampe
+//    2. 'ecoute 4FF0FD63 5' verifie le lien de la lampe (sur l'air 63 FD F0 4F)
 //    3. appairage Matter avec le code affiche au demarrage ('matter' le rappelle)
 //    4. 'help' pour la liste des commandes
 // ===========================================================================
@@ -141,8 +141,9 @@ void setup() {
   // L'USB Serial/JTAG jette les octets des que son tampon d'emission sature
   // (tx_timeout_ms = 100 par defaut dans le core) : le banner de demarrage
   // arrivait deja tronque. On agrandit le tampon et on demande a write()
-  // d'attendre plutot que de perdre des donnees -- le resume de 'find' est une
-  // rafale, et c'est la sortie qu'on peut le moins se permettre de perdre.
+  // d'attendre plutot que de perdre des donnees -- les bilans des outils de
+  // banc sont des rafales, et c'est la sortie qu'on peut le moins se permettre
+  // de perdre.
 #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT && defined(ARDUINO_USB_MODE) && \
     ARDUINO_USB_MODE == 1
   Serial.setTxBufferSize(4096);

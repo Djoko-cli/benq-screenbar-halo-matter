@@ -61,6 +61,18 @@ static char *splitWord(char *s) {
   return sp;
 }
 
+// Adresses d'appairage, Halo 2 (E2 08 00 B0) et Halo 1 (59 01 00 B0, balise
+// capturee le 23/09), dans les deux ordres. Refusees partout ou l'on pourrait
+// emettre ou accuser : un accuse sur la balise suffit a clore l'appairage de
+// la telecommande alors que la lampe n'a rien appris (PROTOCOL.md, pair-4).
+static bool isPairingAddr(const uint8_t a[4]) {
+  static const uint8_t kPairing[4][4] = {{0xE2, 0x08, 0x00, 0xB0}, {0xB0, 0x00, 0x08, 0xE2},
+                                         {0x59, 0x01, 0x00, 0xB0}, {0xB0, 0x00, 0x01, 0x59}};
+  for (const auto &p : kPairing)
+    if (!memcmp(a, p, 4)) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 //  Commandes
 // ---------------------------------------------------------------------------
@@ -71,7 +83,6 @@ static void cmdHelp() {
   Serial.println("  help                  cette aide");
   Serial.println("  info                  materiel, configuration et etat de la lampe");
   Serial.println("  matter                etat Matter, code d'appairage");
-  Serial.println("  poll                  interroge la lampe maintenant");
   Serial.println("  debug                 bascule les traces RF");
   Serial.println("  regs                  dump des registres du BC5602");
   Serial.println("  rfinit                re-teste le module apres correction du cablage");
@@ -149,21 +160,12 @@ static void cmdHelp() {
   Serial.println("  chiplog               bascule les logs de la pile Matter");
   Serial.println();
   Serial.println("  addr                  affiche l'adresse de communication");
-  Serial.println("  addr 11223344         definit l'adresse (ordre d'ecriture, cf. find)");
-  Serial.println("  tail 0102             octets de queue du payload");
-  Serial.println("  tail ffff             desactive le controle des octets de queue");
+  Serial.println("  addr 4FF0FD63         definit l'adresse, ordre d'ecriture (sur l'air 63 FD F0 4F)");
   Serial.println("  chan 5                canal radio : 5=2405 MHz, 46=2446, 75=2475");
   Serial.println("  erase                 efface la configuration radio");
-  Serial.println();
-  Serial.println("  find                  cherche l'adresse (regle la telecommande sur");
-  Serial.println("                        10 % lampe arriere + 3925 K, puis bouge un reglage)");
-  Serial.println("  find 25 4000          idem avec d'autres valeurs (luminosite %, Kelvin)");
-  Serial.println("  find x550f0a          idem avec un mot de synchro brut de 3 octets");
-  Serial.println("  find 100 2700 sweep   idem en balayant 3 debits x 3 canaux (135 s)");
-  Serial.println("  pair                  ecoute sur l'adresse d'appairage E2 08 00 B0");
-  Serial.println("  sniff                 mode sniffer sur l'adresse configuree");
   Serial.println("  normal                retour au mode normal");
-  Serial.println("  send 0300320FA0...    envoie un payload brut de 10 octets (20 hexa)");
+  Serial.println("  ecoute B0000159 5     appairage Halo 1 (59 01 00 B0) : ecouter, jamais emettre");
+  Serial.println("  (poll, send, find, pair, sniff, tail : commandes Halo 2 retirees)");
   Serial.println();
   Serial.println("  wifi <ssid> <mdp>     identifiants Wi-Fi (cibles sans commissioning BLE)");
   Serial.println("  decommission          retire toutes les fabriques Matter");
@@ -180,6 +182,11 @@ static void cmdAddress(char *arg) {
   uint8_t v[4];
   if (parseHexBytes(arg, v, 4) != 4) {
     Serial.println("Format attendu : addr 11223344 (8 caracteres hexa)");
+    return;
+  }
+  // tx6 et txraw emettent sur cette adresse.
+  if (isPairingAddr(v)) {
+    Serial.println("Refuse : adresse d'appairage.");
     return;
   }
   halo.setAddress(v);
@@ -569,14 +576,9 @@ static void handleLine(char *line) {
     if (na != 4 || np < 1 || ch < 0 || ch > 83) {
       Serial.println("Usage : txack <adresse 8 hex> <canal> <charge hex> [essais] [intervalle ms]");
     } else {
-      // Garde-fous. Jamais une adresse d'appairage, Halo 2 (E2 08 00 B0) ou
-      // Halo 1 (59 01 00 B0, balise capturee le 23/09), dans les deux ordres ;
-      // jamais un octet de tete 0x0A (commande d'appairage du Halo 2).
-      static const uint8_t kPairing[4][4] = {{0xE2, 0x08, 0x00, 0xB0}, {0xB0, 0x00, 0x08, 0xE2},
-                                             {0x59, 0x01, 0x00, 0xB0}, {0xB0, 0x00, 0x01, 0x59}};
-      bool pairing = false;
-      for (const auto &p : kPairing) pairing = pairing || !memcmp(addrReg, p, 4);
-      if (pairing || pay[0] == 0x0A) {
+      // Garde-fous. Jamais une adresse d'appairage (isPairingAddr) ; jamais un
+      // octet de tete 0x0A (commande d'appairage du Halo 2).
+      if (isPairingAddr(addrReg) || pay[0] == 0x0A) {
         Serial.println("Refuse : adresse ou commande d'appairage.");
       } else {
         // Sur le canal de la lampe, pas de rafale : 10 essais au plus, espaces
@@ -621,6 +623,9 @@ static void handleLine(char *line) {
     if (*rest) ms = strtol(rest, nullptr, 10);
     if (na != 4 || ch < 0 || ch > 83 || ms < 500 || ms > 600000) {
       Serial.println("Usage : prxack <adresse 8 hex> <canal> [ms]");
+    } else if (isPairingAddr(addrReg)) {
+      // Ce recepteur accuse tout : sur la balise, il clorait l'appairage.
+      Serial.println("Refuse : adresse d'appairage.");
     } else {
       halo.setMode(HaloMode::Normal);
       halo.prxAck(Serial, addrReg, (uint8_t)ch, (uint32_t)ms);
