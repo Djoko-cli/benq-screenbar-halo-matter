@@ -16,17 +16,12 @@
 // Prendre le verrou OpenThread avant l'init de la pile planterait.
 static bool sMatterStarted = false;
 
-// esp_openthread_lock_acquire prend deux mutex recursifs a la suite et, si le
-// second expire, rend false SANS lacher le premier (IDF 5.5.5, desassemble) :
-// la tache OpenThread resterait bloquee pour toujours. Le second est pris seul,
-// et brievement, par la tache lwIP a chaque paquet IPv6 sortant. On rend donc
-// apres un echec : FreeRTOS refuse sans effet de rendre un mutex qu'on ne tient
-// pas (xQueueGiveMutexRecursive), et lache celui qu'on tient.
-static bool otLockTry(TickType_t ticks) {
-  if (esp_openthread_lock_acquire(ticks)) return true;
-  esp_openthread_lock_release();
-  return false;
-}
+// esp_openthread_lock_acquire(ticks) prend deux mutex recursifs a la suite,
+// chacun avec le meme delai : 2 x ticks au pire. Le second est pris seul, et
+// brievement, par la tache lwIP a chaque paquet IPv6 sortant. Si le second
+// expire, IDF 5.5.5 rend lui-meme le premier (firmware.elf desassemble) : un
+// refus ne laisse rien a rendre. Ici, totalMs est le delai total.
+static bool otLockTry(uint32_t totalMs) { return esp_openthread_lock_acquire(pdMS_TO_TICKS(totalMs / 2)); }
 
 // ===========================================================================
 //  Garde d'antenne Thread autour de chaque paquet lampe
@@ -58,16 +53,20 @@ static bool sGuardHeld = false;
 
 static bool airGuardEnter(uint32_t maxWaitUs, uint32_t *waitedUs) {
   *waitedUs = 0;
-  if (!sMatterStarted || !otLockTry(pdMS_TO_TICKS(kGuardLockMs))) return false;
+  if (!sMatterStarted || !otLockTry(kGuardLockMs)) return false;
   sGuardHeld = true;
   if (esp_ieee802154_get_state() == ESP_IEEE802154_RADIO_TRANSMIT) {
     const uint32_t t0 = micros();
     uint32_t w;
+    bool busy;
     do {
       delayMicroseconds(50);
       w = micros() - t0;
-    } while (w < maxWaitUs && esp_ieee802154_get_state() == ESP_IEEE802154_RADIO_TRANSMIT);
-    *waitedUs = w ? w : 1;
+      busy = esp_ieee802154_get_state() == ESP_IEEE802154_RADIO_TRANSMIT;
+    } while (busy && w < maxWaitUs);
+    // maxWaitUs exactement : trame encore en l'air au plafond. Finie pendant
+    // le dernier pas, elle ne compte pas comme plafonnee.
+    *waitedUs = busy ? maxWaitUs : (w >= maxWaitUs ? maxWaitUs - 1 : (w ? w : 1));
   }
   return true;
 }
@@ -391,16 +390,23 @@ void matterBridgeBegin() {
 
   Matter.begin();
 #if MATTER_NET_THREAD
-  sMatterStarted = true;
+  // Matter.begin() ne rend rien : un echec d'esp_matter::start ne fait qu'un
+  // log. L'instance OpenThread n'existe qu'apres esp_openthread_init, qui cree
+  // le verrou (esp_matter::start l'initialise avant de rendre la main).
+  sMatterStarted = chip::DeviceLayer::ThreadStackMgrImpl().OTInstance() != nullptr;
+  if (!sMatterStarted) {
+    Serial.println("!! pile Thread absente : ni garde d'antenne, ni etat Thread");
+  } else {
 #if MATTER_THREAD_MED
-  // esp_matter met Thread en routeur a chaque demarrage : on l'ecrase.
-  chip::DeviceLayer::PlatformMgr().LockChipStack();
-  chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
-      chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
-  chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    // esp_matter met Thread en routeur a chaque demarrage : on l'ecrase.
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
+    chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
+        chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 #endif
-  // Pile OpenThread demarree : son verrou existe. Active par defaut ('lampe garde').
-  lamp.radio.setAirGuard(&kAirGuard);
+    // Pile OpenThread demarree : son verrou existe. Active par defaut ('lampe garde').
+    lamp.radio.setAirGuard(&kAirGuard);
+  }
 #endif
   // Matter.begin() attend la fin de l'init de la pile, dont les ecritures de
   // demarrage passent par les callbacks : le delai du garde-fou part d'ici.
@@ -445,32 +451,57 @@ void matterBridgePoll() {
 }
 
 bool matterIsCommissioned() { return Matter.isDeviceCommissioned(); }
+#if MATTER_NET_THREAD
+// Matter.isDeviceConnected() passe par _IsThreadAttached, qui prend le verrou
+// OpenThread SANS limite de temps (esp_openthread_lock_acquire(portMAX_DELAY),
+// firmware.elf) : appele par la LED a chaque passage de loop(), il pouvait
+// bloquer tick() hors de tout budget (C.9). Ici, un essai sans attente par
+// seconde ; verrou occupe : dernier etat connu, nouvel essai au passage suivant.
+bool matterIsConnected() {
+  static constexpr uint32_t kPollMs = 1000;
+  static uint32_t at = 0;
+  static bool known = false, attached = false;
+  const uint32_t now = millis();
+  if (sMatterStarted && (!known || (uint32_t)(now - at) >= kPollMs) && otLockTry(0)) {
+    const otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());
+    esp_openthread_lock_release();
+    attached = role != OT_DEVICE_ROLE_DISABLED && role != OT_DEVICE_ROLE_DETACHED;
+    known = true;
+    at = now;
+  }
+  return attached;
+}
+#else
 bool matterIsConnected() { return Matter.isDeviceConnected(); }
+#endif
 void matterDecommissionNow() { Matter.decommission(); }
 
 void matterPrintStatus(Print &out) {
   out.println();
   out.println("=== Matter ===");
   out.printf("  mise en service : %s\n", Matter.isDeviceCommissioned() ? "faite" : "EN ATTENTE");
-  out.printf("  reseau          : %s\n", Matter.isDeviceConnected() ? "connecte" : "non connecte");
+  out.printf("  reseau          : %s\n", matterIsConnected() ? "connecte" : "non connecte");
 #if MATTER_NET_THREAD
   out.printf("  reseau Matter   : %s, mise en service Thread sur EP%u, Wi-Fi %s\n",
              Matter.getSelectedNetwork() == MATTER_NETWORK_THREAD ? "THREAD" : "PAS THREAD",
              Matter.getNetworkEndPointId(MATTER_NETWORK_THREAD),
              Matter.isWiFiConnected() ? "CONNECTE (anormal)" : "coupe");
   otInstance *ot = sMatterStarted ? esp_openthread_get_instance() : nullptr;
-  if (ot && otLockTry(pdMS_TO_TICKS(50))) {
+  if (ot && otLockTry(50)) {
+    // Lu sous le verrou, affiche apres : Serial peut attendre 1 s par ecriture
+    // (setTxTimeoutMs), et tout Thread attendrait avec lui.
     const uint8_t ch = otLinkGetChannel(ot);
+    const otDeviceRole role = otThreadGetDeviceRole(ot);
+    const uint16_t pan = otLinkGetPanId(ot);
     int8_t rssi = 0, pw = 0;
     const bool parent = otThreadGetParentAverageRssi(ot, &rssi) == OT_ERROR_NONE;
     otPlatRadioGetTransmitPower(ot, &pw);
+    esp_openthread_lock_release();
     // Canal 11 = 2405 MHz, la frequence de la lampe : a eviter.
     out.printf("  Thread          : role %s, canal %u (%u MHz), PAN 0x%04X, puissance %d dBm",
-               otThreadDeviceRoleToString(otThreadGetDeviceRole(ot)), ch, 2405u + 5u * (ch - 11u),
-               otLinkGetPanId(ot), pw);
+               otThreadDeviceRoleToString(role), ch, 2405u + 5u * (ch - 11u), pan, pw);
     if (parent) out.printf(", parent %d dBm", rssi);
     out.println();
-    esp_openthread_lock_release();
   }
 #elif CONFIG_ENABLE_CHIPOBLE
   out.println("  commissioning   : BLE (le Wi-Fi est fourni par le controleur)");

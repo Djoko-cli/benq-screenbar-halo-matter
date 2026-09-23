@@ -596,7 +596,7 @@ Les valeurs « mesure » viennent des logs tx-sem et ecoute-banc ; les autres so
   - `sendOne` MAX_RT : 11,5 ms ;
   - delai maximal d'attente : 30 ms ;
   - `enterRxMode` : 4,5 ms ;
-  - garde Thread avant chaque paquet (build Thread) : verrou OpenThread <= 20 ms, puis fin d'une trame 802.15.4 deja partie <= 6 ms ;
+  - garde Thread avant chaque paquet (build Thread) : verrou OpenThread <= 20 ms (deux mutex, 10 ms chacun), puis fin d'une trame 802.15.4 deja partie <= 6 ms ; verrou rendu au plus 13 ms apres CE=1 (MAX_RT : 11,5 ms), donc tenu <= ~19 ms ;
   - ecriture NVS : quelques dizaines de ms ;
   - L2 : ~300 ms, rare.
 - Aucun masquage d'interruption, aucun `Serial.flush()` dans le pilote.

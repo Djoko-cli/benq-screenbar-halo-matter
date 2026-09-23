@@ -27,8 +27,9 @@ void applyXoTrim(BC5602 &r);  // defini dans halo.cpp : trim du quartz memorise 
 struct Halo1AirGuard {
   // Juste avant le paquet. true : garde tenue, leave() suivra le verdict.
   // false : garde refusee (verrou pas obtenu a temps), paquet emis sans elle.
-  // *waitedUs : attente active de la fin d'une emission deja partie, bornee
-  // par maxWaitUs ; 0 si l'autre radio n'emettait pas.
+  // *waitedUs : attente active de la fin d'une emission deja partie, 0 si
+  // l'autre radio n'emettait pas ; maxWaitUs exactement si elle emettait
+  // encore au plafond, moins sinon.
   bool (*enter)(uint32_t maxWaitUs, uint32_t *waitedUs);
   void (*leave)();
 };
@@ -92,8 +93,8 @@ class Halo1Radio {
   bool configured() const { return configured_; }
   // Exige ready(Tx), sinon FifoRefused sans toucher a la puce. Bloquant : <= 30 ms
   // d'attente active (1,6-1,7 ms mesures), plus l'entree de la garde d'antenne
-  // (build Thread : <= 26 ms). Apres tout verdict autre que Ack/AckForeign :
-  // lance une reconfiguration vers Tx.
+  // (build Thread : <= 26 ms), rendue au plus 13 ms apres CE=1. Apres tout
+  // verdict autre que Ack/AckForeign : lance une reconfiguration vers Tx.
   TxReport sendOne(const uint8_t *pay, uint8_t len, uint32_t nowMs);
   // Garde tenue autour de chaque paquet de sendOne, jamais entre deux paquets.
   // nullptr la retire. Sans garde, 'lampe garde' ne regle rien.
