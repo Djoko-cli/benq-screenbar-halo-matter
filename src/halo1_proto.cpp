@@ -177,11 +177,23 @@ uint8_t coveredBy(Payload sent, const State &target) {
   if (k != Kind::Temp && k != Kind::Bright) return 0;  // A et le reste : aucun champ
   uint8_t f = 0;
   const bool on = (sent.flags & F_POWER) != 0;
-  if (on == target.power && (sent.flags & F_LAMPS) == target.lamps) f |= FLD_FLAGS;
+  // Comparaison avec la consigne bornee comme par les constructeurs : sinon une
+  // consigne hors invariants (lampes 0, luminosite < 4C...) ne serait jamais
+  // couverte par la trame que plan() en tire, et partirait sans fin.
+  if (on == target.power && (sent.flags & F_LAMPS) == lampBits(target.lamps)) f |= FLD_FLAGS;
   // Une trame d'extinction ne livre que FLAGS : la valeur differee reste due.
-  if (on && k == Kind::Bright && clampBright(sent.value) == target.bright) f |= FLD_BRIGHT;
-  if (on && k == Kind::Temp && clampTemp(sent.value) == target.temp) f |= FLD_TEMP;
+  if (on && k == Kind::Bright && clampBright(sent.value) == clampBright(target.bright)) f |= FLD_BRIGHT;
+  if (on && k == Kind::Temp && clampTemp(sent.value) == clampTemp(target.temp)) f |= FLD_TEMP;
   return f;
+}
+
+uint8_t dueFields(const State &target, uint8_t fields) {
+  // Decision A4 (a) : allumee, FLAGS rend aussi due la luminosite affichee. Sans
+  // cela, une trame de temperature livree avant elle couvrirait FLAGS et la
+  // luminosite ne partirait plus : la lampe s'allumerait a sa propre luminosite.
+  // Repli A4 (b) : renvoyer fields tel quel.
+  if ((fields & FLD_FLAGS) && target.power) fields |= FLD_BRIGHT;
+  return (uint8_t)(fields & FLD_ALL);
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +212,8 @@ Plan plan(const State &target, const State &believed, uint8_t dirty) {
     return p;
   }
   // Decision A4 (a) : allumage et changement de lampes portes par la trame de
-  // luminosite affichee. Repli A4 (b) : FLAGS seul -> makeTemp(true, lamps, believed.temp).
+  // luminosite affichee. Repli A4 (b) : FLAGS seul -> makeTemp(true, lamps, believed.temp),
+  // et dueFields n'ajoute plus BRIGHT.
   if (dirty & (FLD_BRIGHT | FLD_FLAGS)) {
     p.bright = true;
     p.pb = makeBright(true, target.lamps, target.bright);
@@ -225,8 +238,8 @@ uint8_t crc8(const uint8_t *p, size_t n) {
 
 // ---------------------------------------------------------------------------
 //  Auto-test embarque ('lampe autotest') : un sous-ensemble des tests hote
-//  (tools/host_tests/test_halo1.cpp). Aucune radio, aucun etat global modifie :
-//  la table gamma en place est seulement relue.
+//  (tools/host_tests/test_halo1.cpp). Aucune radio. La table gamma en place est
+//  seulement relue (construite a gamma 2,0 si mapInit n'a pas encore ete appele).
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -387,6 +400,13 @@ int selfTest(char *msg, size_t n) {
     t.bright = 0xA5;
     c.expect(coveredBy({0xC5, 0xA5}, t) == (FLD_FLAGS | FLD_BRIGHT), "coveredBy C5 A5");
     c.expect(coveredBy({0xE1, 0x01}, t) == 0, "coveredBy trame A");
+    // Consigne hors invariants : les trames que plan() en tire la couvrent quand meme.
+    const State odd{true, 0, 0x20, 0xC8};
+    const Plan q = plan(odd, odd, FLD_ALL);
+    c.expect((FLD_ALL & ~(coveredBy(q.pb, odd) | coveredBy(q.pt, odd))) == 0, "coveredBy consigne hors bornes");
+    // A4 (a) : allumee, FLAGS rend la luminosite due ; eteinte, non.
+    c.expect(dueFields(t, FLD_FLAGS | FLD_TEMP) == FLD_ALL && dueFields(State(), FLD_FLAGS) == FLD_FLAGS,
+             "dueFields");
   }
   c.expect(nextAuto(0) == 1 && nextAuto(255) == 1 && nextAuto(1) == 2 && nextAuto(254) == 255, "nextAuto");
   static const uint8_t kCheck[9] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};

@@ -5,6 +5,7 @@
 // docs/PROTOCOL.md. Adresse sur l'air 63 FD F0 4F.
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "halo1_map.h"
@@ -276,6 +277,10 @@ static void testCoveredBy() {
             coveredBy({0xFF, 0x00}, onBoth) == 0,
         "A, favori, service : rien");
   CHECK(coveredBy({0xC5, 0x20}, mk(true, F_LAMPS, 0x4C, 0x35)) == (FLD_FLAGS | FLD_BRIGHT), "C5 20 = 4C");
+  // Consigne hors invariants : bornee comme par les constructeurs.
+  CHECK(coveredBy({0xC4, 0x4C}, mk(true, 0, 0x20, 0x35)) == (FLD_FLAGS | FLD_BRIGHT), "lampes 0, lum 20");
+  CHECK(coveredBy({0xC3, 0x64}, mk(true, 0xC3, 0xA5, 0xC8)) == (FLD_FLAGS | FLD_TEMP), "bits parasites, temp C8");
+  CHECK(coveredBy({0x44, 0x60}, mk(false, 0, 0x60, 0x35)) == FLD_FLAGS, "extinction, lampes 0");
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +356,78 @@ static void testPlan() {
   // Resynchronisation (FLD_ALL) allumee : luminosite et temperature.
   checkPlan("sync", plan(mk(true, F_BACK, 0x60, 0x64), mk(true, F_BACK, 0x60, 0x64), FLD_ALL), true,
             {0x85, 0x60}, true, {0x83, 0x64});
+}
+
+// ---------------------------------------------------------------------------
+//  Livraison : plan() et coveredBy() jusqu'a epuisement
+// ---------------------------------------------------------------------------
+
+// Livre les trames de plan() une a une, comme les tranches de C4 (complete :
+// etat cru mis a jour, champs couverts effaces, puis replan). tempFirst : la
+// tranche de temperature finit la premiere (celle de luminosite a perdu un
+// paquet). Renvoie le nombre de trames, ou -1 si plan() en redemande apres 'max'.
+static int deliver(const State &t, State &b, uint8_t &dirty, bool tempFirst, Payload *out, int max) {
+  for (int n = 0;; n++) {
+    const Plan p = plan(t, b, dirty);
+    if (!p.bright && !p.temp) return n;
+    if (n == max) return -1;
+    const Payload sent = (p.temp && (tempFirst || !p.bright)) ? p.pt : p.pb;
+    if (out) out[n] = sent;
+    applyState(b, sent);
+    dirty &= (uint8_t)~coveredBy(sent, t);
+  }
+}
+
+static void testDelivery() {
+  // Toute consigne s'epuise, meme hors invariants (lampes 0 ou bits parasites,
+  // luminosite < 4C, temperature > 64) et quel que soit l'ordre de fin des
+  // tranches : sinon C4 rearmerait la meme tranche apres chaque rafale, sans fin.
+  for (unsigned on = 0; on < 2; on++)
+    for (unsigned lamps = 0; lamps < 256; lamps++)
+      for (unsigned v = 0; v < 256; v++)
+        for (unsigned fields = 1; fields <= FLD_ALL; fields++)
+          for (unsigned tf = 0; tf < 2; tf++) {
+            const State t = mk(on, (uint8_t)lamps, (uint8_t)v, (uint8_t)(255 - v));
+            State b = mk(!on, F_LAMPS, 0xA5, 0x35);
+            const uint8_t due = dueFields(t, (uint8_t)fields);
+            uint8_t dirty = due;
+            const int n = deliver(t, b, dirty, tf, nullptr, 4);
+            const uint8_t wantLamps = (lamps & F_LAMPS) ? (lamps & F_LAMPS) : F_FRONT;
+            // Allumee : tout est livre, en 2 trames au plus. Eteinte : une trame
+            // au plus, et seules la luminosite et la temperature restent dues.
+            bool ok = on ? (n >= 0 && n <= 2 && dirty == 0)
+                         : (n >= 0 && n <= 1 && dirty == (due & (FLD_BRIGHT | FLD_TEMP)));
+            if (fields & FLD_FLAGS) ok = ok && b.power == !!on && b.lamps == wantLamps;
+            // A4 (a) : un allumage ou un changement de lampes part avec la luminosite affichee.
+            if (on && (fields & (FLD_FLAGS | FLD_BRIGHT))) ok = ok && b.bright == clampBright((uint8_t)v);
+            if (on && (fields & FLD_TEMP)) ok = ok && b.temp == clampTemp((uint8_t)(255 - v));
+            CHECK(ok, "livraison %s lampes %02X lum %02X champs %u %s : %d trame(s), reste %u", on ? "on" : "off",
+                  lamps, v, fields, tf ? "temp d'abord" : "lum d'abord", n, dirty);
+          }
+
+  // EP1 on + 370 mireds dans une fenetre, lampe eteinte : FLAGS | TEMP. La
+  // tranche de temperature finit la premiere : C5 60 part quand meme.
+  {
+    const State off = mk(false, F_LAMPS, 0x60, 0x35);
+    MatterIntents in;
+    in.has = IN_POWER | IN_MIREDS;
+    in.power = true;
+    in.mireds = 370;
+    const Resolution r = resolveMatter(off, in, F_LAMPS);
+    CHECK(r.fields == (FLD_FLAGS | FLD_TEMP) && dueFields(r.target, r.fields) == FLD_ALL, "EP1 on + mireds : champs");
+    State b = off;
+    uint8_t dirty = dueFields(r.target, r.fields);
+    const Plan p = plan(r.target, b, dirty);
+    CHECK(p.pb == P(0xC5, 0x60) && p.pt == P(0xC3, 0x64), "EP1 on + mireds : trames");
+    applyState(b, p.pt);
+    dirty &= (uint8_t)~coveredBy(p.pt, r.target);
+    CHECK(plan(r.target, b, dirty).bright && plan(r.target, b, dirty).pb == P(0xC5, 0x60),
+          "C3 64 livree d'abord : C5 60 toujours due (reste %u)", dirty);
+  }
+  // Eteinte : FLAGS ne rend pas la luminosite due ; bits hors FLD_ALL ignores.
+  CHECK(dueFields(mk(false, F_LAMPS, 0x60, 0x35), FLD_FLAGS) == FLD_FLAGS, "dueFields eteinte");
+  CHECK(dueFields(mk(true, F_LAMPS, 0x60, 0x35), FLD_TEMP) == FLD_TEMP, "dueFields sans FLAGS");
+  CHECK(dueFields(mk(true, F_LAMPS, 0x60, 0x35), 0xF8) == 0, "dueFields bits parasites");
 }
 
 // ---------------------------------------------------------------------------
@@ -666,6 +743,91 @@ static void testSelectionMemory() {
 }
 
 // ---------------------------------------------------------------------------
+//  Rejeu des essais de banc T1 et T2 (I.2) sur les fonctions pures
+// ---------------------------------------------------------------------------
+
+// Pilote simule (C4) : consigne, etat cru, champs a livrer, memoire de
+// selection. Une trame dure ~343 ms (reset de 43 ms, 3 paquets a 100 ms), et
+// serial_run.py envoie la commande suivante des le retour de l'invite.
+struct Pilot {
+  State t, b;  // 'lampe oublie' puis reboot : eteinte, deux, A5, 35
+  uint8_t dirty = 0;
+  SelectionMemory mem;
+  uint32_t now = 0;
+  char sent[32] = "";  // trames de la derniere commande, "85 60 83 64"
+  Pilot() { mem.reset(t.lamps); }
+  void wait(uint32_t ms) {  // tick() toutes les 10 ms
+    for (uint32_t i = 0; i < ms; i += 10) mem.update(t, now += 10, 2000);
+  }
+  void request(const State &nt, uint8_t fields) {
+    t = nt;
+    dirty |= dueFields(t, fields);
+    Payload out[4];
+    const int n = deliver(t, b, dirty, false, out, 4);
+    for (int i = 0; i < n; i++)
+      snprintf(sent + strlen(sent), sizeof(sent) - strlen(sent), "%s%02X %02X", i ? " " : "", out[i].flags,
+               out[i].value);
+    wait(50 + 343u * (n > 0 ? n : 0));
+  }
+  void matter(const char *seq) {
+    const Resolution r = resolveMatter(t, intents(seq), mem.memory(t));
+    request(r.target, r.fields);
+  }
+  void cmd(const char *c) {  // commandes 'lampe ...' de G.2 ; "@3000" : attendre 3 s
+    State s = t;
+    unsigned v;
+    sent[0] = 0;
+    if (c[0] == '@') wait((uint32_t)strtoul(c + 1, nullptr, 10));
+    else if (!strcmp(c, "on")) matter("P1");
+    else if (!strcmp(c, "off")) matter("P0");
+    else if (!strcmp(c, "avant on")) matter("F1");
+    else if (!strcmp(c, "avant off")) matter("F0");
+    else if (!strcmp(c, "arriere on")) matter("B1");
+    else if (!strcmp(c, "arriere off")) matter("B0");
+    else if (!strcmp(c, "mode avant")) {
+      s.power = true;
+      s.lamps = F_FRONT;
+      request(s, FLD_FLAGS);
+    } else if (sscanf(c, "lum %x", &v) == 1) {
+      s.bright = (uint8_t)v;
+      request(s, FLD_BRIGHT);
+    } else if (sscanf(c, "temp %u", &v) == 1) {
+      s.temp = (uint8_t)v;
+      request(s, FLD_TEMP);
+    } else if (!strcmp(c, "sync")) {
+      request(s, FLD_ALL);
+    } else {
+      CHECK(false, "commande inconnue '%s'", c);
+    }
+  }
+};
+
+static void testBenchT2() {
+  // Predictions de I.2 (T1 puis T2), chaque trame une fois ; "@..." : aucune trame.
+  const char *const steps[][2] = {
+      {"@3000", ""},       {"on", "C5 A5"},        {"temp 0", "C3 00"},   {"temp 100", "C3 64"},
+      {"mode avant", "C4 A5"}, {"lum 4C", "C4 4C"}, {"lum FE", "C4 FE"},  {"@3000", ""},
+      {"off", "42 64"},    {"lum 60", ""},         {"on", "C4 60"},       {"arriere on", "C5 60"},
+      {"@3000", ""},       {"avant off", "85 60"}, {"@3000", ""},         {"arriere off", "03 64"},
+      {"on", "85 60"},     {"sync", "85 60 83 64"},
+  };
+  Pilot p;
+  for (const auto &s : steps) {
+    p.cmd(s[0]);
+    CHECK(!strcmp(p.sent, s[1]), "T2 '%s' : '%s' au lieu de '%s'", s[0], p.sent, s[1]);
+  }
+  // Sans l'attente avant 'off', 'mode avant' n'a pas tenu 2 s : la memoire
+  // garde les deux lampes (43 64), et le rallumage aussi (C5 60).
+  Pilot q;
+  const char *const quick[] = {"@3000", "on", "temp 0", "temp 100", "mode avant", "lum 4C", "lum FE", "off"};
+  for (const char *c : quick) q.cmd(c);
+  CHECK(!strcmp(q.sent, "43 64"), "T2 sans attente : '%s'", q.sent);
+  q.cmd("lum 60");
+  q.cmd("on");
+  CHECK(!strcmp(q.sent, "C5 60"), "T2 sans attente, rallumage : '%s'", q.sent);
+}
+
+// ---------------------------------------------------------------------------
 
 int main() {
   testLevelMap();  // en premier : gamma par defaut avant tout mapInit
@@ -677,10 +839,12 @@ int main() {
   testApplyState();
   testCoveredBy();
   testPlan();
+  testDelivery();
   testAutoAndCrc8();
   testMireds();
   testRules();
   testSelectionMemory();
+  testBenchT2();
 
   // L'auto-test embarque passe, quel que soit le gamma en place.
   const float gammas[] = {2.0f, 1.0f, 0.5f, 3.7f};

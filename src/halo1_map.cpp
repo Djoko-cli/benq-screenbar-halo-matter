@@ -17,7 +17,7 @@ static uint8_t sRaw[255];    // indice = niveau Matter 0..254
 static float sGamma = 0.0f;  // 0 : table pas encore construite
 
 static void ensureTable() {
-  if (sGamma <= 0.0f) mapInit(2.0f);  // decision A3
+  if (sGamma <= 0.0f) mapInit(2.0f);  // repli (decision A3), sans HALO1_LEVEL_GAMMA
 }
 
 void mapInit(float gamma) {
