@@ -48,6 +48,24 @@ Adresse, format, CRC et chaine d'emission sont valides de bout en bout sur la
 vraie lampe. Premiere hypothese sur la charge, a verifier : `C4` = reglage de
 luminosite, octet suivant = `1` + niveau sur 7 bits (`FE` -> 126 sur 127).
 
+**Semantique de la charge -- premiers essais (telecommande sans piles).**
+| charge | etat de depart | effet observe |
+|---|---|---|
+| `C4 FE` x1 | minimum | quasi-maximum (une seule trame suffit : niveau ABSOLU) |
+| `C4 9C` x3 | maximum | legere baisse percue |
+| `C4 80` x1 | maximum | « a peu pres la moitie ou plus bas » |
+
+Hypothese la plus compatible : `C4` = luminosite, 2e octet = niveau sur 8 bits.
+L'hypothese d'un niveau sur 7 bits est ecartee (`C4 80` aurait donne le
+minimum). Observations a l'oeil, donc a confirmer par l'ecoute de la
+telecommande (`ecoute 4FF0FD63 5`).
+
+**Outils valides le 23/09** : `txack` (emission standard avec accuse, verdict
+TX_DS/MAX_RT, reconfiguration apres chaque echec), `ecoute` (reception
+passive qui n'accuse jamais, PCF et CRC decodes en logiciel ; valide sur banc,
+canal 40 : C4 FE et C4 80 decodes neuf fois chacun), `prxack` (recepteur de
+banc).
+
 **Emission, avant le 23/09 : rien n'avait fonctionne, et on comprend pourquoi.** Les essais
 `tx6` (un accuse mal forme) puis `txraw` (bonne trame bit pour bit, mais avec
 l'adresse decalee, donc le mauvais preambule, et 1800 copies de meme PID que
