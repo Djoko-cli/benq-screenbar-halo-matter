@@ -73,12 +73,17 @@ enum : uint8_t { FLD_FLAGS = 1, FLD_BRIGHT = 2, FLD_TEMP = 4, FLD_ALL = 7 };
 // reste : RIEN (sens des bits de mode d'une trame A inconnu, '60 01' observe).
 // Renvoie les FLD_* dont la valeur a change.
 uint8_t applyState(State &s, Payload p);
-// Champs de la consigne qu'une trame livree satisfait (efface 'dirty').
+// Champs de la consigne qu'une trame livree satisfait (efface 'dirty'). La consigne
+// est bornee comme par les constructeurs : une trame de plan() couvre toujours ses champs.
 uint8_t coveredBy(Payload sent, const State &target);
 
 // ---- Planification (voir D.3) ---------------------------------------------
 struct Plan { bool bright = false, temp = false; Payload pb{0, 0}, pt{0, 0}; };
 Plan plan(const State &target, const State &believed, uint8_t dirty);
+// Champs a livrer pour une consigne (Halo1Lamp::request : dirty_ |= dueFields(...)).
+// A4 (a) : allumee, FLAGS ajoute BRIGHT, pour que la luminosite affichee parte
+// meme si la trame de temperature est livree avant elle.
+uint8_t dueFields(const State &target, uint8_t fields);
 
 uint8_t nextAuto(uint8_t last);            // 0 ou 255 -> 1, sinon last + 1
 uint8_t crc8(const uint8_t *p, size_t n);  // poly 0x07, init 0 : blob NVS

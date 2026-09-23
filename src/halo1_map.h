@@ -8,7 +8,8 @@ constexpr uint16_t kMiredCold = 153;  // temp 0x00 (le plus froid) ; ~6536 K NOM
 constexpr uint16_t kMiredWarm = 370;  // temp 0x64 (le plus chaud) ; ~2703 K NOMINAL, non mesure
 
 // Tant que mapInit n'a pas ete appele, la table est construite a gamma 2,0
-// (decision A3, meme valeur que HALO1_LEVEL_GAMMA) au premier usage.
+// (decision A3) au premier usage. Ce repli ignore HALO1_LEVEL_GAMMA : c'est
+// Halo1Lamp::begin (C4, les deux builds) qui appelle mapInit(HALO1_LEVEL_GAMMA).
 void mapInit(float gamma);            // table 254 entrees ; gamma 1.0 = formule lineaire exacte
 float mapGamma();
 uint8_t rawFromLevel(uint8_t level);  // 0..254 -> 0x4C..0xFE (0 traite comme 1)
