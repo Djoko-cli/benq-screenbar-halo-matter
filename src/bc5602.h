@@ -182,7 +182,10 @@ class BC5602 {
   // Pose PRM_RX, puis, tant que OMST ne rapporte pas RX : vide la FIFO RX,
   // acquitte RX_DR et strobe RX_MODE (0x8E). Ne touche PAS a CE. Rend la main
   // tout de suite si la puce est deja en RX : ce n'est pas un rearmement force.
-  bool enterRxMode(uint32_t timeoutUs = 1500);  // par tentative, 3 tentatives au plus
+  // timeoutUs, par tentative (3 au plus), ne compte que les pauses de 50 us, pas
+  // la lecture de STA1 qui suit chacune (~30 us a 1 MHz) : une tentative dure
+  // ~1,6 x timeoutUs, soit ~7-8 ms au pire pour les 3 tentatives de 1500 us.
+  bool enterRxMode(uint32_t timeoutUs = 1500);
   bool crystalReady() const { return crystalReady_; }
   uint8_t lastCalibOM() const { return lastCalibOM_; }
   // Nombre de registres recommandes qui ne se relisent pas a la valeur ecrite.

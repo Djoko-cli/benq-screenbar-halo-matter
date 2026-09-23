@@ -680,15 +680,17 @@ static void handleLine(char *line) {
     // sont a 100 %% des 1 lus comme 0, toujours sur le dernier 1 avant une
     // transition -- la signature d'un seuil de decision decale, donc d'un
     // ecart de frequence porteuse. Le projet amont regle ce registre a 0x15.
-    // Correction de l'audit (B11) : la valeur se lit en base 0 ('xo 0x15'
-    // reglait le trim a 0), et 'off' ou -1 rendent la main ("ne pas toucher").
+    // Correction de l'audit (B11) : la valeur se lit en decimal, ou en
+    // hexadecimal avec 0x ('xo 0x15' reglait le trim a 0), et 'off' ou -1
+    // rendent la main ("ne pas toucher"). Pas de base 0 : 'xo 010' y vaut 8.
     for (size_t n = strlen(arg); n && arg[n - 1] == ' ';) arg[--n] = 0;
     long v = -2;  // -2 = saisie invalide
     if (!strcmp(arg, "off")) {
       v = -1;
     } else if (*arg) {
       char *end = nullptr;
-      v = strtol(arg, &end, 0);
+      const bool hex = arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X');
+      v = strtol(arg, &end, hex ? 16 : 10);
       if (end == arg || *end || v < -1 || v > 31) v = -2;
     }
     if (!halo.radio.present()) {

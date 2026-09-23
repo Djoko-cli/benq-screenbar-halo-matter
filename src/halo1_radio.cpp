@@ -78,6 +78,7 @@ void Halo1Radio::begin(BC5602 &chip, const uint8_t addrReg[4]) {
   target_ = Mode::Unknown;
   verifyFails_ = 0;
   restartWanted_ = false;
+  spi3Wire_ = false;  // halo.begin() a reecrit IO1
   setAddress(addrReg);
 }
 
@@ -131,6 +132,7 @@ void Halo1Radio::beginReset(Mode target, uint32_t nowMs, uint8_t why) {
   if (why == WHY_SILENCE) stats.silenceReconf++;
   else if (why == WHY_TX) stats.txReconf++;
   halo1StdReset(*chip_);
+  spi3Wire_ = true;
   // Horloge reelle, pas nowMs : l'appelant a pu bloquer depuis (envoi, entree
   // en RX), et les 40 ms comptent a partir du reset lui-meme.
   resetAt_ = millis();
@@ -140,6 +142,7 @@ void Halo1Radio::beginReset(Mode target, uint32_t nowMs, uint8_t why) {
 
 void Halo1Radio::finishReset(uint32_t nowMs) {
   halo1StdConfigure(*chip_, addrReg_, halo1::kChannel, DATARATE_125K, target_ == Mode::Rx);
+  spi3Wire_ = false;  // IO1 reecrit en tete de configuration
   if (!verify()) {
     stats.verifyFail++;
     if (++verifyFails_ >= kMaxVerifyFails) {
@@ -169,7 +172,9 @@ void Halo1Radio::finishReset(uint32_t nowMs) {
 }
 
 bool Halo1Radio::readConfig(uint8_t out[3]) {
-  if (!present()) return false;
+  // Pendant les 40 ms du reset, la puce est en SPI 3 fils et GIO2 n'emet rien
+  // (bc5602.cpp) : une lecture rendrait n'importe quoi.
+  if (!readable()) return false;
   out[0] = chip_->readRegister(REG_RFCH | CMD_READ_REGISTER);
   out[1] = chip_->readRegister(REG_DM1 | CMD_READ_REGISTER);
   out[2] = chip_->readRegister(REG_RT1 | CMD_READ_REGISTER);
@@ -275,9 +280,15 @@ bool Halo1Radio::pollRx(uint32_t nowMs, uint8_t raw[8]) {
 // reset suit toujours l'instantane.
 void Halo1Radio::takeSnapshot(uint8_t why, uint32_t nowMs) {
   BC5602 &r = *chip_;
-  Snapshot &s = snaps_[snapIdx_];
-  snapIdx_ = (uint8_t)((snapIdx_ + 1) % kSnaps);
-  if (snapN_ < kSnaps) snapN_++;
+  // Un silence qui suit un silence reprend sa case : les instantanes d'echec TX
+  // ou de verification survivent a l'ecoute qui suit (attente D.5).
+  const uint8_t last = (uint8_t)((snapIdx_ + kSnaps - 1) % kSnaps);
+  const bool again = why == WHY_SILENCE && snapN_ && snaps_[last].why == WHY_SILENCE;
+  Snapshot &s = snaps_[again ? last : snapIdx_];
+  if (!again) {
+    snapIdx_ = (uint8_t)((snapIdx_ + 1) % kSnaps);
+    if (snapN_ < kSnaps) snapN_++;
+  }
   s.atMs = nowMs;
   s.why = why;
   s.cfg1 = r.readRegister(REG_CFG1 | CMD_READ_REGISTER);
