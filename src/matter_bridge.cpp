@@ -468,7 +468,7 @@ static bool reflect(uint32_t now) {
 //   - (a) relance de la reprise quand le reseau est pret (ResumePlanner),
 //     session d'abord : un echec ne touche pas aux compteurs de la pile ;
 //   - (b) type Thread choisi a l'execution ('matter med', enveloppe plus bas) ;
-//   - (c) plafond de l'intervalle max des abonnements neufs (180 s par defaut).
+//   - (c) plafond de l'intervalle max des abonnements neufs (60 s par defaut).
 //
 //  Verrous : OpenThread seulement sous otLockTry (attente bornee) ; pile CHIP
 //  seulement sous TryLockChipStack ou dans la tache CHIP (ScheduleWork) ;
