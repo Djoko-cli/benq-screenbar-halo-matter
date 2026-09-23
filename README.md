@@ -204,6 +204,10 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `info` | materiel, configuration radio, etat du pilote |
 | `matter` | etat Matter, code d'appairage, compteurs du pont |
 | `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS |
+| `matter reprise` | (Thread) relance tout de suite la reprise des abonnements sauves d'Apple Home |
+| `matter reprise auto [0\|1]` | (Thread) relance seule apres un redemarrage : Thread + SRP prets depuis 10 s, pas avant 50 s, aucun abonnement actif ; puis 30 s, 60 s, 5 min apres chaque echec (NVS) |
+| `matter med [0\|1\|2]` | (Thread) type au prochain demarrage : 0 routeur, 1 MED des l'init (sans nouvelle attache), 2 MED apres `Matter.begin()` (ancien) (NVS) |
+| `matter maxint [0\|60..3600]` | (Thread) plafond de l'intervalle max des abonnements neufs, 0 = celui du controleur (NVS) |
 | `lampe` | pilote Halo 1 : consigne, etat cru, champs a livrer, lien, radio |
 | `lampe on` / `lampe off` | allumer / eteindre, memes regles que Matter |
 | `lampe avant on\|off` / `lampe arriere on\|off` | une lampe (comme EP2 / EP3) |

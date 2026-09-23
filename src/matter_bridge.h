@@ -23,3 +23,34 @@ bool matterSetAutoPulseMs(uint32_t ms, bool *saved);
 void matterDecommissionNow();
 bool matterIsCommissioned();
 bool matterIsConnected();
+
+#if MATTER_NET_THREAD
+// Abonnements d'Apple Home apres un redemarrage (build Thread). Toutes ces
+// fonctions sont a appeler depuis la tache loop (CLI) ; les reglages sont
+// gardes en NVS (espace halo1). Une ecriture NVS ratee laisse *saved a false.
+
+// Relance tout de suite la reprise des abonnements sauves (banc). Refusee
+// (false, raison affichee) si la pile est absente, le noeud pas mis en
+// service, ou une tentative deja en cours. Le resultat arrive en traces
+// '[matter] reprise ...'.
+bool matterResumeNow(Print &out);
+
+// Relance automatique : reseau pret (attache + SRP) depuis 10 s, pas avant
+// 50 s apres le demarrage de Matter, aucun abonnement actif.
+bool matterResumeAuto();
+void matterSetResumeAuto(bool on, bool *saved);
+
+// Type Thread au PROCHAIN demarrage : 0 routeur (reglage d'esp_matter), 1 MED
+// des l'init de Thread (sans nouvelle attache), 2 MED apres Matter.begin()
+// (ancien comportement : une attache de plus a chaque demarrage).
+constexpr uint8_t kMatterMedModes = 3;
+uint8_t matterMedMode();
+bool matterSetMedMode(uint32_t mode, bool *saved);
+
+// Plafond de l'intervalle max des abonnements NEUFS, en secondes : 0 = celui
+// que demande le controleur, sinon kMatterMaxIntMinS..kMatterMaxIntMaxS.
+constexpr uint16_t kMatterMaxIntMinS = 60;
+constexpr uint16_t kMatterMaxIntMaxS = 3600;
+uint16_t matterMaxIntervalCap();
+bool matterSetMaxIntervalCap(uint32_t s, bool *saved);
+#endif

@@ -8,12 +8,32 @@
 #include "halo1_lamp.h"
 
 #if MATTER_NET_THREAD
+#include <app/CASESessionManager.h>
+#include <app/InteractionModelEngine.h>
+#include <app/ReadHandler.h>
+#include <app/SubscriptionResumptionSessionEstablisher.h>
+#include <esp_event.h>
 #include <esp_ieee802154.h>
 #include <esp_openthread.h>
 #include <esp_openthread_lock.h>
+#include <lib/support/CHIPMem.h>
+#include <openthread/dns_client.h>
 #include <openthread/link.h>
 #include <openthread/platform/radio.h>
+#include <openthread/srp_client.h>
 #include <openthread/thread.h>
+
+#include "matter_resume.h"
+
+// Les bibliotheques precompilees ont ces deux options (sdkconfig, puis
+// AppBuildConfig.h) : sans elles ici, SubscriptionInfo n'aurait pas la meme
+// forme que dans la pile (mResumptionRetries), et la reprise non plus.
+#if !CHIP_CONFIG_PERSIST_SUBSCRIPTIONS || !CHIP_CONFIG_SUBSCRIPTION_TIMEOUT_RESUMPTION
+#error "reprise des abonnements : CHIP_CONFIG_PERSIST_SUBSCRIPTIONS et _SUBSCRIPTION_TIMEOUT_RESUMPTION attendus"
+#endif
+#ifndef MATTER_THREAD_MED
+#define MATTER_THREAD_MED 0
+#endif
 // Prendre le verrou OpenThread avant l'init de la pile planterait.
 static bool sMatterStarted = false;
 
@@ -426,6 +446,911 @@ static bool reflect(uint32_t now) {
   return true;
 }
 
+#if MATTER_NET_THREAD
+// ===========================================================================
+//  Abonnements d'Apple Home et reseau Thread (build Thread)
+//
+//  Terrain du 23/09 : apres chaque redemarrage, Apple Home ne voit plus rien
+//  du noeud (ni miroir de la telecommande : 66 ecritures d'attributs perdues)
+//  tant que l'utilisateur n'agit pas dans l'app, et s'y raccroche ensuite en
+//  2-3 min. La pile reprend l'abonnement d'Apple (persistant) une seule fois
+//  au demarrage, des Server::Init : son init DNS-SD passe par mDNS, prete tout
+//  de suite, alors que Thread et SRP ne le sont pas. La recherche d'adresse
+//  de l'abonne expire (erreur 32 = CHIP_ERROR_TIMEOUT, vue a 47 s), et la
+//  tentative suivante vient 300 s plus tard (puis 600, 600, 900 s...). Chaque
+//  echec incremente un compteur sauve avec l'abonnement : au 11e, meme a
+//  travers les redemarrages, la pile l'oublie (firmware.elf desassemble).
+//
+//  Ce que ce bloc ajoute :
+//   - mesures dans 'matter' : abonnements actifs et sauves, roles Thread
+//     horodates, compteurs MLE, etat SRP et DNS, tentatives de reprise ;
+//   - (a) relance de la reprise quand le reseau est pret (ResumePlanner) ;
+//   - (b) type Thread choisi a l'execution ('matter med', enveloppe plus bas) ;
+//   - (c) plafond optionnel de l'intervalle max des abonnements neufs.
+//
+//  Verrous : OpenThread seulement sous otLockTry (attente bornee) ; pile CHIP
+//  seulement sous TryLockChipStack ou dans la tache CHIP (ScheduleWork) ;
+//  jamais le verrou CHIP sous le verrou OT (la tache CHIP prend OT en tenant
+//  le sien). Les rappels (tache CHIP, tache des evenements IDF) n'ecrivent que
+//  des compteurs, sous sSubMux ; seule la tache loop affiche.
+// ===========================================================================
+
+using chip::app::SubscriptionResumptionStorage;
+using SubInfo = SubscriptionResumptionStorage::SubscriptionInfo;
+using ThreadDeviceType = chip::DeviceLayer::ConnectivityManager::ThreadDeviceType;
+
+static portMUX_TYPE sSubMux = portMUX_INITIALIZER_UNLOCKED;
+// Incremente sous sSubMux par tout evenement a tracer : la tache loop ne
+// copie les compteurs que s'il a bouge (lecture atomique, sans le verrou).
+static uint32_t sEventSeq = 0;
+
+// "12,3" : des millisecondes en secondes, une decimale.
+static const char *secs(char *b, size_t n, uint32_t ms) {
+  snprintf(b, n, "%lu,%lu", (unsigned long)(ms / 1000), (unsigned long)(ms % 1000 / 100));
+  return b;
+}
+
+// --- Reglages (NVS halo1, tache loop) --------------------------------------
+
+static const char *const kNvsMedKey = "med";
+static const char *const kNvsResumeKey = "reprise";
+static const char *const kNvsMaxIntKey = "maxint";
+static constexpr uint8_t kMedRouter = 0, kMedEarly = 1;  // 2 : MED apres Matter.begin() (ancien)
+static uint8_t sMedMode = MATTER_THREAD_MED ? kMedEarly : kMedRouter;  // prochain demarrage
+static uint8_t sMedBoot = MATTER_THREAD_MED ? kMedEarly : kMedRouter;  // ce demarrage
+static bool sResumeAuto = true;
+// Ecrit par la tache loop, lu par la tache CHIP (OnSubscriptionRequested).
+static volatile uint16_t sMaxIntCap = 0;
+
+static void loadThreadSettings() {
+  Preferences p;
+  if (!p.begin(kNvsNs, false)) return;
+  if (p.isKey(kNvsMedKey)) {
+    const uint8_t v = p.getUChar(kNvsMedKey, sMedMode);
+    if (v < kMatterMedModes) sMedMode = v;
+  }
+  if (p.isKey(kNvsResumeKey)) sResumeAuto = p.getUChar(kNvsResumeKey, 1) != 0;
+  if (p.isKey(kNvsMaxIntKey)) {
+    const uint16_t v = p.getUShort(kNvsMaxIntKey, 0);
+    if (v == 0 || (v >= kMatterMaxIntMinS && v <= kMatterMaxIntMaxS)) sMaxIntCap = v;
+  }
+  p.end();
+  sMedBoot = sMedMode;
+}
+
+static bool saveU8(const char *key, uint8_t v) {
+  Preferences p;
+  if (!p.begin(kNvsNs, false)) return false;
+  const bool ok = p.putUChar(key, v) == sizeof(uint8_t);
+  p.end();
+  return ok;
+}
+
+static bool saveU16(const char *key, uint16_t v) {
+  Preferences p;
+  if (!p.begin(kNvsNs, false)) return false;
+  const bool ok = p.putUShort(key, v) == sizeof(uint16_t);
+  p.end();
+  return ok;
+}
+
+bool matterResumeAuto() { return sResumeAuto; }
+void matterSetResumeAuto(bool on, bool *saved) {
+  sResumeAuto = on;
+  const bool ok = saveU8(kNvsResumeKey, on ? 1 : 0);
+  if (saved) *saved = ok;
+}
+
+uint8_t matterMedMode() { return sMedMode; }
+bool matterSetMedMode(uint32_t mode, bool *saved) {
+  if (saved) *saved = false;
+  if (mode >= kMatterMedModes) return false;
+  sMedMode = (uint8_t)mode;  // sMedBoot ne bouge pas : prochain demarrage
+  const bool ok = saveU8(kNvsMedKey, sMedMode);
+  if (saved) *saved = ok;
+  return true;
+}
+
+uint16_t matterMaxIntervalCap() { return sMaxIntCap; }
+bool matterSetMaxIntervalCap(uint32_t s, bool *saved) {
+  if (saved) *saved = false;
+  if (s != 0 && (s < kMatterMaxIntMinS || s > kMatterMaxIntMaxS)) return false;
+  sMaxIntCap = (uint16_t)s;
+  const bool ok = saveU16(kNvsMaxIntKey, (uint16_t)s);
+  if (saved) *saved = ok;
+  return true;
+}
+
+// --- (b) Type Thread des l'init --------------------------------------------
+//
+//  esp_matter::start (firmware.elf) : _InitThreadStack (Thread demarre avec le
+//  mode restaure de sa NVS et cherche son parent), puis _SetThreadDeviceType
+//  (Router), puis _StartThreadTask, puis Server::Init. Passer ensuite en MED,
+//  comme le faisait ce pont, change deux fois le mode (routeur puis MED) :
+//  deux ecritures en flash, et OpenThread relance l'attache a chaque passage
+//  FTD <-> MTD (Mle::SetDeviceMode ; detache s'il etait deja attache).
+//  L'enveloppe remplace la demande de routeur par MED (mode 1) : le mode
+//  restaure, MED depuis le premier demarrage, ne change plus, rien n'est
+//  ecrit, et l'attache n'est pas relancee (meme mode : sortie immediate).
+//
+//  Editeur de liens : -Wl,--wrap=<symbole> dans l'env esp32c6thread, avec
+//  HALO_WRAP_THREAD_DEVTYPE (l'un sans l'autre ne lie pas), comme le core le
+//  fait pour ESP32Utils::InitWiFiStack. Dans les bibliotheques, seul
+//  esp_matter_core.cpp.obj y fait reference (nm) ; nos appels passent aussi
+//  par ici. Methode : 'this' en premier argument, un pointeur suffit.
+#ifndef HALO_WRAP_THREAD_DEVTYPE
+#define HALO_WRAP_THREAD_DEVTYPE 0
+#endif
+static uint8_t sDevTypeCalls = 0, sDevTypeSwaps = 0;  // tache loop (Matter.begin() et apres)
+
+#if HALO_WRAP_THREAD_DEVTYPE
+extern "C" CHIP_ERROR
+__real__ZN4chip11DeviceLayer8Internal40GenericThreadStackManagerImpl_OpenThreadINS0_22ThreadStackManagerImplEE20_SetThreadDeviceTypeENS0_19ConnectivityManager16ThreadDeviceTypeE(
+    void *self, ThreadDeviceType type);
+
+extern "C" CHIP_ERROR
+__wrap__ZN4chip11DeviceLayer8Internal40GenericThreadStackManagerImpl_OpenThreadINS0_22ThreadStackManagerImplEE20_SetThreadDeviceTypeENS0_19ConnectivityManager16ThreadDeviceTypeE(
+    void *self, ThreadDeviceType type) {
+  if (sDevTypeCalls < 255) sDevTypeCalls++;
+  if (sMedBoot == kMedEarly && type == chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_Router) {
+    type = chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice;
+    if (sDevTypeSwaps < 255) sDevTypeSwaps++;
+  }
+  return __real__ZN4chip11DeviceLayer8Internal40GenericThreadStackManagerImpl_OpenThreadINS0_22ThreadStackManagerImplEE20_SetThreadDeviceTypeENS0_19ConnectivityManager16ThreadDeviceTypeE(
+      self, type);
+}
+#endif
+
+// Mode lu juste apres Matter.begin(), avant notre propre bascule eventuelle.
+static bool sModeKnown = false;
+static otLinkModeConfig sModeAtBegin = {};
+
+static void linkModeText(const otLinkModeConfig &m, char *b) {
+  b[0] = m.mRxOnWhenIdle ? 'r' : '-';
+  b[1] = m.mDeviceType ? 'd' : '-';
+  b[2] = m.mNetworkData ? 'n' : '-';
+  b[3] = 0;
+}
+
+// --- Historique des roles Thread (tache des evenements IDF) ------------------
+//
+//  esp_openthread poste OPENTHREAD_EVENT_ROLE_CHANGED (role precedent et
+//  nouveau) sur la boucle d'evenements par defaut, depuis son rappel d'etat
+//  OpenThread. Ecoute branchee AVANT Matter.begin() : les roles du demarrage
+//  y sont. Aucun verrou OpenThread ni CHIP ici.
+struct RoleChange {
+  uint32_t ms;
+  uint8_t from, to;
+};
+static constexpr uint8_t kRoleHistory = 6;
+static RoleChange sRoles[kRoleHistory];
+static uint32_t sRoleChanges = 0;  // depuis le demarrage, sous sSubMux
+static bool sRoleHooked = false;
+
+static void onOtRoleChanged(void *, esp_event_base_t, int32_t, void *data) {
+  if (!data) return;
+  const auto *e = static_cast<const esp_openthread_role_changed_event_t *>(data);
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&sSubMux);
+  sRoles[sRoleChanges % kRoleHistory] = {now, (uint8_t)e->previous_role, (uint8_t)e->current_role};
+  sRoleChanges++;
+  sEventSeq++;
+  portEXIT_CRITICAL(&sSubMux);
+}
+
+static void hookRoleChanges() {
+  // esp_matter::start cree la meme boucle et accepte qu'elle existe deja
+  // (ESP_ERR_INVALID_STATE, firmware.elf).
+  const esp_err_t e = esp_event_loop_create_default();
+  if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return;
+  sRoleHooked =
+      esp_event_handler_register(OPENTHREAD_EVENT, OPENTHREAD_EVENT_ROLE_CHANGED, onOtRoleChanged, nullptr) == ESP_OK;
+}
+
+static const char *roleName(uint8_t r) { return otThreadDeviceRoleToString((otDeviceRole)r); }
+
+// --- Etat du reseau (tache loop, verrou OT sans attente) ---------------------
+
+static bool srpRegistered(uint8_t st) {
+  return st == OT_SRP_CLIENT_ITEM_STATE_REGISTERED || st == OT_SRP_CLIENT_ITEM_STATE_TO_REFRESH ||
+         st == OT_SRP_CLIENT_ITEM_STATE_REFRESHING;
+}
+
+static bool roleAttached(otDeviceRole r) {
+  return r == OT_DEVICE_ROLE_CHILD || r == OT_DEVICE_ROLE_ROUTER || r == OT_DEVICE_ROLE_LEADER;
+}
+
+static struct {
+  bool known;
+  uint32_t at;
+  otDeviceRole role;
+  uint8_t srpHost;  // otSrpClientItemState, 0xFF : inconnu
+  uint32_t readyAt;  // premier instant ou le reseau a ete pret (0 : jamais)
+} sNet = {false, 0, OT_DEVICE_ROLE_DISABLED, 0xFF, 0};
+
+// Matter.isDeviceConnected() passe par _IsThreadAttached, qui prend le verrou
+// OpenThread SANS limite de temps (esp_openthread_lock_acquire(portMAX_DELAY),
+// firmware.elf) : appele par la LED a chaque passage de loop(), il pouvait
+// bloquer tick() hors de tout budget (C.9). Ici, un essai sans attente par
+// seconde ; verrou occupe : dernier etat connu, nouvel essai au passage suivant.
+static void netPoll(uint32_t now) {
+  static constexpr uint32_t kPollMs = 1000;
+  if (!sMatterStarted || (sNet.known && (uint32_t)(now - sNet.at) < kPollMs) || !otLockTry(0)) return;
+  otInstance *ot = esp_openthread_get_instance();
+  const otDeviceRole role = otThreadGetDeviceRole(ot);
+  const otSrpClientHostInfo *h = otSrpClientGetHostInfo(ot);
+  const uint8_t host = h ? (uint8_t)h->mState : 0xFF;
+  esp_openthread_lock_release();
+  sNet.role = role;
+  sNet.srpHost = host;
+  sNet.known = true;
+  sNet.at = now;
+  if (!sNet.readyAt && roleAttached(role) && srpRegistered(host)) sNet.readyAt = now ? now : 1;
+}
+
+static bool netReady() { return sNet.known && roleAttached(sNet.role) && srpRegistered(sNet.srpHost); }
+
+// --- Abonnements vus par la pile (tache CHIP) --------------------------------
+//
+//  Seul crochet public sur la vie des abonnements : ReadHandler::
+//  ApplicationCallback (un seul par pile ; ni esp_matter ni la bibliotheque
+//  Arduino n'en posent, nm). OnSubscriptionEstablished vient aussi pour un
+//  abonnement repris (ReadHandler::OnSubscriptionResumed), sans
+//  OnSubscriptionRequested avant : c'est ce qui les distingue.
+static struct {
+  uint32_t requested, capped, fresh, resumed, terminated;
+  uint32_t firstAt;  // premier abonnement etabli depuis le demarrage (0 : aucun)
+  uint32_t lastAt;
+  bool lastResumed;
+  uint16_t lastMin, lastMax;
+  uint64_t reqPeer;
+  uint16_t reqMin, reqMax, reqApplied;
+  uint32_t reqAt;
+} sSubs = {};
+static const void *sRequestedHandler = nullptr;  // tache CHIP seulement
+
+class SubscriptionWatch : public chip::app::ReadHandler::ApplicationCallback {
+ public:
+  // (c) Plafond de l'intervalle max : Apple le fixe sans doute a 600 s pour ce
+  // noeud (code Darwin public). Apres un redemarrage qu'aucune reprise ne
+  // rattrape, Apple ne s'apercoit de la perte qu'au bout de cet intervalle
+  // (plus une marge) ; un plafond plus court borne la duree sans miroir, au
+  // prix d'un rapport vide par intervalle. Abonnements neufs seulement : un
+  // abonnement repris garde l'intervalle sauve. Regle du SDK :
+  // plancher <= max <= max(3600, plafond demande).
+  CHIP_ERROR OnSubscriptionRequested(chip::app::ReadHandler &rh, chip::Transport::SecureSession &session) override {
+    uint16_t floorS = 0, maxS = 0;
+    rh.GetReportingIntervals(floorS, maxS);
+    uint16_t applied = maxS;
+    const uint16_t cap = sMaxIntCap;
+    if (cap) {
+      const uint16_t want = cap < floorS ? floorS : cap;
+      if (want < maxS && rh.SetMaxReportingInterval(want) == CHIP_NO_ERROR) applied = want;
+    }
+    const uint32_t now = millis();
+    portENTER_CRITICAL(&sSubMux);
+    sSubs.requested++;
+    if (applied != maxS) sSubs.capped++;
+    sSubs.reqPeer = session.GetPeerNodeId();
+    sSubs.reqMin = floorS;
+    sSubs.reqMax = maxS;
+    sSubs.reqApplied = applied;
+    sSubs.reqAt = now;
+    sEventSeq++;
+    portEXIT_CRITICAL(&sSubMux);
+    sRequestedHandler = &rh;
+    return CHIP_NO_ERROR;
+  }
+
+  void OnSubscriptionEstablished(chip::app::ReadHandler &rh) override {
+    uint16_t minS = 0, maxS = 0;
+    rh.GetReportingIntervals(minS, maxS);
+    const uint32_t now = millis();
+    portENTER_CRITICAL(&sSubMux);
+    // Une demande restee sans suite (refusee apres OnSubscriptionRequested) ne
+    // fait pas passer pour neuf, plus tard, un abonnement repris a la meme
+    // adresse : 30 s au plus entre la demande et l'etablissement.
+    const bool fresh = sRequestedHandler == &rh && (uint32_t)(now - sSubs.reqAt) < 30000;
+    if (fresh) sSubs.fresh++;
+    else sSubs.resumed++;
+    if (!sSubs.firstAt) sSubs.firstAt = now ? now : 1;
+    sSubs.lastAt = now;
+    sSubs.lastResumed = !fresh;
+    sSubs.lastMin = minS;
+    sSubs.lastMax = maxS;
+    sEventSeq++;
+    portEXIT_CRITICAL(&sSubMux);
+    if (sRequestedHandler == &rh) sRequestedHandler = nullptr;
+  }
+
+  void OnSubscriptionTerminated(chip::app::ReadHandler &rh) override {
+    portENTER_CRITICAL(&sSubMux);
+    sSubs.terminated++;
+    sEventSeq++;
+    portEXIT_CRITICAL(&sSubMux);
+    if (sRequestedHandler == &rh) sRequestedHandler = nullptr;
+  }
+};
+static SubscriptionWatch sSubWatch;
+
+// --- (a) Relance de la reprise (tache CHIP) ---------------------------------
+//
+//  API publique, celle qu'emploie la pile a chaque tentative
+//  (InteractionModelEngine::ResumeSubscriptionsTimerCallback) : pour chaque
+//  abonnement sauve, un SubscriptionResumptionSessionEstablisher alloue par
+//  Platform::New, dont ResumeSubscription() ouvre (ou rejoint) une session
+//  CASE vers l'abonne ; ses rappels le liberent (Platform::Delete), creent le
+//  ReadHandler et remettent le compteur d'essais a 0, ou l'incrementent et
+//  programment la tentative suivante de la pile. ResumeSubscriptions()
+//  n'aurait rien fait : il sort tant qu'une tentative est programmee.
+//
+//  Un observateur par abonne (FindOrEstablishSession avec nos propres
+//  rappels, sur la meme mise en place de session) donne la fin, sa duree et
+//  l'erreur. Il est lance avant l'etablisseur, qui le rejoint.
+//
+//  Garde-fous : aucun abonnement actif (sinon, faute d'API publique pour lire
+//  l'identifiant d'un abonnement vivant, on risquerait un doublon) ; aucune
+//  tentative de ce pont en cours ; jamais un abonnement deja a
+//  kResumeMaxRetries essais (le 11e echec le fait oublier : la pile garde
+//  seule la main sur ses derniers essais). Reste possible : rejoindre une
+//  tentative de la pile en cours (d'ou kNotBeforeMs au demarrage) ; en cas
+//  de succes, deux ReadHandler pour le meme abonnement, rapports doubles
+//  jusqu'au prochain reabonnement d'Apple.
+
+enum : intptr_t { kResumeAuto = 0, kResumeManual = 1 };
+enum : uint8_t { kRunLaunched, kRunSubsActive, kRunNothing, kRunNoStorage, kRunNoIterator };
+static constexpr uint32_t kResumeMaxRetries = 8;
+static constexpr uint32_t kWatchLostMs = 180000;  // recherche 45 s + CASE : bien en deca
+
+struct SavedSub {
+  uint64_t node;
+  uint32_t id, retries;
+  uint16_t minS, maxS;
+  uint8_t fabric;
+};
+static constexpr uint8_t kSavedMax = 6;
+
+struct ResumeWatch {
+  ResumeWatch() : conn(onConnected, this), fail(onFailed, this) {}
+  chip::Callback::Callback<chip::OnDeviceConnected> conn;
+  chip::Callback::Callback<chip::OnDeviceConnectionFailure> fail;
+  uint64_t node = 0;
+  uint8_t fabric = 0;
+  uint32_t startMs = 0;
+  bool pending = false;  // sous sSubMux
+  static void onConnected(void *ctx, chip::Messaging::ExchangeManager &, const chip::SessionHandle &);
+  static void onFailed(void *ctx, const chip::ScopedNodeId &, CHIP_ERROR err);
+};
+static constexpr uint8_t kWatchMax = 2;
+static ResumeWatch sWatch[kWatchMax];
+
+static struct {
+  // lancements (resumeWork)
+  uint32_t runs, autoRuns, launched;
+  uint32_t runSeq, runAt, runSubs, runSaved;
+  uint8_t runKind, runVerdict, runLaunched, runSkipped, runBusy, runFailed;
+  // fins de session (observateurs)
+  uint32_t ok, failed, lost, late;
+  uint32_t doneSeq, doneAt, doneMs, doneErr;
+  uint64_t doneNode;
+} sResume = {};
+static bool sResumePosted = false;  // travail poste, pas encore execute ; sous sSubMux
+
+static void watchDone(ResumeWatch *w, CHIP_ERROR err) {
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&sSubMux);
+  if (w->pending) {
+    w->pending = false;
+    if (err == CHIP_NO_ERROR) sResume.ok++;
+    else sResume.failed++;
+    sResume.doneErr = err.AsInteger();
+    sResume.doneMs = now - w->startMs;
+    sResume.doneAt = now;
+    sResume.doneNode = w->node;
+    sResume.doneSeq++;
+    sEventSeq++;
+  } else {
+    sResume.late++;  // fin arrivee apres l'abandon (kWatchLostMs)
+  }
+  portEXIT_CRITICAL(&sSubMux);
+}
+
+void ResumeWatch::onConnected(void *ctx, chip::Messaging::ExchangeManager &, const chip::SessionHandle &) {
+  watchDone(static_cast<ResumeWatch *>(ctx), CHIP_NO_ERROR);
+}
+
+void ResumeWatch::onFailed(void *ctx, const chip::ScopedNodeId &, CHIP_ERROR err) {
+  watchDone(static_cast<ResumeWatch *>(ctx), err);
+}
+
+// Tache loop : une tentative de ce pont est-elle en cours ? Un observateur
+// muet depuis kWatchLostMs est abandonne. Ses rappels peuvent rester
+// accroches a une session : un nouvel Enqueue les en decroche d'abord
+// (GroupedCallbackList::Enqueue appelle Cancel()). *launched : abonnements
+// relances par le dernier passage, lu dans le meme instant.
+static bool resumeInFlight(uint32_t now, uint32_t *launched = nullptr) {
+  bool busy;
+  portENTER_CRITICAL(&sSubMux);
+  busy = sResumePosted;
+  if (launched) *launched = sResume.runLaunched;
+  for (ResumeWatch &w : sWatch) {
+    if (!w.pending) continue;
+    if ((uint32_t)(now - w.startMs) >= kWatchLostMs) {
+      w.pending = false;
+      sResume.lost++;
+    } else {
+      busy = true;
+    }
+  }
+  portEXIT_CRITICAL(&sSubMux);
+  return busy;
+}
+
+// Sous le verrou de la pile. L'iterateur est rendu avant de sortir : il n'y en
+// a que deux, partages avec la pile. -1 : aucun de libre.
+static int collectSaved(SubscriptionResumptionStorage *st, SavedSub *out, uint8_t max, uint32_t &total) {
+  total = 0;
+  auto *it = st->IterateSubscriptions();
+  if (!it) return -1;
+  SubInfo info;
+  uint8_t n = 0;
+  while (it->Next(info)) {
+    total++;
+    if (n < max)
+      out[n++] = {info.mNodeId, info.mSubscriptionId, info.mResumptionRetries, info.mMinInterval, info.mMaxInterval,
+                  info.mFabricIndex};
+  }
+  it->Release();
+  return n;
+}
+
+// Recharge un abonnement sauve complet (chemins compris), iterateur rendu :
+// les rappels synchrones d'une reprise ecrivent dans ce stockage.
+static bool loadSaved(SubscriptionResumptionStorage *st, const SavedSub &s, SubInfo &info) {
+  auto *it = st->IterateSubscriptions();
+  if (!it) return false;
+  bool found = false;
+  while (!found && it->Next(info))
+    found = info.mNodeId == s.node && info.mFabricIndex == s.fabric && info.mSubscriptionId == s.id;
+  it->Release();
+  return found;
+}
+
+static void resumeWork(intptr_t kind) {
+  // Tache CHIP, verrou de la pile tenu.
+  auto *im = chip::app::InteractionModelEngine::GetInstance();
+  const uint32_t subs = im->GetNumActiveReadHandlers(chip::app::ReadHandler::InteractionType::Subscribe);
+  SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
+  chip::CASESessionManager *mgr = im->GetCASESessionManager();
+  SavedSub saved[kSavedMax];
+  uint32_t total = 0;
+  uint8_t launched = 0, skipped = 0, busy = 0, failed = 0, verdict;
+  int n = 0;
+  if (subs > 0) {
+    verdict = kRunSubsActive;
+  } else if (!st || !mgr) {
+    verdict = kRunNoStorage;
+  } else if ((n = collectSaved(st, saved, kSavedMax, total)) < 0) {
+    verdict = kRunNoIterator;
+  } else {
+    uint8_t watched = 0;  // observateurs lances par ce passage (un par abonne)
+    ResumeWatch *mine[kWatchMax] = {};
+    for (int i = 0; i < n; i++) {
+      const SavedSub &s = saved[i];
+      if (s.retries >= kResumeMaxRetries) {
+        skipped++;
+        continue;
+      }
+      bool known = false;
+      for (uint8_t k = 0; k < watched; k++) known |= mine[k]->node == s.node && mine[k]->fabric == s.fabric;
+      ResumeWatch *w = nullptr;
+      if (!known) {
+        portENTER_CRITICAL(&sSubMux);
+        for (ResumeWatch &c : sWatch) {
+          if (c.pending && c.node == s.node && c.fabric == s.fabric) {  // tentative d'avant pas finie
+            w = nullptr;
+            break;
+          }
+          if (!c.pending && !w) w = &c;
+        }
+        portEXIT_CRITICAL(&sSubMux);
+        if (!w) {
+          busy++;
+          continue;
+        }
+      }
+      SubInfo info;
+      if (!loadSaved(st, s, info)) {
+        failed++;
+        continue;
+      }
+      if (w) {
+        const uint32_t now = millis();
+        portENTER_CRITICAL(&sSubMux);
+        w->node = s.node;
+        w->fabric = s.fabric;
+        w->startMs = now;
+        w->pending = true;
+        portEXIT_CRITICAL(&sSubMux);
+        mine[watched++] = w;
+        // Peut finir tout de suite (session deja ouverte, ou pas de place).
+        mgr->FindOrEstablishSession(chip::ScopedNodeId(s.node, s.fabric), &w->conn, &w->fail);
+      }
+      auto *est = chip::Platform::New<chip::app::SubscriptionResumptionSessionEstablisher>();
+      if (!est) {
+        failed++;
+        break;
+      }
+      // Erreur possible seulement avant l'ouverture de session (copie des
+      // chemins) : rien n'est accroche, l'etablisseur est a nous.
+      if (est->ResumeSubscription(*mgr, info) != CHIP_NO_ERROR) {
+        chip::Platform::Delete(est);
+        failed++;
+        continue;
+      }
+      launched++;
+    }
+    verdict = launched ? kRunLaunched : kRunNothing;
+  }
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&sSubMux);
+  sResume.runs++;
+  if (kind == kResumeAuto) sResume.autoRuns++;
+  sResume.launched += launched;
+  sResume.runSeq++;
+  sResume.runAt = now;
+  sResume.runSubs = subs;
+  sResume.runSaved = total;
+  sResume.runKind = (uint8_t)kind;
+  sResume.runVerdict = verdict;
+  sResume.runLaunched = launched;
+  sResume.runSkipped = skipped;
+  sResume.runBusy = busy;
+  sResume.runFailed = failed;
+  sEventSeq++;
+  sResumePosted = false;  // en dernier : les observateurs sont deja marques
+  portEXIT_CRITICAL(&sSubMux);
+}
+
+// Tache loop. ScheduleWork se passe du verrou de la pile.
+static bool postResume(intptr_t kind) {
+  portENTER_CRITICAL(&sSubMux);
+  const bool already = sResumePosted;
+  sResumePosted = true;
+  portEXIT_CRITICAL(&sSubMux);
+  if (already) return false;
+  if (chip::DeviceLayer::PlatformMgr().ScheduleWork(resumeWork, kind) == CHIP_NO_ERROR) return true;
+  portENTER_CRITICAL(&sSubMux);
+  sResumePosted = false;
+  portEXIT_CRITICAL(&sSubMux);
+  return false;
+}
+
+// --- Tache loop : comptage, calendrier, traces -------------------------------
+
+static ResumePlanner sPlan;
+static struct {
+  bool known;
+  uint32_t at, subs, reads;
+} sCount = {};
+static uint32_t sSeenRoles = 0, sSeenRunSeq = 0, sSeenDoneSeq = 0;
+static uint32_t sSeenRequested = 0, sSeenEstablished = 0, sSeenTerminated = 0;
+
+// Abonnements actifs, toutes les 2 s, sans attendre le verrou de la pile.
+static bool countPoll(uint32_t now) {
+  static constexpr uint32_t kCountMs = 2000;
+  if (sCount.known && (uint32_t)(now - sCount.at) < kCountMs) return false;
+  if (!chip::DeviceLayer::PlatformMgr().TryLockChipStack()) return false;
+  auto *im = chip::app::InteractionModelEngine::GetInstance();
+  const uint32_t subs = im->GetNumActiveReadHandlers(chip::app::ReadHandler::InteractionType::Subscribe);
+  const uint32_t all = im->GetNumActiveReadHandlers();
+  chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+  sCount.known = true;
+  sCount.at = now;
+  sCount.subs = subs;
+  sCount.reads = all > subs ? all - subs : 0;
+  return true;
+}
+
+static void nodeText(char *b, size_t n, uint64_t id) {
+  snprintf(b, n, "0x%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFu));
+}
+
+// Evenements rares (quelques-uns par demarrage) : toujours traces.
+static void tracePoll() {
+  static uint32_t seen = 0;
+  if (__atomic_load_n(&sEventSeq, __ATOMIC_RELAXED) == seen) return;
+  RoleChange roles[kRoleHistory];
+  uint32_t nRoles;
+  decltype(sSubs) subs;
+  decltype(sResume) res;
+  portENTER_CRITICAL(&sSubMux);
+  seen = sEventSeq;
+  nRoles = sRoleChanges;
+  memcpy(roles, sRoles, sizeof(roles));
+  subs = sSubs;
+  res = sResume;
+  portEXIT_CRITICAL(&sSubMux);
+  char a[16], b[16], node[24];
+
+  if (nRoles != sSeenRoles) {
+    const uint32_t from = nRoles - sSeenRoles > kRoleHistory ? nRoles - kRoleHistory : sSeenRoles;
+    for (uint32_t i = from; i < nRoles; i++) {
+      const RoleChange &c = roles[i % kRoleHistory];
+      bridgeLog("[matter] Thread : %s -> %s a +%s s", roleName(c.from), roleName(c.to), secs(a, sizeof(a), c.ms));
+    }
+    sSeenRoles = nRoles;
+  }
+  if (subs.requested != sSeenRequested) {
+    sSeenRequested = subs.requested;
+    nodeText(node, sizeof(node), subs.reqPeer);
+    bridgeLog("[matter] abonnement demande par %s a +%s s : plancher %u s, max %u s -> %u s", node,
+              secs(a, sizeof(a), subs.reqAt), subs.reqMin, subs.reqMax, subs.reqApplied);
+  }
+  if (subs.fresh + subs.resumed != sSeenEstablished) {
+    sSeenEstablished = subs.fresh + subs.resumed;
+    bridgeLog("[matter] abonnement etabli (%s) a +%s s : min %u s, max %u s", subs.lastResumed ? "repris" : "neuf",
+              secs(a, sizeof(a), subs.lastAt), subs.lastMin, subs.lastMax);
+  }
+  if (subs.terminated != sSeenTerminated) {
+    sSeenTerminated = subs.terminated;
+    bridgeLog("[matter] abonnement termine (%lu en tout)", (unsigned long)subs.terminated);
+  }
+  if (res.runSeq != sSeenRunSeq) {
+    sSeenRunSeq = res.runSeq;
+    const char *kind = res.runKind == kResumeManual ? "manuelle" : "auto";
+    switch (res.runVerdict) {
+      case kRunLaunched:
+        bridgeLog("[matter] reprise %s a +%s s : %u abonnement(s) relance(s) sur %lu sauve(s), %u laisse(s) a la "
+                  "pile (>= %lu essais), %u deja en cours, %u rate(s)",
+                  kind, secs(a, sizeof(a), res.runAt), res.runLaunched, (unsigned long)res.runSaved, res.runSkipped,
+                  (unsigned long)kResumeMaxRetries, res.runBusy, res.runFailed);
+        break;
+      case kRunSubsActive:
+        bridgeLog("[matter] reprise %s : %lu abonnement(s) deja actif(s), rien de lance", kind,
+                  (unsigned long)res.runSubs);
+        break;
+      case kRunNothing:
+        bridgeLog("[matter] reprise %s : rien a relancer (%lu sauve(s), %u a >= %lu essais, %u en cours, %u rate(s))",
+                  kind, (unsigned long)res.runSaved, res.runSkipped, (unsigned long)kResumeMaxRetries, res.runBusy,
+                  res.runFailed);
+        break;
+      case kRunNoStorage: bridgeLog("[matter] reprise %s : pas de stockage d'abonnements", kind); break;
+      default: bridgeLog("[matter] reprise %s : iterateur du stockage occupe, a refaire", kind); break;
+    }
+  }
+  if (res.doneSeq != sSeenDoneSeq) {
+    sSeenDoneSeq = res.doneSeq;
+    nodeText(node, sizeof(node), res.doneNode);
+    if (res.doneErr == CHIP_NO_ERROR.AsInteger())
+      bridgeLog("[matter] reprise : session CASE avec %s ouverte en %s s", node, secs(b, sizeof(b), res.doneMs));
+    else
+      bridgeLog("[matter] reprise : echec 0x%lX avec %s apres %s s%s", (unsigned long)res.doneErr, node,
+                secs(b, sizeof(b), res.doneMs),
+                res.doneErr == CHIP_ERROR_TIMEOUT.AsInteger() ? " (delai : adresse introuvable ou CASE muet)" : "");
+  }
+}
+
+static void threadPoll(uint32_t now) {
+  static uint32_t last = 0;
+  if (!sMatterStarted || (uint32_t)(now - last) < 50) return;  // rien de presse : 20 fois par seconde
+  last = now;
+  netPoll(now);
+  const bool counted = countPoll(now);
+  tracePoll();
+  sPlan.network(netReady(), now);
+  if (counted) sPlan.subscriptions(sCount.subs, now);
+  uint32_t launched = 0;
+  const bool inFlight = resumeInFlight(now, &launched);
+  if (sPlan.waiting && !inFlight) sPlan.finished(launched, now);
+  if (sResumeAuto && !inFlight && sPlan.due(now, sBootMs) && Matter.isDeviceCommissioned() &&
+      postResume(kResumeAuto))
+    sPlan.fired();
+}
+
+bool matterResumeNow(Print &out) {
+  if (!sMatterStarted) {
+    out.println("Pile Thread absente : rien a reprendre.");
+    return false;
+  }
+  if (!Matter.isDeviceCommissioned()) {
+    out.println("Noeud pas mis en service : aucun abonnement.");
+    return false;
+  }
+  const uint32_t now = millis();
+  if (resumeInFlight(now)) {
+    out.println("Une tentative de reprise est deja en cours : attendre sa fin ('matter').");
+    return false;
+  }
+  if (!postResume(kResumeManual)) {
+    out.println("!! Travail refuse par la pile (file pleine ?) : reessayer.");
+    return false;
+  }
+  out.println("Reprise demandee : resultat dans les traces '[matter] reprise'.");
+  if (!netReady())
+    out.printf("  (reseau pas pret : role %s, hote SRP %s : echec probable)\n", roleName(sNet.role),
+               sNet.srpHost == 0xFF ? "?" : otSrpClientItemStateToString((otSrpClientItemState)sNet.srpHost));
+  if ((uint32_t)(now - sBootMs) < ResumePlanner::kNotBeforeMs)
+    out.println("  (moins de 50 s apres le demarrage : la tentative de la pile peut encore chercher l'adresse, "
+                "et celle-ci la rejoindre)");
+  return true;
+}
+
+// Etat pour 'matter' : releve sous chaque verrou tour a tour, puis affiche.
+static void threadStatus(Print &out) {
+  const uint32_t now = millis();
+  char a[16], b[16], c[16];
+
+  // Verrou OpenThread (borne), rien d'autre dessous.
+  struct {
+    bool ok;
+    otLinkModeConfig mode;
+    otMleCounters mle;
+    bool srpRunning;
+    uint8_t host, svcTotal, svcReg;
+    char srpServer[OT_IP6_ADDRESS_STRING_SIZE];
+    uint16_t srpPort;
+    char dns[OT_IP6_ADDRESS_STRING_SIZE];
+    uint16_t dnsPort;
+  } ot = {};
+  otInstance *inst = esp_openthread_get_instance();
+  if (inst && otLockTry(50)) {
+    ot.ok = true;
+    ot.mode = otThreadGetLinkMode(inst);
+    const otMleCounters *m = otThreadGetMleCounters(inst);
+    if (m) ot.mle = *m;
+    ot.srpRunning = otSrpClientIsRunning(inst);
+    const otSrpClientHostInfo *h = otSrpClientGetHostInfo(inst);
+    ot.host = h ? (uint8_t)h->mState : 0xFF;
+    for (const otSrpClientService *s = otSrpClientGetServices(inst); s && ot.svcTotal < 255; s = s->mNext) {
+      ot.svcTotal++;
+      if (srpRegistered((uint8_t)s->mState)) ot.svcReg++;
+    }
+    const otSockAddr *srv = otSrpClientGetServerAddress(inst);
+    if (srv) {
+      otIp6AddressToString(&srv->mAddress, ot.srpServer, sizeof(ot.srpServer));
+      ot.srpPort = srv->mPort;
+    }
+    const otDnsQueryConfig *dc = otDnsClientGetDefaultConfig(inst);
+    if (dc) {
+      otIp6AddressToString(&dc->mServerSockAddr.mAddress, ot.dns, sizeof(ot.dns));
+      ot.dnsPort = dc->mServerSockAddr.mPort;
+    }
+    esp_openthread_lock_release();
+  }
+
+  // Verrou de la pile (borne), rien d'autre dessous.
+  bool chipOk = false;
+  uint32_t subs = 0, reads = 0, total = 0;
+  int nSaved = 0;
+  SavedSub saved[kSavedMax];
+  for (uint32_t t0 = millis(); !chipOk && (uint32_t)(millis() - t0) < 50;) {
+    chipOk = chip::DeviceLayer::PlatformMgr().TryLockChipStack();
+    if (!chipOk) delay(1);
+  }
+  if (chipOk) {
+    auto *im = chip::app::InteractionModelEngine::GetInstance();
+    subs = im->GetNumActiveReadHandlers(chip::app::ReadHandler::InteractionType::Subscribe);
+    const uint32_t all = im->GetNumActiveReadHandlers();
+    reads = all > subs ? all - subs : 0;
+    SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
+    nSaved = st ? collectSaved(st, saved, kSavedMax, total) : -2;
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+  }
+
+  RoleChange roles[kRoleHistory];
+  uint32_t nRoles;
+  decltype(sSubs) sb;
+  decltype(sResume) rs;
+  uint32_t watchAge = 0;
+  bool watching = false;
+  portENTER_CRITICAL(&sSubMux);
+  nRoles = sRoleChanges;
+  memcpy(roles, sRoles, sizeof(roles));
+  sb = sSubs;
+  rs = sResume;
+  for (const ResumeWatch &w : sWatch)
+    if (w.pending) {
+      watching = true;
+      watchAge = now - w.startMs;
+    }
+  portEXIT_CRITICAL(&sSubMux);
+
+  out.printf("  demarrage       : il y a %s s ; Matter pret a +%s s ; reseau pret (attache + SRP) ",
+             secs(a, sizeof(a), now), secs(b, sizeof(b), sBootMs));
+  if (sNet.readyAt) out.printf("a +%s s\n", secs(c, sizeof(c), sNet.readyAt));
+  else out.println("jamais");
+
+  static const char *const kMedText[kMatterMedModes] = {"routeur", "MED des l'init", "MED apres Matter.begin()"};
+  char mode[4] = "?";
+  if (sModeKnown) linkModeText(sModeAtBegin, mode);
+  out.printf("  type Thread     : %s ce demarrage (mode %s apres Matter.begin()) ; esp_matter : %u reglage(s), %u "
+             "routeur -> MED ; prochain : %s ('matter med 0|1|2')%s\n",
+             kMedText[sMedBoot], mode, sDevTypeCalls, sDevTypeSwaps, kMedText[sMedMode],
+             HALO_WRAP_THREAD_DEVTYPE ? "" : " ; enveloppe ABSENTE : 1 = 2");
+
+  if (!sRoleHooked) {
+    out.println("  roles Thread    : ecoute des evenements indisponible");
+  } else {
+    out.printf("  roles Thread    : %lu changement(s)", (unsigned long)nRoles);
+    const uint32_t from = nRoles > kRoleHistory ? nRoles - kRoleHistory : 0;
+    for (uint32_t i = from; i < nRoles; i++) {
+      const RoleChange &r = roles[i % kRoleHistory];
+      out.printf("%s+%s %s>%s", i == from ? " : " : ", ", secs(a, sizeof(a), r.ms), roleName(r.from), roleName(r.to));
+    }
+    out.println();
+  }
+
+  if (ot.ok) {
+    linkModeText(ot.mode, mode);
+    out.printf("  MLE             : mode %s ; %u attache(s) tentee(s), detache %ux, enfant %ux, routeur %ux, chef "
+               "%ux, parent change %ux\n",
+               mode, ot.mle.mAttachAttempts, ot.mle.mDetachedRole, ot.mle.mChildRole, ot.mle.mRouterRole,
+               ot.mle.mLeaderRole, ot.mle.mParentChanges);
+    out.printf("  SRP             : client %s, serveur [%s]:%u, hote %s, services %u/%u enregistre(s) ; DNS [%s]:%u\n",
+               ot.srpRunning ? "actif" : "ARRETE", ot.srpServer[0] ? ot.srpServer : "-", ot.srpPort,
+               ot.host == 0xFF ? "?" : otSrpClientItemStateToString((otSrpClientItemState)ot.host), ot.svcReg,
+               ot.svcTotal, ot.dns[0] ? ot.dns : "-", ot.dnsPort);
+  } else {
+    out.println("  MLE, SRP        : verrou OpenThread occupe, reessayer");
+  }
+
+  if (chipOk) {
+    out.printf("  abonnements     : %lu actif(s), %lu lecture(s) en cours ; ", (unsigned long)subs,
+               (unsigned long)reads);
+    if (nSaved == -2) out.println("pas de stockage");
+    else if (nSaved < 0) out.println("sauves : iterateur occupe");
+    else out.printf("%lu sauve(s)%s\n", (unsigned long)total, total ? " :" : "");
+    for (int i = 0; i < nSaved; i++) {
+      char node[24];
+      nodeText(node, sizeof(node), saved[i].node);
+      out.printf("                    abonne %s (fabrique %u), id 0x%08lX, %lu echec(s) de reprise, min %u s, "
+                 "max %u s\n",
+                 node, saved[i].fabric, (unsigned long)saved[i].id, (unsigned long)saved[i].retries, saved[i].minS,
+                 saved[i].maxS);
+    }
+  } else {
+    out.println("  abonnements     : pile occupee, reessayer");
+  }
+
+  out.printf("  abonnes (IM)    : %lu demande(s), %lu neuf(s), %lu repris, %lu termine(s) ; premier etabli ",
+             (unsigned long)sb.requested, (unsigned long)sb.fresh, (unsigned long)sb.resumed,
+             (unsigned long)sb.terminated);
+  if (sb.firstAt) out.printf("a +%s s\n", secs(a, sizeof(a), sb.firstAt));
+  else out.println(": aucun depuis le demarrage");
+  if (sb.requested) {
+    char node[24];
+    nodeText(node, sizeof(node), sb.reqPeer);
+    out.printf("                    derniere demande a +%s s par %s : plancher %u s, max %u s -> %u s\n",
+               secs(a, sizeof(a), sb.reqAt), node, sb.reqMin, sb.reqMax, sb.reqApplied);
+  }
+
+  out.printf("  reprise         : auto %s ('matter reprise [auto 0|1]') ; %lu lancement(s) dont %lu auto, %lu "
+             "abonnement(s) relance(s) ; CASE %lu ouverte(s), %lu echec(s), %lu sans nouvelles\n",
+             sResumeAuto ? "oui" : "non", (unsigned long)rs.runs, (unsigned long)rs.autoRuns,
+             (unsigned long)rs.launched, (unsigned long)rs.ok, (unsigned long)rs.failed, (unsigned long)rs.lost);
+  if (rs.doneSeq) {
+    out.printf("                    derniere fin a +%s s apres %s s : ", secs(a, sizeof(a), rs.doneAt),
+               secs(b, sizeof(b), rs.doneMs));
+    if (rs.doneErr == CHIP_NO_ERROR.AsInteger()) out.println("session ouverte");
+    else out.printf("erreur 0x%lX\n", (unsigned long)rs.doneErr);
+  }
+  if (watching) out.printf("                    tentative en cours depuis %s s\n", secs(a, sizeof(a), watchAge));
+  else if (sResumeAuto && sPlan.waiting) out.println("                    tentative auto postee");
+  else if (sResumeAuto) {
+    const uint32_t left = sPlan.holdLeftMs(now);
+    if (left) out.printf("                    prochaine auto possible dans %s s (essai %u de l'episode)\n",
+                         secs(a, sizeof(a), left), sPlan.tries + 1);
+  }
+
+  if (sMaxIntCap)
+    out.printf("  intervalle max  : plafonne a %u s pour les abonnements neufs ('matter maxint'), %lu applique(s)\n",
+               sMaxIntCap, (unsigned long)sb.capped);
+  else
+    out.println("  intervalle max  : celui du controleur ('matter maxint <60..3600>' pour plafonner)");
+}
+#endif  // MATTER_NET_THREAD
+
 // ===========================================================================
 //  Cycle de vie
 // ===========================================================================
@@ -440,6 +1365,10 @@ void matterBridgeBegin() {
 #endif
 
 #if MATTER_NET_THREAD
+  // Avant Matter.begin() : le type Thread est applique pendant esp_matter::start
+  // (enveloppe), et les roles du demarrage doivent etre dans l'historique.
+  loadThreadSettings();
+  hookRoleChanges();
   // Avant le premier begin() d'accessoire : c'est lui qui cree le noeud, et le
   // core refuse ensuite de changer de reseau. BLE garde pour l'appairage.
   if (!Matter.selectNetwork(MATTER_NETWORK_THREAD))
@@ -477,13 +1406,26 @@ void matterBridgeBegin() {
   if (!sMatterStarted) {
     Serial.println("!! pile Thread absente : ni garde d'antenne, ni etat Thread");
   } else {
-#if MATTER_THREAD_MED
-    // esp_matter met Thread en routeur a chaque demarrage : on l'ecrase.
+    // Mode en place a la sortie de Matter.begin() : MED ('rn') si l'enveloppe a
+    // agi, FTD ('rdn') sinon. Lu sous le verrou OT, relache avant celui de la pile.
+    if (otLockTry(100)) {
+      sModeAtBegin = otThreadGetLinkMode(esp_openthread_get_instance());
+      sModeKnown = true;
+      esp_openthread_lock_release();
+    }
+    if (sMedBoot != kMedRouter) {
+      // Mode 2 (ancien) : esp_matter a mis Thread en routeur, on l'ecrase, et
+      // OpenThread relance l'attache. Mode 1 : deja MED, OpenThread sort sans
+      // rien faire (meme mode) ; filet si l'enveloppe manque au lien.
+      chip::DeviceLayer::PlatformMgr().LockChipStack();
+      chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
+          chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
+      chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    }
+    // Suivi des abonnements : un seul rappel applicatif par pile, libre (nm).
     chip::DeviceLayer::PlatformMgr().LockChipStack();
-    chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
-        chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
+    chip::app::InteractionModelEngine::GetInstance()->RegisterReadHandlerAppCallback(&sSubWatch);
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
-#endif
     // Pile OpenThread demarree : son verrou existe. Active par defaut ('lampe garde').
     lamp.radio.setAirGuard(&kAirGuard);
   }
@@ -497,6 +1439,9 @@ void matterBridgeBegin() {
 
 void matterBridgePoll() {
   const uint32_t now = millis();
+#if MATTER_NET_THREAD
+  threadPoll(now);  // mesures, traces et relance des abonnements
+#endif
   halo1::MatterIntents in;
   uint32_t first = 0;
   bool ready = false;
@@ -564,24 +1509,11 @@ void matterBridgePoll() {
 
 bool matterIsCommissioned() { return Matter.isDeviceCommissioned(); }
 #if MATTER_NET_THREAD
-// Matter.isDeviceConnected() passe par _IsThreadAttached, qui prend le verrou
-// OpenThread SANS limite de temps (esp_openthread_lock_acquire(portMAX_DELAY),
-// firmware.elf) : appele par la LED a chaque passage de loop(), il pouvait
-// bloquer tick() hors de tout budget (C.9). Ici, un essai sans attente par
-// seconde ; verrou occupe : dernier etat connu, nouvel essai au passage suivant.
+// Releve partage avec la relance des abonnements (netPoll : verrou OT sans
+// attente, au plus une fois par seconde).
 bool matterIsConnected() {
-  static constexpr uint32_t kPollMs = 1000;
-  static uint32_t at = 0;
-  static bool known = false, attached = false;
-  const uint32_t now = millis();
-  if (sMatterStarted && (!known || (uint32_t)(now - at) >= kPollMs) && otLockTry(0)) {
-    const otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());
-    esp_openthread_lock_release();
-    attached = role != OT_DEVICE_ROLE_DISABLED && role != OT_DEVICE_ROLE_DETACHED;
-    known = true;
-    at = now;
-  }
-  return attached;
+  netPoll(millis());
+  return sNet.known && roleAttached(sNet.role);
 }
 #else
 bool matterIsConnected() { return Matter.isDeviceConnected(); }
@@ -615,6 +1547,7 @@ void matterPrintStatus(Print &out) {
     if (parent) out.printf(", parent %d dBm", rssi);
     out.println();
   }
+  if (sMatterStarted) threadStatus(out);
 #elif CONFIG_ENABLE_CHIPOBLE
   out.println("  commissioning   : BLE (le Wi-Fi est fourni par le controleur)");
 #else
