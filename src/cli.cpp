@@ -96,7 +96,7 @@ static void cmdHelp() {
   Serial.println("  matter med [0|1|2]    type Thread au PROCHAIN demarrage (NVS) : 0 routeur, 1 MED des");
   Serial.println("                        l'init, 2 MED apres Matter.begin() (ancien : une attache de plus)");
   Serial.println("  matter maxint [s]     plafond de l'intervalle max des abonnements neufs (NVS) :");
-  Serial.println("                        180 par defaut, 0 = celui d'Apple, 60..3600 ; vaut au");
+  Serial.println("                        20 par defaut, 0 = celui d'Apple, 10..3600 ; vaut au");
   Serial.println("                        prochain abonnement neuf d'Apple, pas pour un repris");
 #endif
 #endif
