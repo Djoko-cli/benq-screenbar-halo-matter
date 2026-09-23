@@ -47,8 +47,9 @@ class Halo1Lamp {
   uint8_t lastAuto() const { return lastAuto_; }
   // Appuis sur A entendus de la telecommande depuis le demarrage, jamais remis a
   // zero ('lampe stats raz' compris) : le pont Matter reflete chaque changement
-  // par une impulsion d'EP4, sans rien emettre. Les copies d'un meme appui
-  // comptent une fois ; nos propres trames A n'y passent jamais (onAir seul).
+  // par une impulsion d'EP4 s'il est expose (HALO1_EXPOSE_AUTO), sans rien
+  // emettre. Les copies d'un meme appui comptent une fois ; nos propres trames
+  // A n'y passent jamais (onAir seul).
   uint32_t remoteAutoCount() const { return remoteAutoPresses_; }
   // Consignes livrees en entier (une trame livree, et plus aucune tranche
   // active) et abandons ("injoignable"), depuis le demarrage, jamais remis a

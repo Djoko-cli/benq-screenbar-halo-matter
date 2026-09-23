@@ -14,22 +14,68 @@ Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
 | EP1 "Halo" | Color Temperature Light | marche/arret, luminosite, temperature 153-370 mireds |
 | EP2 "Halo avant" | On/Off Light | lampe avant allumee (marche ET lampe avant) |
 | EP3 "Halo arriere" | On/Off Light | lampe arriere allumee (marche ET lampe arriere) |
-| EP4 "Halo auto" | On/Off Plug-in Unit | appui sur le bouton A (mode auto), revient seul a off apres 1 s (`matter impulsion <ms>`) ; un appui A sur la telecommande y fait la meme impulsion |
+| ~~EP4 "Halo auto"~~ | On/Off Plug-in Unit | **desactive par defaut** (voir plus bas) : appui sur le bouton A (mode auto), revient seul a off apres 1 s (`matter impulsion <ms>`) ; un appui A sur la telecommande y fait la meme impulsion |
 
 - Une trame radio ne porte qu'une valeur : les deux lampes partagent la
   luminosite et la temperature, d'ou un seul curseur de chaque sur EP1.
 - Allumer EP1 retrouve la derniere selection de lampes, comme le bouton marche
   de la telecommande. Eteindre EP2 puis EP3 eteint la lampe.
-- EP4 est ignore quand la lampe est eteinte, et quand il arrive avec un ordre
-  marche ou lampe (commande de piece, tuile regroupee) : dans Apple Home,
-  afficher les accessoires en tuiles separees.
+- EP4, s'il est reactive, est ignore quand la lampe est eteinte, et quand il
+  arrive avec un ordre marche ou lampe (commande de piece, tuile regroupee) :
+  dans Apple Home, afficher les accessoires en tuiles separees.
 - Les noms se donnent dans l'app. Les Kelvin (~6500 a ~2700 K) sont nominaux,
   non mesures.
 - Dans `src/config.h` : `HALO1_SELECTORS_AS_LIGHTS 0` expose EP2 et EP3 en
-  prises (un "eteins les lumieres" de piece n'y touche plus),
-  `HALO1_EXPOSE_AUTO 0` retire EP4.
+  prises (un "eteins les lumieres" de piece n'y touche plus).
 - Rien n'est emis vers la lampe au demarrage : le noeud reprend l'etat sauve,
   et seul un ordre (Matter ou `lampe ...`) fait emettre.
+
+### EP4 "Halo auto" : desactive pour l'instant
+
+Depuis la 0.3.0 (decision du 23/09), `HALO1_EXPOSE_AUTO` vaut 0 par defaut :
+le bouton A n'est plus expose dans Matter. Le code reste, compile hors du
+firmware : ni endpoint, ni miroir des A de la telecommande, ni reglage
+d'impulsion (`matter impulsion` le dit, `matter` affiche « bouton A (EP4) :
+desactive »). EP1 a EP3 gardent leurs numeros (EP4 etait cree en dernier).
+Le bouton A reste accessible a la console : `lampe auto`.
+
+Sur un noeud deja appaire, EP4 disparait de la liste des endpoints du noeud ;
+la facon dont Apple Home retire la tuile « Halo auto » reste a verifier sur le
+terrain.
+
+Pour le **remettre**, ajouter `-DHALO1_EXPOSE_AUTO=1` aux `build_flags` de
+l'environnement (par exemple `[env:esp32c6thread]` dans `platformio.ini`), ou
+changer la valeur par defaut dans `src/config.h`, puis reflasher. EP4 revient
+avec le meme numero, sa duree d'impulsion sauvee en NVS (`halo1/impulsion`) est
+reprise, et l'app le montre comme un nouvel accessoire a ranger.
+
+### Identite du noeud
+
+Le cluster Basic Information (EP0) porte l'identite du produit, posee a chaque
+demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
+`MATTER_*`, surchargeables par `-D`) :
+
+| Attribut | Valeur |
+|---|---|
+| VendorName | `Djoko-CLI` |
+| ProductName | `Pont ScreenBar Halo` |
+| NodeLabel | `Halo` (reecrit a chaque demarrage : un nom pose par un controleur dans cet attribut est remplace) |
+| SerialNumber | `HALO1-` + l'adresse MAC d'usine en 12 chiffres hexa, unique par carte |
+| HardwareVersion / HardwareVersionString | `1` / `ESP32-C6 SuperMini + BM5602` |
+| SoftwareVersionString | `0.3.0-<commit>` (« Programme interne » dans Apple Home) |
+
+- Le VID et le PID ne changent pas (`0xFFF1` / `0x8000`, certificat de test),
+  ni le discriminateur et le code d'appairage : pas de remise en service. Une
+  app peut mettre un moment a relire ces valeurs.
+- `SoftwareVersionString` est la version du descripteur d'application
+  (`esp_app_desc`), que `src/app_desc.c` remplace : sans lui, c'etait le commit
+  du lib-builder d'Arduino (`6671d0b`). `FW_VERSION` se regle dans
+  `platformio.ini` (`build_src_flags`) ; le commit vient de `tools/git_rev.py`,
+  suivi de `-dirty` si un fichier suivi etait modifie a la compilation.
+- `matter` affiche ces valeurs telles que la pile les rapporte (lignes
+  `identite` et `versions`), et signale toute valeur refusee. Le demarrage
+  affiche `firmware 0.3.0-<commit>` ; sans carte, `esptool.py --chip esp32c6
+  image-info .pio/build/<env>/firmware.bin` montre la meme (`App version`).
 
 > **Mise a jour depuis une version precedente** : la disposition des endpoints
 > a change (avant : alimentation, lumiere avant, halo arriere, capteur, mode
@@ -232,8 +278,8 @@ la CSA et une certification — hors de portée d'un projet perso.
 | Commande | Effet |
 |---|---|
 | `info` | materiel, configuration radio, etat du pilote |
-| `matter` | etat Matter, code d'appairage, compteurs du pont, demandes Identify |
-| `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS |
+| `matter` | etat Matter, code d'appairage, identite du noeud et versions, compteurs du pont, demandes Identify |
+| `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS (EP4 reactive seulement ; sinon un message le dit) |
 | `matter reprise` | (Thread) relance tout de suite la reprise des abonnements sauves d'Apple Home |
 | `matter reprise auto [0\|1]` | (Thread) relance seule apres un redemarrage : Thread + SRP prets depuis 10 s, pas avant 50 s (plus le plancher sauve), pour chaque abonne sauve sans abonnement actif ; session CASE d'abord (un echec ne coute rien a la pile), reprise ensuite ; puis 30 s, 60 s, 5 min apres chaque echec, et un coup d'oeil toutes les 5 min tant qu'un abonnement est actif (NVS) |
 | `matter med [0\|1\|2]` | (Thread) type au prochain demarrage : 0 routeur, 1 MED des l'init (sans nouvelle attache), 2 MED apres `Matter.begin()` (ancien) (NVS) |
@@ -275,7 +321,9 @@ sections Halo 1 a la fin).
 
 ```
 platformio.ini            4 cibles ESP32, plateforme pioarduino, partitions huge_app
-src/config.h              broches, minuteries, limites de la lampe
+src/config.h              broches, minuteries, limites de la lampe, identite Matter
+src/fw_version.h          version du firmware (FW_VERSION + revision git)
+src/app_desc.c            descripteur d'application : version rapportee par Matter
 src/bc5602.{h,cpp}        pilote bas niveau du transceiver
 src/halo.{h,cpp}          demarrage du module, outils de banc (couche Halo 2 neutralisee)
 src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
@@ -291,6 +339,7 @@ src/main.cpp              assemblage, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/WIRING.md            câblage et pièges matériels
 tools/test_halo1.sh       tests hote du protocole Halo 1 et de la LED d'etat, sans carte
+tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 ```
 
 ## Crédits

@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
+#include "config.h"  // HALO1_EXPOSE_AUTO
+
 // Cree les endpoints Matter de la lampe Halo 1 puis demarre la pile. A appeler
 // depuis setup() (la tache loop), apres lamp.begin() : les endpoints partent de
 // la consigne du pilote.
@@ -12,14 +14,17 @@ void matterBridgePoll();
 
 void matterPrintStatus(Print &out);
 
+#if HALO1_EXPOSE_AUTO
 // Duree de l'impulsion d'EP4 "Halo auto" (bouton A), reglable sur le terrain
 // ('matter impulsion <ms>') et gardee en NVS. Hors bornes : refusee (false),
 // rien ne change. Sinon appliquee tout de suite ; *saved dit si l'ecriture NVS
-// a reussi. A appeler depuis la tache loop (CLI).
+// a reussi. A appeler depuis la tache loop (CLI). Sans EP4 (HALO1_EXPOSE_AUTO
+// 0, defaut depuis le 23/09) : rien de tout cela, la valeur NVS reste.
 constexpr uint16_t kMatterPulseMinMs = 300;
 constexpr uint16_t kMatterPulseMaxMs = 15000;
 uint16_t matterAutoPulseMs();
 bool matterSetAutoPulseMs(uint32_t ms, bool *saved);
+#endif
 void matterDecommissionNow();
 bool matterIsCommissioned();
 bool matterIsConnected();

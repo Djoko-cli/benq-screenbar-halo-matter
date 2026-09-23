@@ -86,8 +86,33 @@
 // ===========================================================================
 //  Matter
 // ===========================================================================
-#ifndef FW_VERSION
-#define FW_VERSION "0.2.0"
+// FW_VERSION, FW_GIT_REV et FW_VERSION_FULL : fw_version.h (platformio.ini).
+#include "fw_version.h"
+
+// Identite du noeud (Basic Information, EP0), decisions de Majid du 23/09.
+// Posee a chaque demarrage avant Matter.begin() (matter_bridge.cpp) ; le VID et
+// le PID restent ceux du certificat de test (0xFFF1 / 0x8000) : les changer
+// casserait l'appairage. Chaines de 32 caracteres au plus (64 pour la version
+// materielle), verifie a la compilation. Numero de serie : prefixe + adresse
+// MAC d'usine en 12 chiffres hexa, unique par carte. La version logicielle
+// ("Programme interne") est FW_VERSION_FULL, via src/app_desc.c.
+#ifndef MATTER_VENDOR_NAME
+#define MATTER_VENDOR_NAME "Djoko-CLI"
+#endif
+#ifndef MATTER_PRODUCT_NAME
+#define MATTER_PRODUCT_NAME "Pont ScreenBar Halo"
+#endif
+#ifndef MATTER_NODE_LABEL
+#define MATTER_NODE_LABEL "Halo"              // NodeLabel, reecrit a chaque demarrage
+#endif
+#ifndef MATTER_HW_VERSION
+#define MATTER_HW_VERSION 1
+#endif
+#ifndef MATTER_HW_VERSION_STRING
+#define MATTER_HW_VERSION_STRING "ESP32-C6 SuperMini + BM5602"  // montage de reference
+#endif
+#ifndef MATTER_SERIAL_PREFIX
+#define MATTER_SERIAL_PREFIX "HALO1-"
 #endif
 
 // Appui long sur ce bouton = retrait de toutes les fabriques Matter
@@ -180,7 +205,7 @@
 #define HALO1_REFLECT_MIN_MS 250       // ecart minimal entre deux reflets vers Matter
 #endif
 #ifndef HALO1_AUTO_PULSE_MS
-#define HALO1_AUTO_PULSE_MS 1000       // EP4 (bouton A) revient a off apres 1 s ; 'matter impulsion' en NVS
+#define HALO1_AUTO_PULSE_MS 1000       // EP4 (si expose) revient a off apres 1 s ; 'matter impulsion' en NVS
 #endif
 #ifndef HALO1_BOOT_IGNORE_MS
 #define HALO1_BOOT_IGNORE_MS 2000      // ordres Matter ignores juste apres le demarrage
@@ -191,8 +216,12 @@
 #ifndef HALO1_SELECTORS_AS_LIGHTS
 #define HALO1_SELECTORS_AS_LIGHTS 1    // lampes avant/arriere : lumieres (1) ou prises (0), A1
 #endif
+// Bouton A dans Matter (A2) : EP4 "Halo auto". Desactive le 23/09 (decision de
+// Majid) : ni endpoint, ni miroir des A de la telecommande, ni 'matter
+// impulsion'. Code garde : -DHALO1_EXPOSE_AUTO=1 le remet (README). EP1 a EP3
+// gardent leurs numeros, EP4 etant cree en dernier.
 #ifndef HALO1_EXPOSE_AUTO
-#define HALO1_EXPOSE_AUTO 1            // bouton A expose dans Matter (A2)
+#define HALO1_EXPOSE_AUTO 0
 #endif
 #ifndef HALO1_AIR_GUARD_WAIT_US
 #define HALO1_AIR_GUARD_WAIT_US 6000   // garde Thread : fin d'une trame 802.15.4 deja partie (4,3 ms + accuse)

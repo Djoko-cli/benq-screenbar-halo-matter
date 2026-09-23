@@ -595,7 +595,7 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
       remoteAt_ = now;
       // 3 copies par appui : comptees une fois (AutoPressFilter).
       const bool press = remoteAuto_.feed(p.value, now);
-      if (press) remoteAutoPresses_++;  // reflete dans Matter par le pont (EP4)
+      if (press) remoteAutoPresses_++;  // reflete dans Matter par le pont (EP4, s'il est expose)
       noteAuto(p.value, now);
       trace("[lampe] RX tele PID %u %02X %02X -> A numero %u%s", f.pid, p.flags, p.value, p.value,
             press ? "" : " (copie)");

@@ -2,6 +2,10 @@
 
 #include <Matter.h>
 #include <Preferences.h>
+#include <esp_app_desc.h>
+#include <esp_mac.h>
+#include <platform/ConfigurationManager.h>
+#include <platform/DeviceInstanceInfoProvider.h>
 #include <stdarg.h>
 
 #include "config.h"
@@ -113,11 +117,14 @@ using namespace chip::app::Clusters;
 //  EP3 "Halo arriere"  idem pour la lampe arriere
 //  EP4 "Halo auto"     prise momentanee : un appui sur le bouton A ; un A de
 //                      la telecommande entendu y fait la meme impulsion, sans
-//                      rien emettre
+//                      rien emettre. DESACTIVE par defaut depuis le 23/09
+//                      (HALO1_EXPOSE_AUTO 0) : tout son code est compile hors
+//                      du firmware, rien d'autre ne change.
 //
 //  Les numeros viennent de l'ordre de creation ; les noms se donnent dans
 //  l'app. Matter est multi-admin : le meme noeud se jumelle a Apple Home,
-//  Google Home, Alexa et Home Assistant.
+//  Google Home, Alexa et Home Assistant. L'identite du noeud (fabricant,
+//  produit, numero de serie, versions) est posee avant Matter.begin().
 //
 //  Les callbacks tournent dans la tache CHIP : ils deposent l'ordre dans une
 //  boite d'intentions et c'est tout (ni SPI, ni appel au pilote). La tache
@@ -209,7 +216,7 @@ static_assert(statusled::kEffectBlink == MatterIdentifyRequest::BLINK &&
                   statusled::kEffectStop == MatterIdentifyRequest::STOP,
               "identifiants d'effet Identify");
 
-static constexpr uint8_t kIdentifyEps = 4;              // EP1 a EP4
+static constexpr uint8_t kIdentifyEps = HALO1_EXPOSE_AUTO ? 4 : 3;  // EP1 a EP3, et EP4 s'il existe
 static uint32_t sIdentifyEps = 0;                       // un bit par endpoint en session Identify
 static uint32_t sIdentifyEffectEnd[kIdentifyEps] = {};  // fin d'un TriggerEffect (millis), 0 = aucun
 static uint32_t sIdentifyCount = 0;                     // demandes recues (session ou effet)
@@ -235,11 +242,12 @@ static bool onIdentify(const MatterEndPoint &ep, uint8_t i, bool active) {
 //  Etat du pont (tache loop uniquement)
 // ===========================================================================
 
-static uint32_t sBootMs = 0, sAutoPulseAt = 0, sSeenVersion = 0, sLastReflect = 0;
+static uint32_t sBootMs = 0, sSeenVersion = 0, sLastReflect = 0;
 static bool sBootGuard = true;     // garde-fou de demarrage encore arme
-static bool sAutoPulse = false;    // EP4 a on : impulsion du bouton A en cours
 static bool sForceReflect = true;  // realigner Matter sur la consigne au prochain passage
 #if HALO1_EXPOSE_AUTO
+static uint32_t sAutoPulseAt = 0;
+static bool sAutoPulse = false;       // EP4 a on : impulsion du bouton A en cours
 static uint32_t sSeenRemoteAuto = 0;  // lamp.remoteAutoCount() deja reflete
 // A de la telecommande entendu, EP4 pas encore mis a on : l'impulsion n'a pas
 // commence (sAutoPulseAt = instant de l'appui entendu). Elle part de la montee
@@ -264,10 +272,12 @@ static struct {
 //  1 s. Hypothese : Home ecarte un rapport contraire trop proche de sa propre
 //  ecriture, et ne relit l'attribut que plus tard. La duree se regle donc sans
 //  reflasher ('matter impulsion <ms>'), et reste en NVS : espace de noms du
-//  pilote, une cle a part. Lue et ecrite dans la tache loop seulement.
+//  pilote, une cle a part. Lue et ecrite dans la tache loop seulement. Sans
+//  EP4, ni lue ni ecrite : une valeur deja sauvee attend son retour.
 // ===========================================================================
 
 static const char *const kNvsNs = "halo1";
+#if HALO1_EXPOSE_AUTO
 static const char *const kNvsPulseKey = "impulsion";
 static_assert(HALO1_AUTO_PULSE_MS >= kMatterPulseMinMs && HALO1_AUTO_PULSE_MS <= kMatterPulseMaxMs,
               "HALO1_AUTO_PULSE_MS hors de kMatterPulseMinMs..kMatterPulseMaxMs");
@@ -299,6 +309,7 @@ bool matterSetAutoPulseMs(uint32_t ms, bool *saved) {
   if (saved) *saved = ok;
   return true;
 }
+#endif  // HALO1_EXPOSE_AUTO
 
 // Journal du pont : comme celui du pilote, perdu plutot que d'attendre le port.
 static void bridgeLog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -361,6 +372,8 @@ static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_
   const halo1::Resolution r = halo1::resolveMatter(lamp.target(), in, lamp.memoryLamps());
   if (r.fields) lamp.request(r.target, r.fields);
   const char *autoText = "";
+#if HALO1_EXPOSE_AUTO
+  // Sans EP4, rien ne depose IN_AUTO (onAuto n'est pas branche).
   if (in.has & halo1::IN_AUTO) {
     // resolveMatter applique le garde-fou de groupe (A2) : A arrive avec un
     // ordre marche ou lampe -> commande de piece ou tuile regroupee, ignore.
@@ -374,6 +387,7 @@ static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_
       autoText = r.target.power ? ", A ignore (avec un ordre marche/lampe)" : ", A refuse (lampe eteinte)";
     }
   }
+#endif
   if (lamp.tracing()) {
     char st[48], fl[32];
     Halo1Lamp::describe(lamp.target(), st, sizeof(st));
@@ -1578,6 +1592,108 @@ static void threadStatus(Print &out) {
 #endif  // MATTER_NET_THREAD
 
 // ===========================================================================
+//  Identite du noeud (Basic Information, EP0)
+//
+//  Valeurs de config.h (decisions de Majid du 23/09). La bibliotheque les
+//  garde et ne les publie qu'a Matter.begin() (fournisseur DeviceInstanceInfo
+//  enveloppe, NodeLabel ecrit, attribut SerialNumber cree) : a reposer a CHAQUE
+//  demarrage, avant begin() ; l'ordre par rapport aux begin() d'endpoints est
+//  indifferent. Jamais setSetupDiscriminator ni setSetupPasscode, et ni VID ni
+//  PID : le noeud est appaire dans Apple Home avec le certificat de test.
+//  La version logicielle ("Programme interne") vient du descripteur
+//  d'application (src/app_desc.c), pas d'ici.
+// ===========================================================================
+
+// Bornes de la bibliotheque (MatterIdentity.h) : au-dela, le setter refuse.
+static constexpr size_t kIdMax = 32, kIdHwStringMax = 64;
+static_assert(sizeof(MATTER_VENDOR_NAME) - 1 <= kIdMax, "MATTER_VENDOR_NAME : 32 caracteres au plus");
+static_assert(sizeof(MATTER_PRODUCT_NAME) - 1 <= kIdMax, "MATTER_PRODUCT_NAME : 32 caracteres au plus");
+static_assert(sizeof(MATTER_NODE_LABEL) - 1 <= kIdMax, "MATTER_NODE_LABEL : 32 caracteres au plus");
+static_assert(sizeof(MATTER_HW_VERSION_STRING) - 1 <= kIdHwStringMax, "MATTER_HW_VERSION_STRING : 64 au plus");
+
+// Prefixe + adresse MAC d'usine (eFuse) en 12 chiffres hexa : unique par carte.
+static char sSerial[sizeof(MATTER_SERIAL_PREFIX) + 12] = {};
+static_assert(sizeof(sSerial) - 1 <= kIdMax, "MATTER_SERIAL_PREFIX trop long : numero de serie de 32 au plus");
+
+enum : uint8_t { kIdVendor, kIdProduct, kIdHw, kIdHwString, kIdSerial, kIdNodeLabel, kIdCount };
+static const char *const kIdText[kIdCount] = {"fabricant",       "produit",         "version materielle",
+                                              "materiel (texte)", "numero de serie", "nom du noeud"};
+static uint8_t sIdRefused = 0;  // un bit par valeur refusee (kIdVendor...)
+
+static void applyIdentity() {
+  uint8_t mac[6] = {};
+  const bool macOk = esp_efuse_mac_get_default(mac) == ESP_OK;
+  if (macOk)
+    snprintf(sSerial, sizeof(sSerial), MATTER_SERIAL_PREFIX "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2],
+             mac[3], mac[4], mac[5]);
+  // Evaluees dans l'ordre (liste d'initialisation), toutes meme apres un refus.
+  const bool ok[kIdCount] = {
+      Matter.setVendorName(MATTER_VENDOR_NAME),
+      Matter.setProductName(MATTER_PRODUCT_NAME),
+      Matter.setHardwareVersion(MATTER_HW_VERSION),
+      Matter.setHardwareVersionString(MATTER_HW_VERSION_STRING),
+      macOk && Matter.setSerialNumber(sSerial),  // MAC illisible : numero d'usine de la pile
+      Matter.setDeviceName(MATTER_NODE_LABEL),
+  };
+  for (uint8_t i = 0; i < kIdCount; i++)
+    if (!ok[i]) {
+      sIdRefused |= (uint8_t)(1u << i);
+      Serial.printf("!! identite Matter : %s refuse, valeur d'usine de la pile gardee\n", kIdText[i]);
+    }
+}
+
+// Ce que la pile rapporte aux controleurs, relu apres Matter.begin() : preuve
+// que l'enveloppe est en place. Verrou de la pile borne a 50 ms, comme
+// threadStatus ; sans lui, les valeurs demandees sont affichees a la place.
+// Le nom du noeud (NodeLabel) est toujours la valeur demandee.
+static void printIdentity(Print &out) {
+  char vendor[kIdMax + 1], product[kIdMax + 1], serial[kIdMax + 1], hwString[kIdHwStringMax + 1],
+      sw[chip::DeviceLayer::ConfigurationManager::kMaxSoftwareVersionStringLength + 1];
+  uint16_t hw = MATTER_HW_VERSION;
+  auto get = [](CHIP_ERROR e, char *b) {
+    if (e != CHIP_NO_ERROR) strcpy(b, "?");  // "?" tient dans tous les tampons
+  };
+  bool locked = false, fromStack = false;
+  for (uint32_t t0 = millis(); !locked && (uint32_t)(millis() - t0) < 50;) {
+    locked = chip::DeviceLayer::PlatformMgr().TryLockChipStack();
+    if (!locked) delay(1);
+  }
+  if (locked) {
+    chip::DeviceLayer::DeviceInstanceInfoProvider *p = chip::DeviceLayer::GetDeviceInstanceInfoProvider();
+    if (p) {
+      get(p->GetVendorName(vendor, sizeof(vendor)), vendor);
+      get(p->GetProductName(product, sizeof(product)), product);
+      get(p->GetSerialNumber(serial, sizeof(serial)), serial);
+      get(p->GetHardwareVersionString(hwString, sizeof(hwString)), hwString);
+      if (p->GetHardwareVersion(hw) != CHIP_NO_ERROR) hw = 0;
+      fromStack = true;
+    }
+    get(chip::DeviceLayer::ConfigurationMgr().GetSoftwareVersionString(sw, sizeof(sw)), sw);
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+  } else {
+    snprintf(sw, sizeof(sw), "%s", esp_app_get_description()->version);
+  }
+  if (!fromStack) {
+    snprintf(vendor, sizeof(vendor), "%s", MATTER_VENDOR_NAME);
+    snprintf(product, sizeof(product), "%s", MATTER_PRODUCT_NAME);
+    snprintf(serial, sizeof(serial), "%s", sSerial[0] ? sSerial : "?");
+    snprintf(hwString, sizeof(hwString), "%s", MATTER_HW_VERSION_STRING);
+  }
+  out.printf("  identite        : %s, %s, n/s %s, nom \"%s\"%s\n", vendor, product, serial, MATTER_NODE_LABEL,
+             fromStack ? "" : locked ? " (demandees : fournisseur absent)" : " (demandees : pile occupee)");
+  out.printf("  versions        : programme %s, materiel %u (%s)\n", sw, hw, hwString);
+  if (strcmp(esp_app_get_description()->version, FW_VERSION_FULL))
+    out.printf("  !! descripteur  : %s au lieu de %s (src/app_desc.c pas lie ?)\n",
+               esp_app_get_description()->version, FW_VERSION_FULL);
+  if (sIdRefused) {
+    out.print("  !! refuse       :");
+    for (uint8_t i = 0; i < kIdCount; i++)
+      if (sIdRefused & (1u << i)) out.printf(" %s", kIdText[i]);
+    out.println(" (valeurs d'usine de la pile a la place)");
+  }
+}
+
+// ===========================================================================
 //  Cycle de vie
 // ===========================================================================
 
@@ -1585,8 +1701,8 @@ void matterBridgeBegin() {
   // La table gamma est deja construite par lamp.begin().
   sLoopTask = xTaskGetCurrentTaskHandle();
   const halo1::State t = lamp.target();
-  loadAutoPulse();
 #if HALO1_EXPOSE_AUTO
+  loadAutoPulse();
   sSeenRemoteAuto = lamp.remoteAutoCount();
 #endif
 
@@ -1630,6 +1746,7 @@ void matterBridgeBegin() {
   autoButton.onIdentify([](bool on) { return onIdentify(autoButton, 3, on); });
 #endif
 
+  applyIdentity();  // avant Matter.begin(), a chaque demarrage
   Matter.begin();
 #if MATTER_NET_THREAD
   // Matter.begin() ne rend rien : un echec d'esp_matter::start ne fait qu'un
@@ -1730,25 +1847,22 @@ void matterBridgePoll() {
   // et le retour a zero de millis() (49,7 jours) ne peut pas le rouvrir.
   if (sBootGuard && (uint32_t)(now - sBootMs) >= HALO1_BOOT_IGNORE_MS + HALO1_COALESCE_MAX_MS)
     sBootGuard = false;
-  const uint32_t pulseAge = now - sAutoPulseAt;
+  bool pulseOver = false;  // sans EP4, jamais d'impulsion
 #if HALO1_EXPOSE_AUTO
   // Montee pas encore ecrite : l'impulsion n'a pas commence, seule l'attente
   // est bornee (un EP4 casse ne garde pas l'impulsion pour toujours).
-  const bool pulseOver = sAutoPulse && pulseAge >= (sAutoRaise ? kAutoRaiseMaxWaitMs : (uint32_t)sAutoPulseMs);
-#else
-  const bool pulseOver = sAutoPulse && pulseAge >= sAutoPulseMs;
-#endif
+  const uint32_t pulseAge = now - sAutoPulseAt;
+  pulseOver = sAutoPulse && pulseAge >= (sAutoRaise ? kAutoRaiseMaxWaitMs : (uint32_t)sAutoPulseMs);
   if (pulseOver) {
     sAutoPulse = false;
-#if HALO1_EXPOSE_AUTO
     if (sAutoRaise) {  // EP4 jamais mis a on apres la fin de l'impulsion
       sAutoRaise = false;
       sStats.autoLost++;
       if (lamp.tracing()) bridgeLog("[matter] A de la telecommande non reflete : EP4 pas ecrit en %lu ms",
                                     (unsigned long)kAutoRaiseMaxWaitMs);
     }
-#endif
   }
+#endif
   const bool changed =
       lamp.version() != sSeenVersion && (uint32_t)(now - sLastReflect) >= HALO1_REFLECT_MIN_MS;
   if (!sForceReflect && !pulseOver && !changed) return;
@@ -1820,10 +1934,13 @@ void matterPrintStatus(Print &out) {
     out.printf("  code manuel     : %s\n", Matter.getManualPairingCode().c_str());
     out.printf("  QR code         : %s\n", Matter.getOnboardingQRCodeUrl().c_str());
   }
+  printIdentity(out);
   out.printf("  endpoints       : EP%u Halo, EP%u Halo avant, EP%u Halo arriere (%s)", mainLight.getEndPointId(),
              frontLamp.getEndPointId(), backLamp.getEndPointId(), HALO1_SELECTORS_AS_LIGHTS ? "lumieres" : "prises");
 #if HALO1_EXPOSE_AUTO
   out.printf(", EP%u Halo auto (bouton A)", autoButton.getEndPointId());
+#else
+  out.print(", EP4 Halo auto desactive");
 #endif
   out.println();
   out.printf("  temperature     : %u-%u mireds = temp 00 (froid) a 64 (chaud), ~%u-%u K nominaux\n",
@@ -1831,16 +1948,19 @@ void matterPrintStatus(Print &out) {
              (unsigned)((1000000UL + halo1::kMiredWarm / 2) / halo1::kMiredWarm));
   out.printf("  luminosite      : niveau 1-254 -> 4C-FE, gamma %.2f ; rapporte jamais sous %u (1-%u = 4C)\n",
              (double)halo1::mapGamma(), halo1::kMatterLevelFloor, halo1::kMatterLevelFloor);
+#if HALO1_EXPOSE_AUTO
   out.printf("  ordres          : %lu fenetres, %lu ignorees au demarrage ; A : %lu appuis, %lu refuses\n",
              (unsigned long)sStats.windows, (unsigned long)sStats.bootIgnored, (unsigned long)sStats.autoFired,
              (unsigned long)sStats.autoRefused);
-#if HALO1_EXPOSE_AUTO
   out.printf("  bouton A (EP4)  : impulsion %u ms ('matter impulsion <%u..%u>', NVS), %lu A de la telecommande "
              "entendu(s), %lu non reflete(s)\n",
              sAutoPulseMs, kMatterPulseMinMs, kMatterPulseMaxMs, (unsigned long)sStats.autoHeard,
              (unsigned long)sStats.autoLost);
 #else
-  out.printf("  bouton A (EP4)  : absent (HALO1_EXPOSE_AUTO 0), impulsion %u ms\n", sAutoPulseMs);
+  out.printf("  ordres          : %lu fenetres, %lu ignorees au demarrage\n", (unsigned long)sStats.windows,
+             (unsigned long)sStats.bootIgnored);
+  out.println("  bouton A (EP4)  : desactive (HALO1_EXPOSE_AUTO 0) : ni endpoint, ni miroir des A de la");
+  out.println("                    telecommande, ni 'matter impulsion' ; 'lampe auto' reste (README)");
 #endif
   out.printf("  identify        : %lu demande(s) recue(s), %s ('led' pour la LED d'etat)\n",
              (unsigned long)__atomic_load_n(&sIdentifyCount, __ATOMIC_RELAXED),
