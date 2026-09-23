@@ -142,47 +142,28 @@ Deux contraintes de build, toutes deux déjà réglées dans `platformio.ini` :
 
 ## Mise en service
 
-### 1. Trouver l'adresse de communication
+### 1. Verifier le lien avec la lampe
 
-C'est **l'étape indispensable**, et elle est indépendante de Matter. Chaque
-paire lampe/télécommande a une adresse radio propre, échangée sous forme
-encodée pendant l'appairage BenQ. Sans elle, rien ne se passe.
+Le firmware connait deja l'adresse de lien de la lampe : `63 FD F0 4F` sur
+l'air, soit `4FF0FD63` dans l'ordre d'ecriture du BM5602, canal 5 (2405 MHz),
+125 kbps. `lampe adresse` l'affiche. Rien a chercher.
 
-À la télécommande, règle exactement :
-- luminosité de la **lampe arrière** à **10 %**
-- température de couleur à **3925 K**
-
-Puis, dans le moniteur série :
+Dans le moniteur serie, ecoute la telecommande pendant que tu la manipules
+(30 s par defaut) :
 
 ```
-find
+ecoute 4FF0FD63 5
 ```
 
-Actionne un réglage toutes les 2–3 secondes pendant la minute de capture pour
-que la télécommande émette. À la fin, le firmware liste les candidats classés
-par nombre d'occurrences :
+Chaque geste doit afficher des trames decodees au CRC juste (`C4 xx` a la
+molette, par exemple). Puis `lampe` montre l'etat du pilote : consigne, etat
+cru, champs a livrer, lien et radio. Une premiere commande, `lampe on` ou
+`lampe lum A0`, doit finir sur une ligne `ok ... accuses`.
 
-```
-=== Recherche d'adresse : resultats ===
-  17 occurrence(s)  adresse = 3A 91 04 C7   ->  addr 3A9104C7
-   1 occurrence(s)  adresse = 08 00 12 FF   ->  addr 080012FF
-```
-
-Applique le plus fréquent, puis vérifie :
-
-```
-addr 3A9104C7
-poll
-```
-
-`poll` doit afficher un état cohérent avec ce que tu vois sur la lampe.
-
-Si la télécommande du Halo 1 ne permet pas de régler exactement 3925 K, utilise
-d'autres valeurs : `find 25 4000` (luminosité arrière en %, température en K).
-Le mot de synchro est recalculé tout seul.
-
-Si `find` ne donne rien, voir [docs/PROTOCOL.md](docs/PROTOCOL.md#retrouver-ladresse-de-communication)
-pour les deux autres méthodes (sniff du bus SPI de la télécommande, HackRF).
+L'adresse de lien depend de la telecommande (elle vient de l'appairage BenQ).
+Pour une autre paire lampe/telecommande, `lampe adresse XXXXXXXX` (ordre
+d'ecriture) l'enregistre en NVS. Comment elle a ete trouvee :
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ### 2. Appairer le nœud Matter
 
@@ -220,52 +201,38 @@ la CSA et une certification — hors de portée d'un projet perso.
 
 | Commande | Effet |
 |---|---|
-| `info` | matériel, configuration radio, état de la lampe |
-| `matter` | état Matter, code d'appairage |
-| `poll` | interroge la lampe maintenant |
-| `debug` | bascule les traces RF (trames émises / ACK / télécommande) |
+| `info` | materiel, configuration radio, etat du pilote |
+| `matter` | etat Matter, code d'appairage, compteurs du pont |
+| `lampe` | pilote Halo 1 : consigne, etat cru, champs a livrer, lien, radio |
+| `lampe on` / `lampe off` | allumer / eteindre, memes regles que Matter |
+| `lampe avant on\|off` / `lampe arriere on\|off` | une lampe (comme EP2 / EP3) |
+| `lampe mode avant\|arriere\|deux` | lampes allumees (et allumage) |
+| `lampe lum 4C..FE` / `lampe niveau 1..254` | luminosite brute (hexa) / niveau Matter |
+| `lampe temp 0..100` / `lampe mired 153..370` | temperature : 0 froid, 100 chaud / en mireds |
+| `lampe auto` | bouton A (refuse lampe eteinte) |
+| `lampe sync` | renvoie tout ce qui est connu |
+| `lampe trace 0\|1` / `lampe stats` | journal par evenement / compteurs |
+| `lampe adresse [8 hexa]` | adresse de la lampe (ordre d'ecriture), en NVS |
+| `lampe help` | toutes les commandes `lampe` (reglages et banc) |
+| `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
 | `regs` | dump des registres du BC5602 |
-| `rfinit` | re-teste le module après correction du câblage, sans reflasher |
-| `addr` / `addr 11223344` | affiche / définit l'adresse |
-| `tail 0102` / `tail ffff` | octets de queue du payload ; `ffff` désactive le contrôle |
-| `chan 5` | canal radio (5 = 2405 MHz, 46, 75) |
-| `find` / `find 25 4000` / `find x550f0a` | recherche d'adresse |
-| `pair` | écoute sur l'adresse d'appairage `E2 08 00 B0` |
-| `sniff` / `normal` | mode sniffer / retour au mode normal |
-| `send 0300320FA0320FA00102` | envoie un payload brut de 10 octets, affiche l'ACK |
-| `erase` | efface la configuration radio |
+| `rfinit` | re-teste le module apres correction du cablage, sans reflasher |
 | `wifi <ssid> <mdp>` | identifiants Wi-Fi (ESP32 classique uniquement) |
 | `decommission` | retire toutes les fabriques Matter |
-| `reboot` | redémarre |
+| `reboot` | sauve l'etat de la lampe, puis redemarre |
 
-## Ce qui reste à confirmer sur le Halo 1
+Les commandes du Halo 2 (`poll`, `send`, `find`, `pair`, `sniff`, `tail`) sont
+retirees : la lampe est un Halo 1, dont le protocole est different.
 
-La **couche radio** du Halo 1 est acquise : même BC5602, même bande
-2405–2475 MHz (dossiers FCC `JVPCR20CCTR` / `JVPCR20C`, plus un teardown du PCB
-sur le fil Home Assistant).
+## Protocole du Halo 1
 
-La **couche applicative** vient en revanche du Halo 2 et n'a jamais été
-vérifiée sur la 1re génération :
-
-- structure exacte du payload de 10 octets ;
-- octets de queue (`01 02` sur le Halo 2 — `tail` permet de les changer,
-  `tail ffff` désactive le contrôle) ;
-- bit 5 du registre de contrôle, documenté « capteur ultrason » sur le Halo 2,
-  alors que le Halo 1 n'a pas de détecteur de présence.
-
-Si `poll` ne renvoie rien de cohérent une fois l'adresse trouvée, la marche à
-suivre est dans cet ordre :
-
-1. `tail ffff` pour lever le contrôle des octets de queue, puis `poll` à nouveau ;
-2. `sniff` et manipule la télécommande : les trames brutes s'affichent, on peut
-   comparer les octets qui bougent avec les réglages modifiés ;
-3. `pair` pendant un appairage : les trames sont alors sur une adresse
-   **connue**, donc capturables même sans avoir trouvé l'adresse de
-   communication.
-
-Le décodage se fait ensuite en ajustant `buildPayload()`, `validate()` et
-`parseStatus()` dans [src/halo.cpp](src/halo.cpp). Rien de tout ça ne touche à
-la couche Matter.
+Le protocole est etabli, et verifie par emission sur la lampe : trame BC5602
+standard (adresse de 4 octets, PCF de 9 bits, CRC-16 materiel), charge de deux
+octets (drapeaux marche / lampes / selecteur, puis valeur), accuse vide. On ne
+peut donc pas lire l'etat de la lampe : le pilote suit celui qu'il lui envoie
+et ce qu'il entend de la telecommande. Detail, preuves et questions encore
+ouvertes : [docs/PROTOCOL.md](docs/PROTOCOL.md) (bloc d'en-tete, puis les
+sections Halo 1 a la fin).
 
 ## Structure
 
@@ -273,13 +240,19 @@ la couche Matter.
 platformio.ini            4 cibles ESP32, plateforme pioarduino, partitions huge_app
 src/config.h              broches, minuteries, limites de la lampe
 src/bc5602.{h,cpp}        pilote bas niveau du transceiver
-src/halo.{h,cpp}          protocole BenQ + machine à états non bloquante
+src/halo.{h,cpp}          demarrage du module, outils de banc (couche Halo 2 neutralisee)
+src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
+src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
+src/halo1_radio.{h,cpp}   sequences BC5602 prouvees, reconfiguration non bloquante
+src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telecommande
+src/cli_lampe.cpp         commandes 'lampe ...'
 src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
 src/main.cpp              assemblage, LED d'état, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/WIRING.md            câblage et pièges matériels
+tools/test_halo1.sh       tests hote du protocole Halo 1, sans carte
 ```
 
 ## Crédits

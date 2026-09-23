@@ -643,6 +643,61 @@ static void testRules() {
   CHECK(plan(r.target, off, r.fields).pb == P(0xC4, 0xFE) && plan(r.target, off, r.fields).pt == P(0xC2, 0x64),
         "allumage + niveau + mireds : trames");
 
+  // Niveau ecrit par la pile sur un On/Off (LevelControl avec la fonction OnOff) :
+  // minimum puis niveau garde, ou minimum si OnLevel est fixe. Ecarte : rien ne
+  // reste a livrer lampe eteinte, qui partirait au prochain allumage a la
+  // telecommande.
+  const uint8_t shown = levelFromRaw(0xA5);
+  const uint8_t stackLevels[] = {1, shown, 254, 0};
+  const State offBases[] = {onBoth, off};
+  for (uint8_t l : stackLevels)
+    for (const State &b : offBases) {
+      in = MatterIntents();
+      in.has = IN_POWER | IN_LEVEL;
+      in.level = l;
+      r = resolveMatter(b, in, F_LAMPS);
+      CHECK(!r.target.power && r.target.bright == 0xA5 && r.fields == FLD_FLAGS,
+            "EP1 off + niveau %u (%s) : champs %u lum %02X", l, b.power ? "allumee" : "eteinte", r.fields,
+            r.target.bright);
+      uint8_t dirty = dueFields(r.target, r.fields);
+      const Plan p = plan(r.target, b, dirty);
+      CHECK(!p.bright && p.temp && p.pt == P(0x43, 0x35), "EP1 off + niveau %u : trame", l);
+      dirty &= (uint8_t)~coveredBy(p.pt, r.target);
+      CHECK(dirty == 0, "EP1 off + niveau %u : reste %u apres l'extinction", l, dirty);
+    }
+  // EP1 on + niveau affiche : rien de plus que l'allumage, qui part deja avec
+  // la luminosite affichee (A4 (a)).
+  in = MatterIntents();
+  in.has = IN_POWER | IN_LEVEL;
+  in.power = true;
+  in.level = shown;
+  r = resolveMatter(off, in, F_LAMPS);
+  CHECK(r.target == onBoth && r.fields == FLD_FLAGS && dueFields(r.target, r.fields) == (FLD_FLAGS | FLD_BRIGHT),
+        "EP1 on + niveau affiche");
+  r = resolveMatter(onFront, in, F_LAMPS);
+  CHECK(r.target == onFront && r.fields == FLD_FLAGS, "EP1 on + niveau affiche, deja allumee");
+  // Valeur brute hors d'atteinte de Matter (reglee a la telecommande) : le niveau
+  // affiche en donne une voisine, il est ecarte quand meme.
+  unsigned unreachable = 0;
+  for (unsigned v = kBrightMin; v <= kBrightMax && !unreachable; v++)
+    if (rawFromLevel(levelFromRaw((uint8_t)v)) != v) unreachable = v;
+  CHECK(unreachable != 0, "gamma 2 : aucune valeur brute hors d'atteinte");
+  const State offFar = mk(false, F_LAMPS, (uint8_t)unreachable, 0x35);
+  in.level = levelFromRaw((uint8_t)unreachable);
+  r = resolveMatter(offFar, in, F_LAMPS);
+  CHECK(r.target.power && r.target.bright == unreachable && r.fields == FLD_FLAGS,
+        "EP1 on + niveau affiche, lum %02X hors d'atteinte", unreachable);
+  // EP1 on + un autre niveau (OnLevel) : ordre de luminosite garde.
+  in.level = 64;
+  r = resolveMatter(off, in, F_LAMPS);
+  CHECK(r.target.power && r.target.bright == rawFromLevel(64) && r.fields == (FLD_FLAGS | FLD_BRIGHT),
+        "EP1 on + OnLevel");
+  // Niveau seul (curseur), lampe eteinte : toujours differe, jamais ecarte.
+  in.has = IN_LEVEL;
+  in.level = shown;
+  r = resolveMatter(off, in, F_LAMPS);
+  CHECK(r.target == off && r.fields == FLD_BRIGHT, "niveau seul eteinte, egal a la consigne");
+
   // A : seulement lampe allumee et sans intention marche/lampe dans la fenetre.
   CHECK(resolveMatter(onFront, intents("A1"), F_FRONT).fireAuto, "A seul allumee");
   CHECK(!resolveMatter(off, intents("A1"), F_LAMPS).fireAuto, "A seul eteinte");

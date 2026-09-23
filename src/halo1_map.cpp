@@ -93,7 +93,18 @@ uint16_t displayMired(uint16_t attr, uint8_t temp) {
 //  allumee, d'apres l'intention si elle est la, sinon d'apres la consigne.
 // ---------------------------------------------------------------------------
 
-Resolution resolveMatter(const State &base, const MatterIntents &in, uint8_t memoryLamps) {
+Resolution resolveMatter(const State &base, const MatterIntents &order, uint8_t memoryLamps) {
+  // Niveau ecrit par la pile elle-meme : sur EP1, LevelControl a la fonction
+  // OnOff, et un On/Off y deplace CurrentLevel (minimum, puis niveau garde, ou
+  // OnLevel s'il est fixe). Ce niveau arrive dans la meme fenetre que l'ordre
+  // marche. Une extinction ne porte jamais d'ordre de luminosite, et le niveau
+  // affiche pour la consigne n'ajoute rien a un allumage (A4 (a) envoie deja la
+  // luminosite) : on l'ecarte, sinon il resterait a livrer lampe eteinte et
+  // partirait au prochain allumage a la telecommande (E.6-1).
+  MatterIntents in = order;
+  if ((in.has & IN_POWER) && (in.has & IN_LEVEL) &&
+      (!in.power || displayLevel(in.level, base.bright) == in.level))
+    in.has &= (uint8_t)~IN_LEVEL;
   Resolution r;
   r.target = base;
   const uint8_t mem = (memoryLamps & F_LAMPS) ? (uint8_t)(memoryLamps & F_LAMPS) : F_LAMPS;

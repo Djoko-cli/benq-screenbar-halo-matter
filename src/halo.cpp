@@ -428,11 +428,8 @@ void BenqHalo::tick() {
   // tourne toute la nuit en arriere-plan des mesures, et emettait vers la
   // lampe sans qu'on l'ait demande. Or la lampe est un Halo 1 : ce protocole
   // ne la concerne pas. La radio ne bouge plus que sur commande, jusqu'au
-  // pilote Halo 1 ; le code ci-dessous disparait a l'etape C6.
-  // Consequence dans le build produit : un ordre Matter (requestPush) laisse
-  // phase_ sur Push, settled() reste faux et matterBridgePoll() ne reflete
-  // plus rien. Matter accepte les ordres sans les emettre jusqu'a C5 : ne pas
-  // flasher le produit d'ici la.
+  // pilote Halo 1 ; le code ci-dessous disparait a l'etape C6. Depuis C5, le
+  // pont Matter passe par ce pilote (lamp) et n'appelle plus requestPush.
   return;
   if (!radio.present()) return;
   uint32_t now = millis();

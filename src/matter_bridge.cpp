@@ -98,16 +98,17 @@ static bool onAuto(bool on) { return on ? post(halo1::IN_AUTO, [](halo1::MatterI
 // ===========================================================================
 
 static uint32_t sBootMs = 0, sAutoPulseAt = 0, sSeenVersion = 0, sLastReflect = 0;
+static bool sBootGuard = true;     // garde-fou de demarrage encore arme
 static bool sAutoPulse = false;    // EP4 a on : impulsion du bouton A en cours
 static bool sForceReflect = true;  // realigner Matter sur la consigne au prochain passage
 static struct {
-  uint32_t windows, bootIgnored, autoFired, autoRefused, reflects, writes, writeFails, logDropped;
+  uint32_t windows, bootIgnored, autoFired, autoRefused, reflects, writes, writeFails, lockBusy, logDropped;
 } sStats = {};
 
 // Journal du pont : comme celui du pilote, perdu plutot que d'attendre le port.
 static void bridgeLog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void bridgeLog(const char *fmt, ...) {
-  char line[160];
+  char line[192];  // la trace la plus longue d'une fenetre fait 171 caracteres
   va_list ap;
   va_start(ap, fmt);
   int n = vsnprintf(line, sizeof(line), fmt, ap);
@@ -155,7 +156,8 @@ static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_
   // Garde-fou : rien n'est emis au demarrage. Un controleur ne peut pas ecrire
   // aussi tot ; un ordre la vient de la pile elle-meme. La fenetre est jugee a
   // son premier ordre, pour qu'elle ne passe pas en se refermant apres le delai.
-  if ((uint32_t)(first - sBootMs) < HALO1_BOOT_IGNORE_MS) {
+  // Difference signee : un ordre depose pendant Matter.begin() precede sBootMs.
+  if (sBootGuard && (int32_t)(first - sBootMs) < (int32_t)HALO1_BOOT_IGNORE_MS) {
     sStats.bootIgnored++;
     bridgeLog("[matter] ordres ignores au demarrage :%s", what);
     return;
@@ -229,17 +231,24 @@ static void syncAttr(MatterEndPoint &ep, uint32_t cluster, uint32_t attr, F want
 }
 
 // Sous le verrou de la pile : aucun ordre d'un controleur ne s'intercale. false
-// si rien n'a ete fait (verrou refuse, ou ordre arrive entre-temps).
+// si rien n'a ete fait (verrou occupe, ou ordre arrive entre-temps).
 static bool reflect(uint32_t now) {
-  const esp_matter::lock::status_t st = esp_matter::lock::chip_stack_lock(portMAX_DELAY);
-  if (st == esp_matter::lock::FAILED) return false;
+  // Sans attendre : la tache CHIP garde le verrou pendant tout un evenement
+  // (crypto PASE/CASE : des centaines de ms), et tick() ne doit pas s'arreter
+  // (C.9). Occupe : nouvel essai au passage suivant, ~1 ms plus tard.
+  // chip_stack_lock() avec un delai fini ferait un seul essai, dormirait, puis
+  // afficherait une erreur a chaque refus.
+  if (!chip::DeviceLayer::PlatformMgr().TryLockChipStack()) {
+    sStats.lockBusy++;
+    return false;
+  }
   // La tache CHIP ecrit les attributs sous ce verrou : un ordre arrive juste
   // avant lui est deja dans la boite, et passe d'abord (curseur en cours).
   portENTER_CRITICAL(&sInboxMux);
   const bool pending = sInbox.has != 0;
   portEXIT_CRITICAL(&sInboxMux);
   if (pending) {
-    if (st == esp_matter::lock::SUCCESS) esp_matter::lock::chip_stack_unlock();
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
     return false;
   }
   const halo1::State t = lamp.target();
@@ -255,9 +264,12 @@ static bool reflect(uint32_t now) {
   syncAttr(frontLamp, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)front; });
   syncAttr(backLamp, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)back; });
 #if HALO1_EXPOSE_AUTO
-  syncAttr(autoButton, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)sAutoPulse; });
+  // Jamais remis a on : seul un controleur l'y met. Remis a off par un
+  // controleur pendant l'impulsion, il y reste.
+  syncAttr(autoButton, OnOff::Id, OnOff::Attributes::OnOff::Id,
+           [&](uint16_t cur) { return (uint16_t)(sAutoPulse && cur); });
 #endif
-  if (st == esp_matter::lock::SUCCESS) esp_matter::lock::chip_stack_unlock();
+  chip::DeviceLayer::PlatformMgr().UnlockChipStack();
   sSeenVersion = lamp.version();
   sForceReflect = false;
   sLastReflect = now;
@@ -272,7 +284,6 @@ static bool reflect(uint32_t now) {
 void matterBridgeBegin() {
   // La table gamma est deja construite par lamp.begin().
   sLoopTask = xTaskGetCurrentTaskHandle();
-  sBootMs = millis();
   const halo1::State t = lamp.target();
 
   mainLight.begin(t.power, halo1::levelFromRaw(t.bright), halo1::miredFromTemp(t.temp));
@@ -298,6 +309,9 @@ void matterBridgeBegin() {
 #endif
 
   Matter.begin();
+  // Matter.begin() attend la fin de l'init de la pile, dont les ecritures de
+  // demarrage passent par les callbacks : le delai du garde-fou part d'ici.
+  sBootMs = millis();
   // Premier reflet force : la pile a pu restaurer d'autres valeurs depuis la NVS.
   sForceReflect = true;
 }
@@ -324,6 +338,11 @@ void matterBridgePoll() {
   // Jamais de reflet tant que la boite contient des intentions : un curseur en
   // cours ne revient pas en arriere.
   if (pending) return;
+  // Boite vide apres le delai et la fenetre la plus longue : toute fenetre
+  // ouverte pendant le delai est refermee. Le garde-fou se desarme pour de bon,
+  // et le retour a zero de millis() (49,7 jours) ne peut pas le rouvrir.
+  if (sBootGuard && (uint32_t)(now - sBootMs) >= HALO1_BOOT_IGNORE_MS + HALO1_COALESCE_MAX_MS)
+    sBootGuard = false;
   const bool pulseOver = sAutoPulse && (uint32_t)(now - sAutoPulseAt) >= HALO1_AUTO_PULSE_MS;
   if (pulseOver) sAutoPulse = false;
   const bool changed =
@@ -363,7 +382,7 @@ void matterPrintStatus(Print &out) {
   out.printf("  ordres          : %lu fenetres, %lu ignorees au demarrage ; A : %lu appuis, %lu refuses\n",
              (unsigned long)sStats.windows, (unsigned long)sStats.bootIgnored, (unsigned long)sStats.autoFired,
              (unsigned long)sStats.autoRefused);
-  out.printf("  reflets         : %lu (%lu attributs ecrits, %lu echecs), %lu traces perdues\n",
+  out.printf("  reflets         : %lu (%lu attributs ecrits, %lu echecs, %lu verrou occupe), %lu traces perdues\n",
              (unsigned long)sStats.reflects, (unsigned long)sStats.writes, (unsigned long)sStats.writeFails,
-             (unsigned long)sStats.logDropped);
+             (unsigned long)sStats.lockBusy, (unsigned long)sStats.logDropped);
 }

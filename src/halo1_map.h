@@ -30,6 +30,9 @@ struct MatterIntents {  // derniere valeur gagne dans la fenetre de coalescence
   uint16_t mireds = 0;
 };
 struct Resolution { State target; uint8_t fields = 0; bool fireAuto = false; };
+// Regles E.4. Un niveau venu avec EP1 off, ou avec EP1 on et egal au niveau
+// affiche pour la consigne, est ecarte : c'est la pile qui l'ecrit (LevelControl
+// avec la fonction OnOff).
 Resolution resolveMatter(const State &base, const MatterIntents &in, uint8_t memoryLamps);
 
 // Memoire de selection : derniere selection restee allumee >= stableMs.
