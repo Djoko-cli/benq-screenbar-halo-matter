@@ -1282,3 +1282,120 @@ pauses). Lecture provisoire, a confirmer une par une par `txack` :
 | `83 xx`, `C3 xx` | meme xx que `C2` | variantes de `C2` (marche/arret ?) |
 | `FF 00`, `FE 00`, `FD 00` | en debut et entre les groupes de gestes | reveil / etat ? |
 | `E0 01`, `E0 02`, `FA A8`, `83 35`, `85 A7`, `91 00`, `89 58`, `89 E0` | « autres boutons » | inconnus |
+
+**Bouton de switch de lampe** (capture `logs/btn-switch.log`, appuis repetes ;
+la lampe cycle avant -> arriere -> les deux -> avant). Sequence decodee :
+`C3 35`, `C2 35`, `C2 35` (apres un reveil `FF 00 FD 00 FF 00`), `83 35`,
+`C3 35` -- chaque etat emis 3 fois. L'ordre C3 -> C2 -> 83 -> C3 est bien le
+cycle les deux -> avant -> arriere -> les deux. Le 2e octet (`35` = 53) ne
+bouge pas : c'est la temperature de couleur courante, renvoyee avec le mode.
+
+| 1er octet | bits | lampe |
+|---|---|---|
+| `C2` | `1100 0010` | avant seule |
+| `83` | `1000 0011` | arriere seule |
+| `C3` | `1100 0011` | les deux |
+
+Lecture du 1er octet comme champ de bits, **a confirmer par emission** :
+bit 7 = marche, bit 6 = lampe avant, bit 0 = lampe arriere, bit 1 = le 2e
+octet est la temperature, bit 2 = le 2e octet est la luminosite. Elle explique
+toutes les valeurs deja vues : `C4` (luminosite, avant), `C5` (luminosite, les
+deux), `85` (luminosite, arriere), `44` (eteinte, avant), `C2/83/C3`
+(temperature + mode). La telecommande envoie donc des ETATS ABSOLUS et non des
+bascules -- d'ou le renvoi sans risque du meme etat (`C2 35` deux fois).
+
+**Bouton A et bouton favori** (captures `logs/btn-A.log`, `btn-A2.log`,
+`btn-A3.log` ; l'ecoute horodate desormais chaque trame a la milliseconde).
+Chronologie de `btn-A3.log` (reveil par le bouton favori, puis bouton A) :
+
+| t (ms) | charge | lecture |
+|---|---|---|
+| 2532-2940 | `FF 00` `FF 00` `FE 00` `FF 00` `FD 00` `FF 00` | reveil |
+| 3043 | `FA A8`, NO_ACK=1 | seule trame sans demande d'accuse |
+| 3143 | `83 35` | mode arriere seule, temperature 53 |
+| 3244-3345 | `85 A7` x2 | luminosite A7, arriere seule |
+| 3446-3548 | `91 00` x2 | bit 4, arriere seule |
+| 4048-4250 | `89 58`, `89 E0` x2 | bit 3, arriere seule |
+| 7588 | `A1 01` | bouton A, compteur 1 |
+| 10892-11304 | reveil | |
+| 13202-13405 | `A1 02` x2 | bouton A, compteur 2 |
+| 16445-16824 | reveil | |
+| 17042-17244 | `A1 03` x3 | bouton A, compteur 3 |
+
+Le bloc 3143-4250 (favori) rejoue un etat complet : mode, luminosite, puis
+deux reglages encore inconnus (bits 3 et 4). C'est exactement la liste des
+« autres boutons » de la premiere capture. Le bouton A emet `E0 nn` quand la
+lampe avant seule est active, `A1 nn` en arriere seule, `60 01` une fois
+(bit 7 a zero) : le haut et le bas de l'octet suivent le mode de lampe, le
+bit 5 designe le bouton A. Le 2e octet compte les appuis successifs sur A
+(01, 02, 03... jusqu'a 05 vu) et repart a 01 apres une pause ou une autre
+commande. Constat de l'utilisateur sur `btn-A3.log` : apres le favori, la
+lampe est bien passee en **arriere seule** (confirme la lecture de `83`,
+predite avant son retour) ; **deux appuis brefs** sur A, **rien de visible**
+-- mais trois trames `A1 01/02/03`. Le 1 pour 1 appui/trame n'est donc pas
+acquis : la telecommande pourrait emettre A d'elle-meme (mode automatique
+entretenu ?). A trancher par un appui unique suivi d'un long silence.
+
+Lecture de travail du 1er octet (a confirmer par emission) :
+
+| bit | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+|---|---|---|---|---|---|---|---|---|
+| sens | marche | avant | bouton A | reglage ? | reglage ? | luminosite | temperature | arriere |
+
+`FF`, `FE`, `FD`, `FA` (tous les bits hauts a 1) sortent de ce schema :
+trames de service (reveil, annonce).
+
+**Appui unique sur A** (`logs/btn-A4.log`, lampe en avant seule, puis 21 s
+sans toucher la telecommande) : un seul evenement `E0 01` x3 a 9,8 s, puis
+un reveil sans commande a 13,1 s, puis silence. La telecommande n'emet donc
+pas A d'elle-meme ; les trames en trop des essais precedents etaient des
+doubles detections du bouton tactile. Effet observe : la lampe avant
+**baisse puis remonte**, la temperature semble bouger aussi (incertain).
+Lecture : A = bascule du mode automatique (capteur), 2e octet = numero
+d'appui pour que la lampe ignore les repetitions.
+
+**Verification sur toutes les captures** (tous les `logs/*.log`, 18 valeurs
+distinctes de 1er octet) : `05 42 43 44 60 83 85 89 91 A1 C2 C3 C4 E0` ont
+toutes exactement un bit de reglage parmi les bits 1 a 5, et au moins une
+lampe (bit 6 ou bit 0) ; les seules exceptions sont `FA FD FE FF`. Le bouton
+marche/arret renvoie la derniere trame d'etat avec le bit 7 inverse, dans
+chaque mode : `C4 ED`/`44 ED` (avant, apres la molette), `85 A7`/`05 A7`
+(arriere), `C3 35`/`43 35` (les deux), `C2 35`/`42 35` (avant).
+Le favori a ete rejoue deux fois dans `ecoute-tele2.log` : `83 35`, `85 A7`,
+`91 00`, puis `89 58` ou `89 00`, puis `89 E0`.
+
+### Semantique CONFIRMEE par emission (23/09, telecommande sans piles)
+
+Outil : `txack 4FF0FD63 5 <charge> 3 300` (trois trames, 300 ms d'ecart,
+comme la telecommande). Logs `logs/tx-sem-*.log`. Chaque ligne : 3 accuses
+sur 3, puis observation de l'utilisateur, prediction ecrite AVANT.
+
+| test | charge | prediction | observe |
+|---|---|---|---|
+| 1 | `C3 35` x1 | les deux lampes | **rien** (voir plus bas) |
+| 1 bis | `C3 35` x3 | les deux lampes | les deux lampes |
+| 2 | `83 35` | arriere seule | arriere seule |
+| 3 | `C2 35` | avant seule | avant seule |
+| 4a | `C2 00` | un extreme de temperature | **le plus froid** |
+| 4b | `C2 64` | l'autre extreme | **le plus chaud** |
+| 5a | `42 64` | extinction | eteinte |
+| 5b | `C3 35` | rallumage, les deux, temperature moyenne | les trois a la fois |
+| 6a | `E1 01` (jamais vu, construit) | A : baisse puis remonte, les deux restent | conforme |
+| 6b | `E1 01` renvoye deux fois | rien (numero deja traite) | rien, deux fois |
+| 6c | `E1 02` | nouvelle reaction | baisse puis remonte |
+
+Acquis :
+- 1er octet = champ de bits : b7 marche, b6 avant, b0 arriere, b5 bouton A,
+  b2 luminosite, b1 temperature (b3, b4 : favori, non testes). Une valeur
+  jamais emise par la telecommande (`E1`) est comprise : la lecture en champ
+  de bits est la bonne, pas une table de codes.
+- Les trames d'etat sont ABSOLUES : mode, marche et temperature s'imposent
+  quel que soit l'etat precedent, et plusieurs en une trame (test 5b).
+- Temperature : `00` = le plus froid, `64` (100) = le plus chaud.
+- Bouton A : evenement, 2e octet = numero d'appui ; un numero deja traite est
+  ignore (6b). Effet visible identique a chaque nouveau numero (baisse puis
+  remonte) : bascule ou relance du reglage automatique, non tranche.
+- **Une trame unique n'a pas suffi** (test 1), trois oui. Hypotheses : la
+  premiere trame reveille le microcontroleur de la lampe, ou la lampe
+  ecarte une trame dont le PID egale celui de la derniere recue. A etudier ;
+  en attendant, emettre chaque commande trois fois comme la telecommande.
