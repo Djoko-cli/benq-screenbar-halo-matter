@@ -56,7 +56,8 @@ class Halo1Radio {
   };
   struct Stats {
     // rearmsOffRx : ceux des rearmements faits sur OMST != RX (les autres sont
-    // periodiques). Incident du 24/09, puce sourde : ~450 par seconde.
+    // periodiques). Incident du 24/09, puce sourde : ~450 par seconde ; la
+    // surveillance en fait un symptome (halo1_watch.h, surdite).
     uint32_t fullConfigs, silenceReconf, txReconf, verifyFail, rearms, rearmsOffRx, rxRaw, lightSwitches;
     // Garde d'antenne : paquets gardes, gardes refusees, attentes d'une emission
     // en cours (dont plafonnees a HALO1_AIR_GUARD_WAIT_US), plus longue attente.

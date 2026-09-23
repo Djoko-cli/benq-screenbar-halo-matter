@@ -8,6 +8,7 @@ const char *relaunchText(Relaunch c) {
     case Relaunch::Verify: return "verif.";
     case Relaunch::TxTimeout: return "delais";
     case Relaunch::RxNoise: return "bruit";
+    case Relaunch::RxDeaf: return "sourde";
   }
   return "?";
 }
@@ -41,11 +42,58 @@ void ChipWatch::rxFrame(bool crcOk, uint32_t nowMs) {
   }
 }
 
+void ChipWatch::rxRearms(uint32_t offRx, uint32_t inRx, uint32_t nowMs) {
+  roll(nowMs);
+  uint16_t &s = deafSlice_[deafIdx_];
+  s = (uint16_t)(offRx >= 0xFFFFu - s ? 0xFFFFu : s + offRx);
+  winOffRx_ = offRx >= 0xFFFFFFFFu - winOffRx_ ? 0xFFFFFFFFu : winOffRx_ + offRx;
+  winInRx_ = inRx >= 0xFFFFFFFFu - winInRx_ ? 0xFFFFFFFFu : winInRx_ + inRx;
+}
+
 void ChipWatch::openWindow(uint32_t nowMs) {
   winOpen_ = true;
   winMet_ = false;
   winAt_ = nowMs;
   winFrames_ = winBad_ = 0;
+  winOffRx_ = winInRx_ = 0;
+}
+
+// Fenetre glissante de la surdite : la tranche en cours et les kDeafSlices - 1
+// precedentes, soit moins de kDeafWindowMs. Des tranches echues sont remises a
+// zero en avancant ; plus d'une fenetre sans appel : tout repart de zero.
+void ChipWatch::rollDeaf(uint32_t nowMs) {
+  const uint32_t steps = (nowMs - deafAt_) / kDeafSliceMs;
+  if (!steps) return;
+  if (steps >= kDeafSlices) {
+    clearDeaf(nowMs);
+    return;
+  }
+  for (uint32_t i = 0; i < steps; i++) {
+    deafIdx_ = (uint8_t)((deafIdx_ + 1) % kDeafSlices);
+    deafSlice_[deafIdx_] = 0;
+  }
+  deafAt_ += steps * kDeafSliceMs;
+}
+
+void ChipWatch::clearDeaf(uint32_t nowMs) {
+  for (uint16_t &n : deafSlice_) n = 0;
+  deafIdx_ = 0;
+  deafAt_ = nowMs;
+}
+
+uint32_t ChipWatch::deafRearms() const {
+  uint32_t n = 0;
+  for (uint16_t c : deafSlice_) n += c;
+  return n;
+}
+
+// Du debut de la plus ancienne tranche non vide a maintenant : les rearmements
+// comptes sont tous venus dans cet intervalle (une seconde de trop au plus).
+uint32_t ChipWatch::deafSpan(uint32_t nowMs) const {
+  for (uint8_t k = kDeafSlices; k-- > 0;) {
+    if (deafSlice_[(deafIdx_ + kDeafSlices - k) % kDeafSlices]) return nowMs - (deafAt_ - k * kDeafSliceMs);
+  }
+  return 0;
 }
 
 // Fenetres consecutives de kNoiseWindowMs (la suivante part a la fermeture de
@@ -54,8 +102,13 @@ void ChipWatch::openWindow(uint32_t nowMs) {
 // plus de la moitie de ses trames ont le CRC juste (60 fausses et une juste :
 // une puce malade sous le seuil du deluge, pas une guerison). Plus d'une
 // fenetre ecoulee depuis l'ouverture : la plus recente etait vide, l'alerte
-// tombe.
+// tombe. Apres une relance pour surdite, une fenetre sans CRC faux vaut aussi
+// guerison si la puce y a dit RX (kCalmMinInRx rearmements periodiques) sans
+// en retomber (kCalmMaxOffRx hors RX au plus) : sans trame, en piece calme,
+// c'est la seule preuve que ce symptome est parti. La surdite se lit, elle,
+// sur sa fenetre glissante.
 void ChipWatch::roll(uint32_t nowMs) {
+  rollDeaf(nowMs);
   if (!winOpen_) {
     openWindow(nowMs);
     return;
@@ -64,6 +117,8 @@ void ChipWatch::roll(uint32_t nowMs) {
   if (age < kNoiseWindowMs) return;
   noisy_ = winMet_ && age < 2 * kNoiseWindowMs;
   if (!winMet_ && (uint32_t)winBad_ * 2u < winFrames_) recovered();
+  else if (lastCause_ == Relaunch::RxDeaf && !winBad_ && winOffRx_ <= kCalmMaxOffRx && winInRx_ >= kCalmMinInRx)
+    recovered();
   openWindow(nowMs);
 }
 
@@ -75,6 +130,7 @@ void ChipWatch::recovered() {
 Relaunch ChipWatch::symptom() const {
   if (timeouts_ >= kTimeoutRun) return Relaunch::TxTimeout;
   if (noisy_) return Relaunch::RxNoise;
+  if (deafRearms() >= kDeafMinRearms) return Relaunch::RxDeaf;
   return Relaunch::None;
 }
 
@@ -85,7 +141,9 @@ Relaunch ChipWatch::due(uint32_t nowMs) {
   const Relaunch c = symptom();
   if (c == Relaunch::None) return c;
   if (unrecovered_ >= kFruitless) failed_ = true;  // le symptome revient malgre les relances
-  return holding_ ? Relaunch::None : c;
+  if (holding_) return Relaunch::None;
+  if (c == Relaunch::RxDeaf) deaf_ = Deaf{deafRearms(), deafSpan(nowMs)};
+  return c;
 }
 
 void ChipWatch::relaunched(Relaunch cause, uint32_t nowMs) {
@@ -93,6 +151,7 @@ void ChipWatch::relaunched(Relaunch cause, uint32_t nowMs) {
   lastAt_ = nowMs;
   if (unrecovered_ < 0xFF) unrecovered_++;
   if (cause != Relaunch::None) {
+    lastCause_ = cause;
     counts_[(uint8_t)cause]++;
     hist_[histIdx_] = Entry{cause, nowMs};
     histIdx_ = (uint8_t)((histIdx_ + 1) % kHistN);
@@ -105,6 +164,7 @@ void ChipWatch::forget(uint32_t nowMs) {
   timeouts_ = 0;
   noisy_ = false;
   openWindow(nowMs);
+  clearDeaf(nowMs);
 }
 
 void ChipWatch::clearCounts() {

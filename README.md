@@ -278,13 +278,16 @@ les envois en delai (186 de suite a la fin), l'ecoute sourde (aucune trame a
 la fin, apres ~96 000 trames au CRC faux depuis le demarrage), alors que sa
 configuration se relisait juste ; seul `rfinit` l'a gueri. Le pilote relance
 donc seul le module (`halo.begin()`, ~300 ms, jusqu'a ~0,5 s si le quartz ou
-la calibration ne repondent pas) sur deux symptomes de puce : 3 envois de
-suite sans TX_DS ni MAX_RT (delai de 30 ms), ou, en ecoute, au moins 100
-trames en 10 s dont au moins 90 % au CRC faux (la molette de la telecommande
-en donne ~9 par seconde, au CRC juste). Une puce sourde sans envoi n'est vue
-qu'a la commande suivante (~0,4 s). Une lampe debranchee (MAX_RT, silence) ne
-fait jamais relancer. Une relance au plus par minute ; apres 3 relances de
-suite sans guerison (un accuse, ou une fenetre d'ecoute surtout au CRC juste),
+la calibration ne repondent pas) sur trois symptomes de puce : 3 envois de
+suite sans TX_DS ni MAX_RT (delai de 30 ms) ; en ecoute, au moins 100 trames
+en 10 s dont au moins 90 % au CRC faux (la molette de la telecommande en donne
+~9 par seconde, au CRC juste) ; ou une ecoute sourde, au moins 1000
+rearmements en moins de 10 s sur une puce qui ne reste pas en reception
+(l'incident en donnait ~450 par seconde, vus en ~2-3 s ; d'ordinaire bien
+moins d'un par seconde). Une lampe debranchee (MAX_RT, silence) ne fait
+jamais relancer. Une relance au plus par minute ; apres 3 relances de suite
+sans guerison (un accuse, une fenetre d'ecoute surtout au CRC juste, ou,
+apres une relance pour surdite, 10 s d'ecoute ou la puce reste en reception),
 si le symptome revient, le module est **EN PANNE** : rouge fixe, un essai
 toutes les 10 min. Chaque relance ecrit des lignes `[lampe] BM5602 : ...` sur
 la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`
