@@ -207,7 +207,7 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `matter reprise` | (Thread) relance tout de suite la reprise des abonnements sauves d'Apple Home |
 | `matter reprise auto [0\|1]` | (Thread) relance seule apres un redemarrage : Thread + SRP prets depuis 10 s, pas avant 50 s (plus le plancher sauve), pour chaque abonne sauve sans abonnement actif ; session CASE d'abord (un echec ne coute rien a la pile), reprise ensuite ; puis 30 s, 60 s, 5 min apres chaque echec, et un coup d'oeil toutes les 5 min tant qu'un abonnement est actif (NVS) |
 | `matter med [0\|1\|2]` | (Thread) type au prochain demarrage : 0 routeur, 1 MED des l'init (sans nouvelle attache), 2 MED apres `Matter.begin()` (ancien) (NVS) |
-| `matter maxint [0\|60..3600]` | (Thread) plafond de l'intervalle max des abonnements neufs, 180 s par defaut, 0 = celui du controleur (NVS). Ne vaut qu'a partir du prochain abonnement neuf d'Apple : un abonnement repris garde son intervalle sauve |
+| `matter maxint [0\|60..3600]` | (Thread) plafond de l'intervalle max des abonnements neufs, 60 s par defaut, 0 = celui du controleur (NVS). Ne vaut qu'a partir du prochain abonnement neuf d'Apple : un abonnement repris garde son intervalle sauve |
 | `lampe` | pilote Halo 1 : consigne, etat cru, champs a livrer, lien, radio |
 | `lampe on` / `lampe off` | allumer / eteindre, memes regles que Matter |
 | `lampe avant on\|off` / `lampe arriere on\|off` | une lampe (comme EP2 / EP3) |
