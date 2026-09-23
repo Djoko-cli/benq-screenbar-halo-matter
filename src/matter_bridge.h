@@ -36,7 +36,8 @@ bool matterIsConnected();
 bool matterResumeNow(Print &out);
 
 // Relance automatique : reseau pret (attache + SRP) depuis 10 s, pas avant
-// 50 s apres le demarrage de Matter, aucun abonnement actif.
+// 50 s apres le demarrage de Matter (plus le plancher sauve), pour chaque
+// abonne sauve sans abonnement actif ; session d'abord, reprise ensuite.
 bool matterResumeAuto();
 void matterSetResumeAuto(bool on, bool *saved);
 
@@ -49,8 +50,10 @@ bool matterSetMedMode(uint32_t mode, bool *saved);
 
 // Plafond de l'intervalle max des abonnements NEUFS, en secondes : 0 = celui
 // que demande le controleur, sinon kMatterMaxIntMinS..kMatterMaxIntMaxS.
+// kMatterMaxIntDefaultS tant que la NVS n'a rien.
 constexpr uint16_t kMatterMaxIntMinS = 60;
 constexpr uint16_t kMatterMaxIntMaxS = 3600;
+constexpr uint16_t kMatterMaxIntDefaultS = 180;
 uint16_t matterMaxIntervalCap();
 bool matterSetMaxIntervalCap(uint32_t s, bool *saved);
 #endif

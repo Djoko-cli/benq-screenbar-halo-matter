@@ -92,11 +92,12 @@ static void cmdHelp() {
 #if MATTER_NET_THREAD
   Serial.println("  matter reprise        relance maintenant la reprise des abonnements sauves (banc)");
   Serial.println("  matter reprise auto [0|1]  relance seule apres un redemarrage : Thread + SRP prets");
-  Serial.println("                        depuis 10 s, pas avant 50 s, aucun abonnement actif (NVS)");
+  Serial.println("                        depuis 10 s, pas avant 50 s, abonnes sauves sans abonnement (NVS)");
   Serial.println("  matter med [0|1|2]    type Thread au PROCHAIN demarrage (NVS) : 0 routeur, 1 MED des");
   Serial.println("                        l'init, 2 MED apres Matter.begin() (ancien : une attache de plus)");
-  Serial.println("  matter maxint [s]     intervalle max des abonnements neufs : 0 = celui d'Apple,");
-  Serial.println("                        60..3600 = plafond (NVS)");
+  Serial.println("  matter maxint [s]     plafond de l'intervalle max des abonnements neufs (NVS) :");
+  Serial.println("                        180 par defaut, 0 = celui d'Apple, 60..3600 ; vaut au");
+  Serial.println("                        prochain abonnement neuf d'Apple, pas pour un repris");
 #endif
 #endif
   Serial.println("  debug                 bascule les traces RF");
@@ -287,7 +288,8 @@ static void cmdMatterThread(const char *what, char *val) {
     }
     if (*val) nvsWarn(saved);
     if (matterMaxIntervalCap())
-      Serial.printf("Intervalle max des abonnements neufs plafonne a %u s\n", matterMaxIntervalCap());
+      Serial.printf("Intervalle max des abonnements neufs plafonne a %u s (au prochain abonnement neuf)\n",
+                    matterMaxIntervalCap());
     else
       Serial.println("Intervalle max des abonnements : celui du controleur");
   }

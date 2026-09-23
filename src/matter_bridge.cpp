@@ -458,15 +458,17 @@ static bool reflect(uint32_t now) {
 //  de suite, alors que Thread et SRP ne le sont pas. La recherche d'adresse
 //  de l'abonne expire (erreur 32 = CHIP_ERROR_TIMEOUT, vue a 47 s), et la
 //  tentative suivante vient 300 s plus tard (puis 600, 600, 900 s...). Chaque
-//  echec incremente un compteur sauve avec l'abonnement : au 11e, meme a
-//  travers les redemarrages, la pile l'oublie (firmware.elf desassemble).
+//  echec d'un etablisseur de la pile incremente un compteur sauve avec
+//  l'abonnement (reprise tant qu'il vaut 10 au plus) : le 12e echec, meme a
+//  travers les redemarrages, le fait oublier (firmware.elf desassemble).
 //
 //  Ce que ce bloc ajoute :
 //   - mesures dans 'matter' : abonnements actifs et sauves, roles Thread
 //     horodates, compteurs MLE, etat SRP et DNS, tentatives de reprise ;
-//   - (a) relance de la reprise quand le reseau est pret (ResumePlanner) ;
+//   - (a) relance de la reprise quand le reseau est pret (ResumePlanner),
+//     session d'abord : un echec ne touche pas aux compteurs de la pile ;
 //   - (b) type Thread choisi a l'execution ('matter med', enveloppe plus bas) ;
-//   - (c) plafond optionnel de l'intervalle max des abonnements neufs.
+//   - (c) plafond de l'intervalle max des abonnements neufs (180 s par defaut).
 //
 //  Verrous : OpenThread seulement sous otLockTry (attente bornee) ; pile CHIP
 //  seulement sous TryLockChipStack ou dans la tache CHIP (ScheduleWork) ;
@@ -495,12 +497,13 @@ static const char *secs(char *b, size_t n, uint32_t ms) {
 static const char *const kNvsMedKey = "med";
 static const char *const kNvsResumeKey = "reprise";
 static const char *const kNvsMaxIntKey = "maxint";
-static constexpr uint8_t kMedRouter = 0, kMedEarly = 1;  // 2 : MED apres Matter.begin() (ancien)
+static constexpr uint8_t kMedRouter = 0, kMedEarly = 1, kMedLate = 2;  // 2 : MED apres Matter.begin() (ancien)
 static uint8_t sMedMode = MATTER_THREAD_MED ? kMedEarly : kMedRouter;  // prochain demarrage
 static uint8_t sMedBoot = MATTER_THREAD_MED ? kMedEarly : kMedRouter;  // ce demarrage
 static bool sResumeAuto = true;
 // Ecrit par la tache loop, lu par la tache CHIP (OnSubscriptionRequested).
-static volatile uint16_t sMaxIntCap = 0;
+// Defaut si la NVS n'a rien : 'matter maxint 0' l'ote pour de bon.
+static volatile uint16_t sMaxIntCap = kMatterMaxIntDefaultS;
 
 static void loadThreadSettings() {
   Preferences p;
@@ -511,7 +514,7 @@ static void loadThreadSettings() {
   }
   if (p.isKey(kNvsResumeKey)) sResumeAuto = p.getUChar(kNvsResumeKey, 1) != 0;
   if (p.isKey(kNvsMaxIntKey)) {
-    const uint16_t v = p.getUShort(kNvsMaxIntKey, 0);
+    const uint16_t v = p.getUShort(kNvsMaxIntKey, kMatterMaxIntDefaultS);
     if (v == 0 || (v >= kMatterMaxIntMinS && v <= kMatterMaxIntMaxS)) sMaxIntCap = v;
   }
   p.end();
@@ -582,6 +585,9 @@ bool matterSetMaxIntervalCap(uint32_t s, bool *saved) {
 #define HALO_WRAP_THREAD_DEVTYPE 0
 #endif
 static uint8_t sDevTypeCalls = 0, sDevTypeSwaps = 0;  // tache loop (Matter.begin() et apres)
+// Copie a la sortie de Matter.begin() : les reglages d'esp_matter seuls, sans
+// celui du pont qui suit (il passe aussi par l'enveloppe).
+static uint8_t sDevTypeCallsEsp = 0, sDevTypeSwapsEsp = 0;
 
 #if HALO_WRAP_THREAD_DEVTYPE
 extern "C" CHIP_ERROR
@@ -695,29 +701,79 @@ static bool netReady() { return sNet.known && roleAttached(sNet.role) && srpRegi
 //  Seul crochet public sur la vie des abonnements : ReadHandler::
 //  ApplicationCallback (un seul par pile ; ni esp_matter ni la bibliotheque
 //  Arduino n'en posent, nm). OnSubscriptionEstablished vient aussi pour un
-//  abonnement repris (ReadHandler::OnSubscriptionResumed), sans
-//  OnSubscriptionRequested avant : c'est ce qui les distingue.
+//  abonnement repris (ReadHandler::OnSubscriptionResumed, qui le marque actif
+//  juste avant), sans OnSubscriptionRequested : c'est ce qui les distingue.
+//  Une reprise lancee par le pont s'etablit pendant son appel (session deja
+//  ouverte, voir plus bas) : sResumingNow la distingue de celles de la pile.
+enum : uint8_t { kEstFresh, kEstBridge, kEstStack };
 static struct {
-  uint32_t requested, capped, fresh, resumed, terminated;
+  uint32_t requested, capped, fresh, byBridge, byStack, terminated;
   uint32_t firstAt;  // premier abonnement etabli depuis le demarrage (0 : aucun)
   uint32_t lastAt;
-  bool lastResumed;
+  uint8_t lastKind;
   uint16_t lastMin, lastMax;
   uint64_t reqPeer;
   uint16_t reqMin, reqMax, reqApplied;
   uint32_t reqAt;
 } sSubs = {};
-static const void *sRequestedHandler = nullptr;  // tache CHIP seulement
+
+// Demandes d'abonnement pas encore etablies : plusieurs peuvent se chevaucher
+// (hub et iPhone, deux abonnements du hub). Une demande refusee apres coup
+// n'a ni etablissement ni fin (OnSubscriptionTerminated ne vient que pour un
+// abonnement actif) : elle expire. Sous le verrou de la pile seulement.
+struct PendingRequest {
+  const void *rh;
+  uint64_t node;
+  uint8_t fabric;
+  uint32_t at;
+};
+static constexpr uint8_t kPendingMax = 4;
+static constexpr uint32_t kPendingMs = 60000;
+static PendingRequest sPending[kPendingMax] = {};
+static bool sResumingNow = false;     // ResumeSubscription du pont en cours
+static uint32_t sBridgeEstablished = 0;  // abonnements etablis pendant ces appels
+
+static bool pendingLive(const PendingRequest &p, uint32_t now) {
+  return p.rh && (uint32_t)(now - p.at) < kPendingMs;
+}
+
+// Retire la demande de ce ReadHandler ; true si elle etait encore valable.
+static bool takePending(const void *rh, uint32_t now) {
+  bool live = false;
+  for (PendingRequest &p : sPending)
+    if (p.rh == rh) {
+      live |= pendingLive(p, now);
+      p.rh = nullptr;
+    }
+  return live;
+}
+
+// L'abonne a-t-il deja un abonnement actif, ou une demande en cours ? Sous le
+// verrou de la pile. SubjectHasActiveSubscription lit la session de chaque
+// abonnement sans la verifier (firmware.elf), or un ReadHandler dont la
+// session a ete evincee garde un SessionHolder vide jusqu'a son rapport
+// suivant. GetAccessingFabricIndex, elle, verifie : un abonnement sans
+// session (ou en PASE) compte pour la fabrique 0. Aucun : l'appel est sur.
+// Sinon, repli prudent : tout abonnement de la meme fabrique sert l'abonne.
+static bool subjectServed(chip::app::InteractionModelEngine *im, uint8_t fabric, uint64_t node, uint32_t now) {
+  for (const PendingRequest &p : sPending)
+    if (pendingLive(p, now) && p.node == node && p.fabric == fabric) return true;
+  constexpr auto kSub = chip::app::ReadHandler::InteractionType::Subscribe;
+  if (im->GetNumActiveReadHandlers(kSub, chip::kUndefinedFabricIndex))
+    return im->GetNumActiveReadHandlers(kSub, fabric) != 0;
+  return im->SubjectHasActiveSubscription(fabric, node);
+}
 
 class SubscriptionWatch : public chip::app::ReadHandler::ApplicationCallback {
  public:
-  // (c) Plafond de l'intervalle max : Apple le fixe sans doute a 600 s pour ce
+  // (c) Plafond de l'intervalle max : Apple demande sans doute 600 s pour ce
   // noeud (code Darwin public). Apres un redemarrage qu'aucune reprise ne
   // rattrape, Apple ne s'apercoit de la perte qu'au bout de cet intervalle
-  // (plus une marge) ; un plafond plus court borne la duree sans miroir, au
-  // prix d'un rapport vide par intervalle. Abonnements neufs seulement : un
-  // abonnement repris garde l'intervalle sauve. Regle du SDK :
-  // plancher <= max <= max(3600, plafond demande).
+  // (plus une marge), puis se reabonne seul ; un plafond plus court (180 s par
+  // defaut) borne la duree sans miroir, au prix d'un rapport vide par
+  // intervalle. Abonnements neufs seulement : un abonnement repris garde
+  // l'intervalle sauve ; il ne sert donc qu'a partir du reabonnement suivant
+  // d'Apple. Regle du SDK : plancher <= max <= max(3600, plafond demande).
   CHIP_ERROR OnSubscriptionRequested(chip::app::ReadHandler &rh, chip::Transport::SecureSession &session) override {
     uint16_t floorS = 0, maxS = 0;
     rh.GetReportingIntervals(floorS, maxS);
@@ -728,6 +784,15 @@ class SubscriptionWatch : public chip::app::ReadHandler::ApplicationCallback {
       if (want < maxS && rh.SetMaxReportingInterval(want) == CHIP_NO_ERROR) applied = want;
     }
     const uint32_t now = millis();
+    PendingRequest *slot = nullptr;
+    for (PendingRequest &p : sPending)
+      if (!slot && !pendingLive(p, now)) slot = &p;
+    if (!slot) {  // quatre demandes vivantes : la plus ancienne cede sa place
+      slot = &sPending[0];
+      for (PendingRequest &p : sPending)
+        if ((uint32_t)(now - p.at) > (uint32_t)(now - slot->at)) slot = &p;
+    }
+    *slot = {&rh, session.GetPeerNodeId(), session.GetFabricIndex(), now};
     portENTER_CRITICAL(&sSubMux);
     sSubs.requested++;
     if (applied != maxS) sSubs.capped++;
@@ -738,7 +803,6 @@ class SubscriptionWatch : public chip::app::ReadHandler::ApplicationCallback {
     sSubs.reqAt = now;
     sEventSeq++;
     portEXIT_CRITICAL(&sSubMux);
-    sRequestedHandler = &rh;
     return CHIP_NO_ERROR;
   }
 
@@ -746,60 +810,62 @@ class SubscriptionWatch : public chip::app::ReadHandler::ApplicationCallback {
     uint16_t minS = 0, maxS = 0;
     rh.GetReportingIntervals(minS, maxS);
     const uint32_t now = millis();
+    const bool requested = takePending(&rh, now);
+    const uint8_t kind = sResumingNow ? kEstBridge : requested ? kEstFresh : kEstStack;
+    if (kind == kEstBridge) sBridgeEstablished++;
     portENTER_CRITICAL(&sSubMux);
-    // Une demande restee sans suite (refusee apres OnSubscriptionRequested) ne
-    // fait pas passer pour neuf, plus tard, un abonnement repris a la meme
-    // adresse : 30 s au plus entre la demande et l'etablissement.
-    const bool fresh = sRequestedHandler == &rh && (uint32_t)(now - sSubs.reqAt) < 30000;
-    if (fresh) sSubs.fresh++;
-    else sSubs.resumed++;
+    if (kind == kEstFresh) sSubs.fresh++;
+    else if (kind == kEstBridge) sSubs.byBridge++;
+    else sSubs.byStack++;
     if (!sSubs.firstAt) sSubs.firstAt = now ? now : 1;
     sSubs.lastAt = now;
-    sSubs.lastResumed = !fresh;
+    sSubs.lastKind = kind;
     sSubs.lastMin = minS;
     sSubs.lastMax = maxS;
     sEventSeq++;
     portEXIT_CRITICAL(&sSubMux);
-    if (sRequestedHandler == &rh) sRequestedHandler = nullptr;
   }
 
   void OnSubscriptionTerminated(chip::app::ReadHandler &rh) override {
+    takePending(&rh, millis());
     portENTER_CRITICAL(&sSubMux);
     sSubs.terminated++;
     sEventSeq++;
     portEXIT_CRITICAL(&sSubMux);
-    if (sRequestedHandler == &rh) sRequestedHandler = nullptr;
   }
 };
 static SubscriptionWatch sSubWatch;
 
 // --- (a) Relance de la reprise (tache CHIP) ---------------------------------
 //
-//  API publique, celle qu'emploie la pile a chaque tentative
-//  (InteractionModelEngine::ResumeSubscriptionsTimerCallback) : pour chaque
-//  abonnement sauve, un SubscriptionResumptionSessionEstablisher alloue par
-//  Platform::New, dont ResumeSubscription() ouvre (ou rejoint) une session
-//  CASE vers l'abonne ; ses rappels le liberent (Platform::Delete), creent le
-//  ReadHandler et remettent le compteur d'essais a 0, ou l'incrementent et
-//  programment la tentative suivante de la pile. ResumeSubscriptions()
-//  n'aurait rien fait : il sort tant qu'une tentative est programmee.
+//  En deux temps, pour qu'un echec ne coute rien :
+//   1. resumeWork : pour chaque abonne sauve sans abonnement (ni actif, ni
+//      demande en cours), un observateur ouvre une session CASE vers lui
+//      (FindOrEstablishSession avec nos propres rappels : fin, duree, erreur).
+//      Echec (adresse introuvable : erreur 32) : rien d'autre. Ni le compteur
+//      d'essais sauve avec l'abonnement, ni le calendrier de la pile ne
+//      bougent.
+//   2. Session ouverte : resumePeerWork, poste (ScheduleWork) pour passer
+//      apres un etablisseur de la pile accroche a la meme mise en place : il
+//      est prevenu dans la meme passe et cree son ReadHandler, actif tout de
+//      suite (OnSubscriptionResumed). Si l'abonne n'a toujours rien : pour
+//      chacun de ses abonnements sauves, un SubscriptionResumptionSession
+//      Establisher (Platform::New, comme InteractionModelEngine::
+//      ResumeSubscriptionsTimerCallback), dont ResumeSubscription() trouve la
+//      session ouverte : OperationalSessionSetup::Connect s'y attache, et
+//      HandleDeviceConnected cree le ReadHandler pendant l'appel, puis remet a
+//      0 le compteur sauve et celui de la pile (firmware.elf desassemble).
 //
-//  Un observateur par abonne (FindOrEstablishSession avec nos propres
-//  rappels, sur la meme mise en place de session) donne la fin, sa duree et
-//  l'erreur. Il est lance avant l'etablisseur, qui le rejoint.
-//
-//  Garde-fous : aucun abonnement actif (sinon, faute d'API publique pour lire
-//  l'identifiant d'un abonnement vivant, on risquerait un doublon) ; aucune
-//  tentative de ce pont en cours ; jamais un abonnement deja a
-//  kResumeMaxRetries essais (le 11e echec le fait oublier : la pile garde
-//  seule la main sur ses derniers essais). Reste possible : rejoindre une
-//  tentative de la pile en cours (d'ou kNotBeforeMs au demarrage) ; en cas
-//  de succes, deux ReadHandler pour le meme abonnement, rapports doubles
-//  jusqu'au prochain reabonnement d'Apple.
+//  La pile garde seule ses propres essais : chaque echec d'un de ses
+//  etablisseurs incremente le compteur sauve (jusqu'a 11) ; le 12e echec, qui
+//  le trouve a 11, fait oublier l'abonnement. Un abonne deja servi est saute
+//  (subjectServed : abonnement actif ou demande en cours). Reste hors
+//  d'atteinte l'identifiant d'un abonnement vivant (prive) : un abonne qui en
+//  a un vivant et un autre sauve mort garde le mort a la pile.
 
 enum : intptr_t { kResumeAuto = 0, kResumeManual = 1 };
-enum : uint8_t { kRunLaunched, kRunSubsActive, kRunNothing, kRunNoStorage, kRunNoIterator };
-static constexpr uint32_t kResumeMaxRetries = 8;
+enum : uint8_t { kRunLaunched, kRunNothing, kRunNoStorage, kRunNoIterator };
+enum : uint8_t { kPeerResumed, kPeerServed, kPeerNothing, kPeerNoStorage, kPeerNoIterator, kPeerQueueFull };
 static constexpr uint32_t kWatchLostMs = 180000;  // recherche 45 s + CASE : bien en deca
 
 struct SavedSub {
@@ -810,14 +876,15 @@ struct SavedSub {
 };
 static constexpr uint8_t kSavedMax = 6;
 
+enum : uint8_t { kWatchIdle, kWatchOpening, kWatchResuming };
 struct ResumeWatch {
   ResumeWatch() : conn(onConnected, this), fail(onFailed, this) {}
   chip::Callback::Callback<chip::OnDeviceConnected> conn;
   chip::Callback::Callback<chip::OnDeviceConnectionFailure> fail;
   uint64_t node = 0;
   uint8_t fabric = 0;
+  uint8_t state = kWatchIdle;  // sous sSubMux ; node et fabric ne changent qu'a l'arret
   uint32_t startMs = 0;
-  bool pending = false;  // sous sSubMux
   static void onConnected(void *ctx, chip::Messaging::ExchangeManager &, const chip::SessionHandle &);
   static void onFailed(void *ctx, const chip::ScopedNodeId &, CHIP_ERROR err);
 };
@@ -825,22 +892,47 @@ static constexpr uint8_t kWatchMax = 2;
 static ResumeWatch sWatch[kWatchMax];
 
 static struct {
-  // lancements (resumeWork)
-  uint32_t runs, autoRuns, launched;
-  uint32_t runSeq, runAt, runSubs, runSaved;
-  uint8_t runKind, runVerdict, runLaunched, runSkipped, runBusy, runFailed;
+  // passages (resumeWork)
+  uint32_t runs, autoRuns, opened;
+  uint32_t runSeq, runAt, runSaved;
+  uint8_t runKind, runVerdict, runPeers, runLaunched, runServed, runBusy;
   // fins de session (observateurs)
   uint32_t ok, failed, lost, late;
   uint32_t doneSeq, doneAt, doneMs, doneErr;
   uint64_t doneNode;
+  // reprises, session ouverte (resumePeerWork)
+  uint32_t resumed;
+  uint32_t peerSeq, peerAt;
+  uint64_t peerNode;
+  uint8_t peerVerdict, peerResumed, peerUnsettled, peerFailed;
 } sResume = {};
 static bool sResumePosted = false;  // travail poste, pas encore execute ; sous sSubMux
 
-static void watchDone(ResumeWatch *w, CHIP_ERROR err) {
+// Tache CHIP : fin de la reprise d'un abonne, observateur rendu.
+static void peerDone(ResumeWatch *w, uint8_t verdict, uint8_t resumed, uint8_t unsettled, uint8_t failed) {
   const uint32_t now = millis();
   portENTER_CRITICAL(&sSubMux);
-  if (w->pending) {
-    w->pending = false;
+  sResume.resumed += resumed;
+  sResume.peerSeq++;
+  sResume.peerAt = now;
+  sResume.peerNode = w->node;
+  sResume.peerVerdict = verdict;
+  sResume.peerResumed = resumed;
+  sResume.peerUnsettled = unsettled;
+  sResume.peerFailed = failed;
+  w->state = kWatchIdle;
+  sEventSeq++;
+  portEXIT_CRITICAL(&sSubMux);
+}
+
+static void resumePeerWork(intptr_t arg);
+
+// Tache CHIP (parfois pendant FindOrEstablishSession, dans resumeWork).
+static void watchDone(ResumeWatch *w, CHIP_ERROR err) {
+  const uint32_t now = millis();
+  bool post = false;
+  portENTER_CRITICAL(&sSubMux);
+  if (w->state == kWatchOpening) {
     if (err == CHIP_NO_ERROR) sResume.ok++;
     else sResume.failed++;
     sResume.doneErr = err.AsInteger();
@@ -849,10 +941,15 @@ static void watchDone(ResumeWatch *w, CHIP_ERROR err) {
     sResume.doneNode = w->node;
     sResume.doneSeq++;
     sEventSeq++;
+    post = err == CHIP_NO_ERROR;
+    w->state = post ? kWatchResuming : kWatchIdle;
   } else {
     sResume.late++;  // fin arrivee apres l'abandon (kWatchLostMs)
   }
   portEXIT_CRITICAL(&sSubMux);
+  if (post && chip::DeviceLayer::PlatformMgr().ScheduleWork(resumePeerWork, reinterpret_cast<intptr_t>(w)) !=
+                  CHIP_NO_ERROR)
+    peerDone(w, kPeerQueueFull, 0, 0, 0);
 }
 
 void ResumeWatch::onConnected(void *ctx, chip::Messaging::ExchangeManager &, const chip::SessionHandle &) {
@@ -866,17 +963,20 @@ void ResumeWatch::onFailed(void *ctx, const chip::ScopedNodeId &, CHIP_ERROR err
 // Tache loop : une tentative de ce pont est-elle en cours ? Un observateur
 // muet depuis kWatchLostMs est abandonne. Ses rappels peuvent rester
 // accroches a une session : un nouvel Enqueue les en decroche d'abord
-// (GroupedCallbackList::Enqueue appelle Cancel()). *launched : abonnements
-// relances par le dernier passage, lu dans le meme instant.
+// (GroupedCallbackList::Enqueue appelle Cancel()). Une reprise postee finit
+// toujours (file de la pile). *launched : abonnes contactes par le dernier
+// passage, lu dans le meme instant.
 static bool resumeInFlight(uint32_t now, uint32_t *launched = nullptr) {
   bool busy;
   portENTER_CRITICAL(&sSubMux);
   busy = sResumePosted;
   if (launched) *launched = sResume.runLaunched;
   for (ResumeWatch &w : sWatch) {
-    if (!w.pending) continue;
-    if ((uint32_t)(now - w.startMs) >= kWatchLostMs) {
-      w.pending = false;
+    if (w.state == kWatchIdle) continue;
+    // Age signe : un observateur arme par la tache CHIP apres notre millis()
+    // (elle passe devant la tache loop) est tout jeune, pas perdu.
+    if (w.state == kWatchOpening && (int32_t)(now - w.startMs) >= (int32_t)kWatchLostMs) {
+      w.state = kWatchIdle;
       sResume.lost++;
     } else {
       busy = true;
@@ -916,79 +1016,54 @@ static bool loadSaved(SubscriptionResumptionStorage *st, const SavedSub &s, SubI
   return found;
 }
 
+// 1. Ouvrir une session vers chaque abonne sauve sans abonnement.
 static void resumeWork(intptr_t kind) {
   // Tache CHIP, verrou de la pile tenu.
   auto *im = chip::app::InteractionModelEngine::GetInstance();
-  const uint32_t subs = im->GetNumActiveReadHandlers(chip::app::ReadHandler::InteractionType::Subscribe);
   SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
   chip::CASESessionManager *mgr = im->GetCASESessionManager();
+  const uint32_t t0 = millis();
   SavedSub saved[kSavedMax];
   uint32_t total = 0;
-  uint8_t launched = 0, skipped = 0, busy = 0, failed = 0, verdict;
+  uint8_t peers = 0, launched = 0, served = 0, busy = 0, verdict;
   int n = 0;
-  if (subs > 0) {
-    verdict = kRunSubsActive;
-  } else if (!st || !mgr) {
+  if (!st || !mgr) {
     verdict = kRunNoStorage;
   } else if ((n = collectSaved(st, saved, kSavedMax, total)) < 0) {
     verdict = kRunNoIterator;
   } else {
-    uint8_t watched = 0;  // observateurs lances par ce passage (un par abonne)
-    ResumeWatch *mine[kWatchMax] = {};
     for (int i = 0; i < n; i++) {
       const SavedSub &s = saved[i];
-      if (s.retries >= kResumeMaxRetries) {
-        skipped++;
+      bool seen = false;  // un seul passage par abonne
+      for (int k = 0; k < i; k++) seen |= saved[k].node == s.node && saved[k].fabric == s.fabric;
+      if (seen) continue;
+      peers++;
+      if (subjectServed(im, s.fabric, s.node, t0)) {
+        served++;
         continue;
       }
-      bool known = false;
-      for (uint8_t k = 0; k < watched; k++) known |= mine[k]->node == s.node && mine[k]->fabric == s.fabric;
       ResumeWatch *w = nullptr;
-      if (!known) {
-        portENTER_CRITICAL(&sSubMux);
-        for (ResumeWatch &c : sWatch) {
-          if (c.pending && c.node == s.node && c.fabric == s.fabric) {  // tentative d'avant pas finie
-            w = nullptr;
-            break;
-          }
-          if (!c.pending && !w) w = &c;
-        }
-        portEXIT_CRITICAL(&sSubMux);
-        if (!w) {
-          busy++;
-          continue;
-        }
+      bool same = false;  // tentative d'avant pas finie pour cet abonne
+      const uint32_t now = millis();
+      portENTER_CRITICAL(&sSubMux);
+      for (ResumeWatch &c : sWatch) {
+        if (c.state != kWatchIdle) same |= c.node == s.node && c.fabric == s.fabric;
+        else if (!w) w = &c;
       }
-      SubInfo info;
-      if (!loadSaved(st, s, info)) {
-        failed++;
-        continue;
-      }
-      if (w) {
-        const uint32_t now = millis();
-        portENTER_CRITICAL(&sSubMux);
+      if (!same && w) {
         w->node = s.node;
         w->fabric = s.fabric;
         w->startMs = now;
-        w->pending = true;
-        portEXIT_CRITICAL(&sSubMux);
-        mine[watched++] = w;
-        // Peut finir tout de suite (session deja ouverte, ou pas de place).
-        mgr->FindOrEstablishSession(chip::ScopedNodeId(s.node, s.fabric), &w->conn, &w->fail);
+        w->state = kWatchOpening;
       }
-      auto *est = chip::Platform::New<chip::app::SubscriptionResumptionSessionEstablisher>();
-      if (!est) {
-        failed++;
-        break;
-      }
-      // Erreur possible seulement avant l'ouverture de session (copie des
-      // chemins) : rien n'est accroche, l'etablisseur est a nous.
-      if (est->ResumeSubscription(*mgr, info) != CHIP_NO_ERROR) {
-        chip::Platform::Delete(est);
-        failed++;
+      portEXIT_CRITICAL(&sSubMux);
+      if (same || !w) {
+        busy++;
         continue;
       }
       launched++;
+      // Peut finir pendant l'appel (session deja ouverte, ou pas de place).
+      mgr->FindOrEstablishSession(chip::ScopedNodeId(s.node, s.fabric), &w->conn, &w->fail);
     }
     verdict = launched ? kRunLaunched : kRunNothing;
   }
@@ -996,20 +1071,73 @@ static void resumeWork(intptr_t kind) {
   portENTER_CRITICAL(&sSubMux);
   sResume.runs++;
   if (kind == kResumeAuto) sResume.autoRuns++;
-  sResume.launched += launched;
+  sResume.opened += launched;
   sResume.runSeq++;
   sResume.runAt = now;
-  sResume.runSubs = subs;
   sResume.runSaved = total;
   sResume.runKind = (uint8_t)kind;
   sResume.runVerdict = verdict;
+  sResume.runPeers = peers;
   sResume.runLaunched = launched;
-  sResume.runSkipped = skipped;
+  sResume.runServed = served;
   sResume.runBusy = busy;
-  sResume.runFailed = failed;
   sEventSeq++;
   sResumePosted = false;  // en dernier : les observateurs sont deja marques
   portEXIT_CRITICAL(&sSubMux);
+}
+
+// 2. Session ouverte vers un abonne : reprendre ses abonnements sauves.
+static void resumePeerWork(intptr_t arg) {
+  // Tache CHIP, verrou de la pile tenu. L'observateur est en kWatchResuming :
+  // personne d'autre n'y touche jusqu'a peerDone().
+  ResumeWatch *w = reinterpret_cast<ResumeWatch *>(arg);
+  auto *im = chip::app::InteractionModelEngine::GetInstance();
+  SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
+  chip::CASESessionManager *mgr = im->GetCASESessionManager();
+  SavedSub saved[kSavedMax];
+  uint32_t total = 0;
+  uint8_t resumed = 0, unsettled = 0, failed = 0, verdict;
+  int n = 0;
+  if (subjectServed(im, w->fabric, w->node, millis())) {
+    verdict = kPeerServed;  // la pile (ou un abonnement neuf) est passee avant
+  } else if (!st || !mgr) {
+    verdict = kPeerNoStorage;
+  } else if ((n = collectSaved(st, saved, kSavedMax, total)) < 0) {
+    verdict = kPeerNoIterator;
+  } else {
+    for (int i = 0; i < n; i++) {
+      const SavedSub &s = saved[i];
+      if (s.node != w->node || s.fabric != w->fabric) continue;
+      SubInfo info;
+      if (!loadSaved(st, s, info)) {
+        failed++;
+        continue;
+      }
+      auto *est = chip::Platform::New<chip::app::SubscriptionResumptionSessionEstablisher>();
+      if (!est) {
+        failed++;
+        break;
+      }
+      const uint32_t before = sBridgeEstablished;
+      sResumingNow = true;
+      const CHIP_ERROR err = est->ResumeSubscription(*mgr, info);
+      sResumingNow = false;
+      // Erreur possible seulement avant la session (copie des chemins) : rien
+      // n'est accroche, l'etablisseur est a nous. Sinon il s'est deja libere.
+      if (err != CHIP_NO_ERROR) {
+        chip::Platform::Delete(est);
+        failed++;
+      } else if (sBridgeEstablished != before) {
+        resumed++;
+      } else {
+        // Session fermee entre-temps (l'etablisseur en rouvre une, comme ceux
+        // de la pile), ou pas de ReadHandler libre.
+        unsettled++;
+      }
+    }
+    verdict = resumed ? kPeerResumed : kPeerNothing;
+  }
+  peerDone(w, verdict, resumed, unsettled, failed);
 }
 
 // Tache loop. ScheduleWork se passe du verrou de la pile.
@@ -1033,7 +1161,7 @@ static struct {
   bool known;
   uint32_t at, subs, reads;
 } sCount = {};
-static uint32_t sSeenRoles = 0, sSeenRunSeq = 0, sSeenDoneSeq = 0;
+static uint32_t sSeenRoles = 0, sSeenRunSeq = 0, sSeenDoneSeq = 0, sSeenPeerSeq = 0;
 static uint32_t sSeenRequested = 0, sSeenEstablished = 0, sSeenTerminated = 0;
 
 // Abonnements actifs, toutes les 2 s, sans attendre le verrou de la pile.
@@ -1056,9 +1184,14 @@ static void nodeText(char *b, size_t n, uint64_t id) {
   snprintf(b, n, "0x%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFu));
 }
 
-// Evenements rares (quelques-uns par demarrage) : toujours traces.
+static const char *const kEstText[] = {"neuf", "repris par le pont", "repris par la pile"};
+
+// Evenements rares (quelques-uns par demarrage) : toujours traces. Seule
+// exception : le coup d'oeil de 5 min qui ne trouve rien a faire, trace une
+// fois tant que son resultat ne change pas.
 static void tracePoll() {
   static uint32_t seen = 0;
+  static uint32_t quiet = 0;  // signature du dernier passage auto sans effet trace (0 : aucun)
   if (__atomic_load_n(&sEventSeq, __ATOMIC_RELAXED) == seen) return;
   RoleChange roles[kRoleHistory];
   uint32_t nRoles;
@@ -1087,9 +1220,9 @@ static void tracePoll() {
     bridgeLog("[matter] abonnement demande par %s a +%s s : plancher %u s, max %u s -> %u s", node,
               secs(a, sizeof(a), subs.reqAt), subs.reqMin, subs.reqMax, subs.reqApplied);
   }
-  if (subs.fresh + subs.resumed != sSeenEstablished) {
-    sSeenEstablished = subs.fresh + subs.resumed;
-    bridgeLog("[matter] abonnement etabli (%s) a +%s s : min %u s, max %u s", subs.lastResumed ? "repris" : "neuf",
+  if (subs.fresh + subs.byBridge + subs.byStack != sSeenEstablished) {
+    sSeenEstablished = subs.fresh + subs.byBridge + subs.byStack;
+    bridgeLog("[matter] abonnement etabli (%s) a +%s s : min %u s, max %u s", kEstText[subs.lastKind],
               secs(a, sizeof(a), subs.lastAt), subs.lastMin, subs.lastMax);
   }
   if (subs.terminated != sSeenTerminated) {
@@ -1099,24 +1232,31 @@ static void tracePoll() {
   if (res.runSeq != sSeenRunSeq) {
     sSeenRunSeq = res.runSeq;
     const char *kind = res.runKind == kResumeManual ? "manuelle" : "auto";
+    const uint32_t sig = 1u + (res.runSaved & 0xFF) + ((uint32_t)res.runPeers << 8) +
+                         ((uint32_t)res.runServed << 16) + ((uint32_t)res.runBusy << 24);
     switch (res.runVerdict) {
       case kRunLaunched:
-        bridgeLog("[matter] reprise %s a +%s s : %u abonnement(s) relance(s) sur %lu sauve(s), %u laisse(s) a la "
-                  "pile (>= %lu essais), %u deja en cours, %u rate(s)",
-                  kind, secs(a, sizeof(a), res.runAt), res.runLaunched, (unsigned long)res.runSaved, res.runSkipped,
-                  (unsigned long)kResumeMaxRetries, res.runBusy, res.runFailed);
-        break;
-      case kRunSubsActive:
-        bridgeLog("[matter] reprise %s : %lu abonnement(s) deja actif(s), rien de lance", kind,
-                  (unsigned long)res.runSubs);
+        bridgeLog("[matter] reprise %s a +%s s : session demandee vers %u abonne(s) sur %u (%lu abonnement(s) "
+                  "sauve(s)), %u deja servi(s), %u deja en cours",
+                  kind, secs(a, sizeof(a), res.runAt), res.runLaunched, res.runPeers, (unsigned long)res.runSaved,
+                  res.runServed, res.runBusy);
+        quiet = 0;
         break;
       case kRunNothing:
-        bridgeLog("[matter] reprise %s : rien a relancer (%lu sauve(s), %u a >= %lu essais, %u en cours, %u rate(s))",
-                  kind, (unsigned long)res.runSaved, res.runSkipped, (unsigned long)kResumeMaxRetries, res.runBusy,
-                  res.runFailed);
+        if (res.runKind == kResumeAuto && sig == quiet) break;
+        bridgeLog("[matter] reprise %s : rien a relancer (%lu sauve(s), %u abonne(s) : %u deja servi(s), %u deja en "
+                  "cours)",
+                  kind, (unsigned long)res.runSaved, res.runPeers, res.runServed, res.runBusy);
+        quiet = res.runKind == kResumeAuto ? sig : 0;
         break;
-      case kRunNoStorage: bridgeLog("[matter] reprise %s : pas de stockage d'abonnements", kind); break;
-      default: bridgeLog("[matter] reprise %s : iterateur du stockage occupe, a refaire", kind); break;
+      case kRunNoStorage:
+        bridgeLog("[matter] reprise %s : pas de stockage d'abonnements", kind);
+        quiet = 0;
+        break;
+      default:
+        bridgeLog("[matter] reprise %s : iterateur du stockage occupe, a refaire", kind);
+        quiet = 0;
+        break;
     }
   }
   if (res.doneSeq != sSeenDoneSeq) {
@@ -1125,9 +1265,26 @@ static void tracePoll() {
     if (res.doneErr == CHIP_NO_ERROR.AsInteger())
       bridgeLog("[matter] reprise : session CASE avec %s ouverte en %s s", node, secs(b, sizeof(b), res.doneMs));
     else
-      bridgeLog("[matter] reprise : echec 0x%lX avec %s apres %s s%s", (unsigned long)res.doneErr, node,
-                secs(b, sizeof(b), res.doneMs),
+      bridgeLog("[matter] reprise : echec 0x%lX avec %s apres %s s%s (sans frais : compteurs de la pile intacts)",
+                (unsigned long)res.doneErr, node, secs(b, sizeof(b), res.doneMs),
                 res.doneErr == CHIP_ERROR_TIMEOUT.AsInteger() ? " (delai : adresse introuvable ou CASE muet)" : "");
+  }
+  if (res.peerSeq != sSeenPeerSeq) {
+    sSeenPeerSeq = res.peerSeq;
+    nodeText(node, sizeof(node), res.peerNode);
+    switch (res.peerVerdict) {
+      case kPeerResumed:
+      case kPeerNothing:
+        bridgeLog("[matter] reprise : %u abonnement(s) de %s repris, %u sans ReadHandler immediat, %u rate(s)",
+                  res.peerResumed, node, res.peerUnsettled, res.peerFailed);
+        break;
+      case kPeerServed:
+        bridgeLog("[matter] reprise : %s deja servi a l'ouverture de la session (pile ou abonnement neuf)", node);
+        break;
+      case kPeerNoStorage: bridgeLog("[matter] reprise : pas de stockage d'abonnements pour %s", node); break;
+      case kPeerNoIterator: bridgeLog("[matter] reprise : iterateur du stockage occupe pour %s, a refaire", node); break;
+      default: bridgeLog("[matter] reprise : file de la pile pleine, %s pas repris", node); break;
+    }
   }
 }
 
@@ -1170,15 +1327,15 @@ bool matterResumeNow(Print &out) {
   if (!netReady())
     out.printf("  (reseau pas pret : role %s, hote SRP %s : echec probable)\n", roleName(sNet.role),
                sNet.srpHost == 0xFF ? "?" : otSrpClientItemStateToString((otSrpClientItemState)sNet.srpHost));
-  if ((uint32_t)(now - sBootMs) < ResumePlanner::kNotBeforeMs)
-    out.println("  (moins de 50 s apres le demarrage : la tentative de la pile peut encore chercher l'adresse, "
-                "et celle-ci la rejoindre)");
+  if ((uint32_t)(now - sBootMs) < sPlan.startDelayMs)
+    out.printf("  (moins de %lu s apres le demarrage : la tentative de la pile peut encore chercher l'adresse, "
+               "et celle-ci la rejoindre)\n",
+               (unsigned long)(sPlan.startDelayMs / 1000));
   return true;
 }
 
 // Etat pour 'matter' : releve sous chaque verrou tour a tour, puis affiche.
 static void threadStatus(Print &out) {
-  const uint32_t now = millis();
   char a[16], b[16], c[16];
 
   // Verrou OpenThread (borne), rien d'autre dessous.
@@ -1224,6 +1381,7 @@ static void threadStatus(Print &out) {
   uint32_t subs = 0, reads = 0, total = 0;
   int nSaved = 0;
   SavedSub saved[kSavedMax];
+  bool servedSaved[kSavedMax] = {};
   for (uint32_t t0 = millis(); !chipOk && (uint32_t)(millis() - t0) < 50;) {
     chipOk = chip::DeviceLayer::PlatformMgr().TryLockChipStack();
     if (!chipOk) delay(1);
@@ -1235,25 +1393,32 @@ static void threadStatus(Print &out) {
     reads = all > subs ? all - subs : 0;
     SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
     nSaved = st ? collectSaved(st, saved, kSavedMax, total) : -2;
+    for (int i = 0; i < nSaved; i++) servedSaved[i] = subjectServed(im, saved[i].fabric, saved[i].node, millis());
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
   }
 
+  // Lu apres les verrous : un observateur arme entre-temps n'a pas d'age negatif.
+  const uint32_t now = millis();
   RoleChange roles[kRoleHistory];
   uint32_t nRoles;
   decltype(sSubs) sb;
   decltype(sResume) rs;
   uint32_t watchAge = 0;
-  bool watching = false;
+  uint64_t watchNode = 0;
+  uint8_t opening = 0, resuming = 0;
   portENTER_CRITICAL(&sSubMux);
   nRoles = sRoleChanges;
   memcpy(roles, sRoles, sizeof(roles));
   sb = sSubs;
   rs = sResume;
-  for (const ResumeWatch &w : sWatch)
-    if (w.pending) {
-      watching = true;
-      watchAge = now - w.startMs;
-    }
+  for (const ResumeWatch &w : sWatch) {
+    if (w.state == kWatchResuming) resuming++;
+    if (w.state != kWatchOpening) continue;
+    opening++;
+    const int32_t age = (int32_t)(now - w.startMs);
+    watchAge = age > 0 ? (uint32_t)age : 0;
+    watchNode = w.node;
+  }
   portEXIT_CRITICAL(&sSubMux);
 
   out.printf("  demarrage       : il y a %s s ; Matter pret a +%s s ; reseau pret (attache + SRP) ",
@@ -1266,7 +1431,7 @@ static void threadStatus(Print &out) {
   if (sModeKnown) linkModeText(sModeAtBegin, mode);
   out.printf("  type Thread     : %s ce demarrage (mode %s apres Matter.begin()) ; esp_matter : %u reglage(s), %u "
              "routeur -> MED ; prochain : %s ('matter med 0|1|2')%s\n",
-             kMedText[sMedBoot], mode, sDevTypeCalls, sDevTypeSwaps, kMedText[sMedMode],
+             kMedText[sMedBoot], mode, sDevTypeCallsEsp, sDevTypeSwapsEsp, kMedText[sMedMode],
              HALO_WRAP_THREAD_DEVTYPE ? "" : " ; enveloppe ABSENTE : 1 = 2");
 
   if (!sRoleHooked) {
@@ -1304,19 +1469,20 @@ static void threadStatus(Print &out) {
     for (int i = 0; i < nSaved; i++) {
       char node[24];
       nodeText(node, sizeof(node), saved[i].node);
-      out.printf("                    abonne %s (fabrique %u), id 0x%08lX, %lu echec(s) de reprise, min %u s, "
-                 "max %u s\n",
-                 node, saved[i].fabric, (unsigned long)saved[i].id, (unsigned long)saved[i].retries, saved[i].minS,
-                 saved[i].maxS);
+      out.printf("                    abonne %s (fabrique %u, %s), id 0x%08lX, %lu echec(s) de reprise de la pile "
+                 "(oubli au 12e), min %u s, max %u s\n",
+                 node, saved[i].fabric, servedSaved[i] ? "servi" : "SANS abonnement actif", (unsigned long)saved[i].id,
+                 (unsigned long)saved[i].retries, saved[i].minS, saved[i].maxS);
     }
   } else {
     out.println("  abonnements     : pile occupee, reessayer");
   }
 
-  out.printf("  abonnes (IM)    : %lu demande(s), %lu neuf(s), %lu repris, %lu termine(s) ; premier etabli ",
-             (unsigned long)sb.requested, (unsigned long)sb.fresh, (unsigned long)sb.resumed,
-             (unsigned long)sb.terminated);
-  if (sb.firstAt) out.printf("a +%s s\n", secs(a, sizeof(a), sb.firstAt));
+  out.printf("  abonnes (IM)    : %lu demande(s) ; etablis : %lu neuf(s), %lu repris par le pont, %lu repris par la "
+             "pile ; %lu termine(s) ; premier etabli ",
+             (unsigned long)sb.requested, (unsigned long)sb.fresh, (unsigned long)sb.byBridge,
+             (unsigned long)sb.byStack, (unsigned long)sb.terminated);
+  if (sb.firstAt) out.printf("a +%s s (%s)\n", secs(a, sizeof(a), sb.firstAt), kEstText[sb.lastKind]);
   else out.println(": aucun depuis le demarrage");
   if (sb.requested) {
     char node[24];
@@ -1325,26 +1491,45 @@ static void threadStatus(Print &out) {
                secs(a, sizeof(a), sb.reqAt), node, sb.reqMin, sb.reqMax, sb.reqApplied);
   }
 
-  out.printf("  reprise         : auto %s ('matter reprise [auto 0|1]') ; %lu lancement(s) dont %lu auto, %lu "
-             "abonnement(s) relance(s) ; CASE %lu ouverte(s), %lu echec(s), %lu sans nouvelles\n",
+  out.printf("  reprise         : auto %s ('matter reprise [auto 0|1]') ; %lu passage(s) dont %lu auto ; %lu "
+             "session(s) demandee(s) : %lu ouverte(s), %lu echec(s), %lu sans nouvelles ; %lu abonnement(s) repris\n",
              sResumeAuto ? "oui" : "non", (unsigned long)rs.runs, (unsigned long)rs.autoRuns,
-             (unsigned long)rs.launched, (unsigned long)rs.ok, (unsigned long)rs.failed, (unsigned long)rs.lost);
+             (unsigned long)rs.opened, (unsigned long)rs.ok, (unsigned long)rs.failed, (unsigned long)rs.lost,
+             (unsigned long)rs.resumed);
   if (rs.doneSeq) {
-    out.printf("                    derniere fin a +%s s apres %s s : ", secs(a, sizeof(a), rs.doneAt),
+    out.printf("                    derniere session a +%s s apres %s s : ", secs(a, sizeof(a), rs.doneAt),
                secs(b, sizeof(b), rs.doneMs));
-    if (rs.doneErr == CHIP_NO_ERROR.AsInteger()) out.println("session ouverte");
+    if (rs.doneErr == CHIP_NO_ERROR.AsInteger()) out.println("ouverte");
     else out.printf("erreur 0x%lX\n", (unsigned long)rs.doneErr);
   }
-  if (watching) out.printf("                    tentative en cours depuis %s s\n", secs(a, sizeof(a), watchAge));
-  else if (sResumeAuto && sPlan.waiting) out.println("                    tentative auto postee");
-  else if (sResumeAuto) {
+  if (rs.peerSeq) {
+    static const char *const kPeerText[] = {"repris",           "deja servi",         "rien repris",
+                                            "pas de stockage", "iterateur occupe", "file pleine"};
+    out.printf("                    derniere reprise a +%s s : %s (%u repris, %u sans ReadHandler, %u rate(s))\n",
+               secs(a, sizeof(a), rs.peerAt), kPeerText[rs.peerVerdict], rs.peerResumed, rs.peerUnsettled,
+               rs.peerFailed);
+  }
+  if (opening) {
+    char node[24];
+    nodeText(node, sizeof(node), watchNode);
+    out.printf("                    session en cours vers %s depuis %s s\n", node, secs(a, sizeof(a), watchAge));
+  } else if (resuming) {
+    out.println("                    session ouverte, reprise postee");
+  } else if (sResumeAuto && sPlan.waiting) {
+    out.println("                    tentative auto postee");
+  } else if (sResumeAuto) {
     const uint32_t left = sPlan.holdLeftMs(now);
-    if (left) out.printf("                    prochaine auto possible dans %s s (essai %u de l'episode)\n",
-                         secs(a, sizeof(a), left), sPlan.tries + 1);
+    if (left && sPlan.subs)
+      out.printf("                    prochain coup d'oeil auto dans %s s (abonnement actif)\n",
+                 secs(a, sizeof(a), left));
+    else if (left)
+      out.printf("                    prochaine relance auto dans %s s (essai %u de l'episode)\n",
+                 secs(a, sizeof(a), left), sPlan.tries + 1);
   }
 
   if (sMaxIntCap)
-    out.printf("  intervalle max  : plafonne a %u s pour les abonnements neufs ('matter maxint'), %lu applique(s)\n",
+    out.printf("  intervalle max  : plafonne a %u s pour les abonnements neufs ('matter maxint', 0 = celui "
+               "d'Apple), %lu applique(s) depuis le demarrage\n",
                sMaxIntCap, (unsigned long)sb.capped);
   else
     out.println("  intervalle max  : celui du controleur ('matter maxint <60..3600>' pour plafonner)");
@@ -1413,19 +1598,34 @@ void matterBridgeBegin() {
       sModeKnown = true;
       esp_openthread_lock_release();
     }
-    if (sMedBoot != kMedRouter) {
-      // Mode 2 (ancien) : esp_matter a mis Thread en routeur, on l'ecrase, et
-      // OpenThread relance l'attache. Mode 1 : deja MED, OpenThread sort sans
-      // rien faire (meme mode) ; filet si l'enveloppe manque au lien.
+    sDevTypeCallsEsp = sDevTypeCalls;
+    sDevTypeSwapsEsp = sDevTypeSwaps;
+    // Mode 2 (ancien) : esp_matter a mis Thread en routeur, on l'ecrase, et
+    // OpenThread relance l'attache. Mode 1 : filet si l'enveloppe manque au
+    // lien, ou si le mode lu n'est pas MED ('rn') ; sinon rien a refaire (et
+    // pas deux verrous pris sans limite pour rien).
+    const bool medInPlace =
+        HALO_WRAP_THREAD_DEVTYPE && sModeKnown && !sModeAtBegin.mDeviceType && sModeAtBegin.mRxOnWhenIdle;
+    if (sMedBoot == kMedLate || (sMedBoot == kMedEarly && !medInPlace)) {
       chip::DeviceLayer::PlatformMgr().LockChipStack();
       chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
           chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
       chip::DeviceLayer::PlatformMgr().UnlockChipStack();
     }
     // Suivi des abonnements : un seul rappel applicatif par pile, libre (nm).
+    // Plus grand plancher sauve : la pile y tente sa reprise (ResumePlanner).
+    SavedSub saved[kSavedMax];
+    uint32_t total = 0;
     chip::DeviceLayer::PlatformMgr().LockChipStack();
-    chip::app::InteractionModelEngine::GetInstance()->RegisterReadHandlerAppCallback(&sSubWatch);
+    auto *im = chip::app::InteractionModelEngine::GetInstance();
+    im->RegisterReadHandlerAppCallback(&sSubWatch);
+    SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
+    const int nSaved = st ? collectSaved(st, saved, kSavedMax, total) : 0;
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    uint16_t maxMin = 0;
+    for (int i = 0; i < nSaved; i++)
+      if (saved[i].minS > maxMin) maxMin = saved[i].minS;
+    sPlan.startDelay(maxMin);
     // Pile OpenThread demarree : son verrou existe. Active par defaut ('lampe garde').
     lamp.radio.setAirGuard(&kAirGuard);
   }
