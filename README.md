@@ -283,11 +283,13 @@ suite sans TX_DS ni MAX_RT (delai de 30 ms) ; en ecoute, au moins 100 trames
 en 10 s dont au moins 90 % au CRC faux (la molette de la telecommande en donne
 ~9 par seconde, au CRC juste) ; ou une ecoute sourde, au moins 1000
 rearmements en moins de 10 s sur une puce qui ne reste pas en reception
-(l'incident en donnait ~450 par seconde, vus en ~2-3 s ; d'ordinaire bien
-moins d'un par seconde). Une lampe debranchee (MAX_RT, silence) ne fait
-jamais relancer. Une relance au plus par minute ; apres 3 relances de suite
-sans guerison (un accuse, une fenetre d'ecoute surtout au CRC juste, ou,
-apres une relance pour surdite, 10 s d'ecoute ou la puce reste en reception),
+(l'incident en donnait ~450 par seconde, vus en ~2-3 s ; d'ordinaire estime a
+bien moins d'un par seconde, deduit des totaux, a confirmer par « hors RX »
+dans `lampe stats`). Une lampe debranchee (MAX_RT, silence) ne fait jamais
+relancer. Une relance au plus par minute ; apres 3 relances de suite sans
+guerison (un accuse, une fenetre d'ecoute surtout au CRC juste, ou, apres une
+relance pour surdite, 10 s d'ecoute ou la puce reste en reception sans envoi
+en delai),
 si le symptome revient, le module est **EN PANNE** : rouge fixe, un essai
 toutes les 10 min. Chaque relance ecrit des lignes `[lampe] BM5602 : ...` sur
 la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`

@@ -24,6 +24,7 @@ void ChipWatch::txVerdict(TxSeen v) {
       break;
     case TxSeen::Timeout:
       if (timeouts_ < 0xFF) timeouts_++;
+      winTimeout_ = true;  // pas de guerison apres surdite sur cette fenetre
       break;
     case TxSeen::Refused: break;  // rien d'emis : ni pour ni contre
   }
@@ -56,6 +57,7 @@ void ChipWatch::openWindow(uint32_t nowMs) {
   winAt_ = nowMs;
   winFrames_ = winBad_ = 0;
   winOffRx_ = winInRx_ = 0;
+  winTimeout_ = false;
 }
 
 // Fenetre glissante de la surdite : la tranche en cours et les kDeafSlices - 1
@@ -105,8 +107,10 @@ uint32_t ChipWatch::deafSpan(uint32_t nowMs) const {
 // tombe. Apres une relance pour surdite, une fenetre sans CRC faux vaut aussi
 // guerison si la puce y a dit RX (kCalmMinInRx rearmements periodiques) sans
 // en retomber (kCalmMaxOffRx hors RX au plus) : sans trame, en piece calme,
-// c'est la seule preuve que ce symptome est parti. La surdite se lit, elle,
-// sur sa fenetre glissante.
+// c'est la seule preuve que ce symptome est parti. Pas si l'emission reste
+// malade : un delai dans la fenetre, ou une serie de delais pas encore close
+// par un accuse ou un MAX_RT, l'empeche. La surdite se lit, elle, sur sa
+// fenetre glissante.
 void ChipWatch::roll(uint32_t nowMs) {
   rollDeaf(nowMs);
   if (!winOpen_) {
@@ -117,7 +121,8 @@ void ChipWatch::roll(uint32_t nowMs) {
   if (age < kNoiseWindowMs) return;
   noisy_ = winMet_ && age < 2 * kNoiseWindowMs;
   if (!winMet_ && (uint32_t)winBad_ * 2u < winFrames_) recovered();
-  else if (lastCause_ == Relaunch::RxDeaf && !winBad_ && winOffRx_ <= kCalmMaxOffRx && winInRx_ >= kCalmMinInRx)
+  else if (lastCause_ == Relaunch::RxDeaf && !winTimeout_ && !timeouts_ && !winBad_ && winOffRx_ <= kCalmMaxOffRx &&
+           winInRx_ >= kCalmMinInRx)
     recovered();
   openWindow(nowMs);
 }
