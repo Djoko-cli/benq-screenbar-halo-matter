@@ -1055,39 +1055,82 @@ static void testResumePlanner() {
       t += g + 45000;
     }
     CHECK(p.tries == 5, "5 tentatives dans l'episode : %u", p.tries);
-    // Abonnement repris : episode clos, plus rien ; perdu : nouvel episode.
+    // Abonnement repris : un coup d'oeil toutes les 5 min, episode pas encore clos.
     p.finished(1, t);
     p.subscriptions(1, t + 1000);
-    CHECK(p.tries == 0 && !p.due(t + 400000, base), "abonnement actif : rien");
-    p.subscriptions(0, t + 500000);
-    CHECK(!p.due(t + 509900, base), "perte : pas avant 10 s");
-    CHECK(p.due(t + 510000, base), "perte : relance apres 10 s");
+    CHECK(p.tries == 5 && !p.due(t + 1000 + 299900, base), "abonnement actif : rien avant 5 min");
+    CHECK(p.due(t + 1000 + 300000, base), "abonnement actif : coup d'oeil a 5 min");
     p.fired();
-    p.finished(0, t + 511000);  // rien a relancer
-    CHECK(!p.due(t + 511000 + 299900, base) && p.due(t + 511000 + 300000, base), "rien a relancer : 5 min");
+    CHECK(p.tries == 5, "coup d'oeil : pas un essai de l'episode (%u)", p.tries);
+    p.finished(0, t + 302000);  // abonne deja servi : rien de lance
+    CHECK(!p.due(t + 302000 + 299900, base) && p.due(t + 302000 + 300000, base), "coup d'oeil suivant a 5 min");
+    p.subscriptions(1, t + 1000 + ResumePlanner::kStableMs);
+    CHECK(p.stable && p.tries == 0, "abonnement tenu 5 min : episode clos (%u)", p.tries);
+    const uint32_t lost = t + 700000;
+    p.subscriptions(0, lost);
+    CHECK(!p.due(lost + 9900, base) && p.due(lost + 10000, base), "perte d'un abonnement tenu : relance a 10 s");
+    p.fired();
+    p.finished(0, lost + 11000);  // rien a relancer
+    CHECK(!p.due(lost + 11000 + 299900, base) && p.due(lost + 11000 + 300000, base), "rien a relancer : 5 min");
+  }
+  {
+    ResumePlanner p;  // repris puis perdu au bout de 20 s, quatre fois : 30 s, 60 s, 5 min, 5 min
+    p.subscriptions(0, 0);
+    p.network(true, 0);
+    uint32_t t = firstDue(p, 0, 100000, 0);
+    CHECK(t == 50000, "premiere tentative a 50 s : %lu", (unsigned long)t);
+    const uint32_t gaps[] = {30000, 60000, 300000, 300000};
+    for (uint32_t g : gaps) {
+      p.fired();
+      p.finished(1, t + 2000);  // session ouverte, abonnement repris, pas encore compte
+      p.subscriptions(1, t + 3000);
+      p.subscriptions(1, t + 21000);
+      p.subscriptions(0, t + 23000);
+      CHECK(!p.due(t + 23000 + g - 100, 0) && p.due(t + 23000 + g, 0), "perdu apres 20 s : %lu ms",
+            (unsigned long)g);
+      t += 23000 + g;
+    }
+    CHECK(p.tries == 4, "episode garde : %u", p.tries);
   }
   {
     ResumePlanner p;  // reseau pret tard : 10 s de stabilisation, pas plus
     p.subscriptions(0, 1000);
     p.network(true, 70000);
     CHECK(firstDue(p, 70000, 100000, 0) == 80000, "pret a 70 s : tentative a 80 s");
-    // Reseau perdu puis retrouve : compteur a zero, stabilisation a refaire.
     p.fired();
-    p.finished(1, 90000);
+    p.finished(1, 90000);  // echec : 30 s d'attente, jusqu'a 120 s
+    // Courte coupure pendant l'attente : ni l'attente ni le compteur ne bougent.
     p.network(false, 100000);
-    CHECK(!p.due(200000, 0), "reseau perdu : rien");
-    p.network(true, 200000);
-    CHECK(p.tries == 0 && !p.hold, "reseau retrouve : nouvel episode");
-    CHECK(firstDue(p, 200000, 260000, 0) == 210000, "retrouve a 200 s : tentative a 210 s");
-    p.network(true, 205000);  // meme etat : readySince ne bouge pas
-    CHECK(p.readySince == 200000, "releve suivant sans effet");
+    p.network(true, 105000);
+    CHECK(p.tries == 1 && p.hold, "courte coupure : episode garde");
+    CHECK(firstDue(p, 105000, 200000, 0) == 120000, "attente de 30 s tenue : %lu",
+          (unsigned long)firstDue(p, 105000, 200000, 0));
+    p.fired();
+    p.finished(1, 160000);  // 2e echec : 60 s
+    p.network(false, 170000);
+    CHECK(!p.due(400000, 0), "reseau perdu : rien");
+    p.network(true, 500000);  // coupure de 330 s : nouvel episode
+    CHECK(p.tries == 0 && !p.hold, "longue coupure : nouvel episode");
+    p.network(true, 505000);  // meme etat : readySince ne bouge pas
+    CHECK(p.readySince == 500000, "releve suivant sans effet");
+    CHECK(firstDue(p, 505000, 560000, 0) == 510000, "retrouve a 500 s : tentative a 510 s");
   }
   {
-    ResumePlanner p;  // comptage pas encore fait : rien
+    ResumePlanner p;  // comptage pas encore fait : rien ; abonnements actifs : 5 min
     p.network(true, 0);
     CHECK(!p.due(100000, 0), "abonnements inconnus : rien");
     p.subscriptions(2, 100000);
-    CHECK(!p.due(200000, 0), "abonnements actifs : rien");
+    CHECK(!p.due(399900, 0) && p.due(400000, 0), "abonnements actifs : coup d'oeil a 5 min seulement");
+  }
+  {
+    ResumePlanner p;  // plancher sauve de 20 s : la pile cherche jusqu'a ~65 s
+    p.startDelay(20);
+    p.subscriptions(0, 0);
+    p.network(true, 0);
+    CHECK(firstDue(p, 0, 200000, 0) == 70000, "plancher 20 s : premiere tentative a 70 s : %lu",
+          (unsigned long)firstDue(p, 0, 200000, 0));
+    p.startDelay(60000);
+    CHECK(p.startDelayMs == 650000, "plancher borne a 600 s : %lu", (unsigned long)p.startDelayMs);
   }
   {
     ResumePlanner p;  // des semaines plus tard : les attentes franchies restent acquises
