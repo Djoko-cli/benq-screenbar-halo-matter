@@ -3966,7 +3966,8 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
   uint32_t cmds = 0, acks = 0, bad = 0, spin = 0;
   uint32_t lastArm = millis(), lastFrame = millis(), lastBeat = millis(), lastFull = millis();
   uint32_t rearms = 0;
-  const uint32_t until = millis() + ms;
+  const uint32_t start = millis();
+  const uint32_t until = start + ms;
   while ((int32_t)(millis() - until) < 0) {
     const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
     if (irq & IRQ_RX_DR) {
@@ -4001,11 +4002,13 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
           bad++;
         } else if (len == 0) {
           acks++;
-          snprintf(line, sizeof(line), "  accuse   PID %u  NO_ACK %u", pid, noAck);
+          snprintf(line, sizeof(line), "  %6lu ms  accuse   PID %u  NO_ACK %u",
+                   (unsigned long)(lastFrame - start), pid, noAck);
           out.println(line);
         } else {
           cmds++;
-          size_t w = (size_t)snprintf(line, sizeof(line), "  COMMANDE PID %u  NO_ACK %u  charge", pid, noAck);
+          size_t w = (size_t)snprintf(line, sizeof(line), "  %6lu ms  COMMANDE PID %u  NO_ACK %u  charge",
+                                      (unsigned long)(lastFrame - start), pid, noAck);
           for (uint8_t q = 0; q < len; q++) w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", pay[q]);
           out.println(line);
         }
