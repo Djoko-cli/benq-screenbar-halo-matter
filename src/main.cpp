@@ -26,6 +26,7 @@
 #include "cli.h"
 #include "config.h"
 #include "halo.h"
+#include "halo1_lamp.h"
 #ifndef DIAG_ONLY
 #include "matter_bridge.h"
 #include "net.h"
@@ -185,6 +186,15 @@ void setup() {
   }
   // Rien n'est emis au demarrage : l'ancien HELLO (protocole Halo 2, pollNow)
   // est retire, la lampe est un Halo 1 (plan du pilote Halo 1, etape C1).
+  // Le pilote reprend l'etat sauve et se met en ecoute passive (produit) ou en
+  // veille (diagnostic) ; halo.begin() lui sert de relance du module.
+  lamp.begin(halo.radio, HALO1_LISTEN_DEFAULT, []() { return halo.begin(); });
+  {
+    char st[48];
+    Halo1Lamp::describe(lamp.target(), st, sizeof(st));
+    Serial.printf("Lampe Halo 1 : %s, ecoute %s ('lampe' pour le detail)\n", st,
+                  lamp.listening() ? "active" : "coupee");
+  }
 
 #ifndef DIAG_ONLY
   netBegin();
@@ -209,11 +219,14 @@ void setup() {
 }
 
 void loop() {
-  halo.tick();
+  lamp.tick();
 #ifndef DIAG_ONLY
   matterBridgePoll();
 #endif
   cliPoll();
   statusLed();
   decommissionButton();
+  // Cede la main a IDLE et aux taches moins prioritaires : tick() tourne ainsi
+  // a ~1 kHz, assez pour l'ecoute passive.
+  delay(1);
 }

@@ -116,7 +116,26 @@
 
 // ===========================================================================
 //  Halo 1 : pilote produit (prouve, ou reglable au banc via 'lampe')
+//  Chaque valeur se surcharge par -D dans platformio.ini.
 // ===========================================================================
+#ifndef HALO1_REPEATS
+#define HALO1_REPEATS 3                // comme la telecommande ; une trame seule a ete ignoree
+#endif
+#ifndef HALO1_MIN_ACKS
+#define HALO1_MIN_ACKS 2               // accuses exiges pour qu'une trame soit livree
+#endif
+#ifndef HALO1_MAX_ATTEMPTS
+#define HALO1_MAX_ATTEMPTS 5           // paquets au plus par trame, a chaque tour
+#endif
+#ifndef HALO1_GAP_MS
+#define HALO1_GAP_MS 100               // telecommande ~100 ; seul 500 est prouve depuis l'ESP32
+#endif
+#ifndef HALO1_RETRY_MS
+#define HALO1_RETRY_MS 1000            // reprise apres un echec : 1 s x rang de l'echec
+#endif
+#ifndef HALO1_PLAN_RETRIES
+#define HALO1_PLAN_RETRIES 2           // reprises avant d'abandonner la consigne
+#endif
 #ifndef HALO1_RESET_WAIT_MS
 #define HALO1_RESET_WAIT_MS 40         // 2 x 20 ms du chemin prouve (configStdAutoAck)
 #endif
@@ -125,6 +144,52 @@
 #endif
 #ifndef HALO1_RX_SILENCE_MS
 #define HALO1_RX_SILENCE_MS 500        // reconfiguration apres ce silence, comme 'ecoute'
+#endif
+#ifndef HALO1_REMOTE_HOLDOFF_MS
+#define HALO1_REMOTE_HOLDOFF_MS 250    // pas de rafale juste apres une trame de la telecommande...
+#endif
+#ifndef HALO1_REMOTE_HOLDOFF_MAX_MS
+#define HALO1_REMOTE_HOLDOFF_MAX_MS 2000  // ... sauf pour une demande qui attend depuis 2 s
+#endif
+#ifndef HALO1_SELECTION_STABLE_MS
+#define HALO1_SELECTION_STABLE_MS 2000 // selection de lampes retenue apres 2 s allumee
+#endif
+#ifndef HALO1_PERSIST_DELAY_MS
+#define HALO1_PERSIST_DELAY_MS 10000   // etat cru sauve 10 s apres son dernier changement...
+#endif
+#ifndef HALO1_PERSIST_MAX_MS
+#define HALO1_PERSIST_MAX_MS 60000     // ... et jamais plus de 60 s apres le premier
+#endif
+#ifndef HALO1_COALESCE_QUIET_MS
+#define HALO1_COALESCE_QUIET_MS 120    // pont Matter : ordres regroupes jusqu'a 120 ms de calme...
+#endif
+#ifndef HALO1_COALESCE_MAX_MS
+#define HALO1_COALESCE_MAX_MS 400      // ... ou 400 ms au plus
+#endif
+#ifndef HALO1_REFLECT_MIN_MS
+#define HALO1_REFLECT_MIN_MS 250       // ecart minimal entre deux reflets vers Matter
+#endif
+#ifndef HALO1_AUTO_PULSE_MS
+#define HALO1_AUTO_PULSE_MS 1000       // l'endpoint du bouton A revient a off apres 1 s
+#endif
+#ifndef HALO1_BOOT_IGNORE_MS
+#define HALO1_BOOT_IGNORE_MS 2000      // ordres Matter ignores juste apres le demarrage
+#endif
+#ifndef HALO1_LEVEL_GAMMA
+#define HALO1_LEVEL_GAMMA 2.0f         // niveau Matter -> luminosite brute (decision A3)
+#endif
+#ifndef HALO1_SELECTORS_AS_LIGHTS
+#define HALO1_SELECTORS_AS_LIGHTS 1    // lampes avant/arriere : lumieres (1) ou prises (0), A1
+#endif
+#ifndef HALO1_EXPOSE_AUTO
+#define HALO1_EXPOSE_AUTO 1            // bouton A expose dans Matter (A2)
+#endif
+#ifndef HALO1_LISTEN_DEFAULT
+#ifdef DIAG_ONLY
+#define HALO1_LISTEN_DEFAULT false     // diag : aucune activite radio de fond
+#else
+#define HALO1_LISTEN_DEFAULT true      // produit : suivre la telecommande
+#endif
 #endif
 
 // ===========================================================================

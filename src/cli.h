@@ -7,6 +7,9 @@
 // `cliPoll()` est non bloquante et doit être appelée depuis loop().
 void cliBegin();
 
+// Famille 'lampe ...' : pilote Halo 1 (cli_lampe.cpp).
+void cmdLampe(char *arg);
+
 // Identification du module CC2500 et de son etage d'entree.
 void ccIdentify(Print &out);
 void ccDiagnose(Print &out);
