@@ -431,6 +431,10 @@ void BenqHalo::tick() {
   // lampe sans qu'on l'ait demande. Or la lampe est un Halo 1 : ce protocole
   // ne la concerne pas. La radio ne bouge plus que sur commande, jusqu'au
   // pilote Halo 1 ; le code ci-dessous disparait a l'etape C6.
+  // Consequence dans le build produit : un ordre Matter (requestPush) laisse
+  // phase_ sur Push, settled() reste faux et matterBridgePoll() ne reflete
+  // plus rien. Matter accepte les ordres sans les emettre jusqu'a C5 : ne pas
+  // flasher le produit d'ici la.
   return;
   if (!radio.present()) return;
   uint32_t now = millis();
@@ -1254,7 +1258,7 @@ void BenqHalo::printInfo(Print &out) {
              PIN_RF_MOSI, PIN_RF_CSN, (unsigned long)RF_SPI_HZ);
   out.printf("  canal         : %u (%u MHz)\n", channel_, 2400 + channel_);
   out.printf("  adresse       : %02X %02X %02X %02X %s\n", addr_[0], addr_[1], addr_[2], addr_[3],
-             addressConfigured() ? "" : "  <-- NON CONFIGUREE, lance 'find'");
+             addressConfigured() ? "" : "  (non configuree)");
   out.printf("  sur l'air     : %02X %02X %02X %02X\n", addr_[3], addr_[2], addr_[1], addr_[0]);
   out.printf("  octets queue  : %02X %02X%s\n", tail_[0], tail_[1],
              (tail_[0] == 0xFF && tail_[1] == 0xFF) ? "  (joker : controle desactive)" : "");
@@ -4909,7 +4913,7 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
     }
     out.println();
     out.println("  Un candidat qui revient trois fois ou plus merite d'etre");
-    out.println("  essaye : 'addr' dans l'ordre inverse, puis 'sniff'.");
+    out.println("  essaye : 'ecoute <adresse dans l'ordre inverse> 5'.");
   }
   out.println();
 }
@@ -5179,7 +5183,7 @@ void BenqHalo::huntAnchored(Print &out, uint32_t seconds, uint8_t group, uint32_
   }
   if (solved) {
     out.println("  ADRESSE TROUVEE. Enregistre-la avec la commande 'addr' affichee");
-    out.println("  ci-dessus, puis 'sniff' pour verifier qu'on suit la lampe.");
+    out.println("  ci-dessus, puis 'ecoute <adresse> 5' pour verifier qu'on suit la lampe.");
   } else if (frames > 6) {
     out.println("  Beaucoup d'accroches sans adresse valide : la fenetre mord sur");
     out.println("  quelque chose de reel mais la lecture echoue. Envoie les vidages.");
