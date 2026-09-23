@@ -1184,3 +1184,19 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 | 17 | L2 bloquant (~300 ms) ; ramasse-miettes NVS | rare ; aucune interruption masquee ; ecritures au repos seulement |
 | 18 | Re-appairage en rejouant la balise (non essaye, fenetre d'appairage necessaire) | hors perimetre ; adresse d'appairage refusee partout |
 | 19 | Outils de banc (`txack`, `xo`) qui modifient la puce ou `gXoTrim` | invalidation apres chaque commande hors liste blanche ; B11 corrige |
+---
+
+## Resultats du banc (23/09/2026, build diag, carte A = 144401, temoin B = 11301)
+
+Prediction annoncee a Majid avant chaque essai ; journaux `logs/drv-T*.log`.
+
+| Essai | Resultat |
+|---|---|
+| T0 | `lampe autotest` ok, `lampe decode` conforme ; B : **0 trame, 0 accuse** en 75 s (3 redemarrages de A puis 40 s d'ecoute) ; RFCH/DM1/RT1 relus 05/82/73 ; instantane passif ENAA 00 |
+| T1 | `lampe on` : `C5 A5` 3/3 accuses a **100 ms** d'ecart (1,6-1,7 ms) ; B voit PID 1 puis 2 : le PID avance sur l'air. Lampe : deux lampes a A5 (Majid percoit un bref passage par l'etat memorise avant d'appliquer la trame) |
+| T2 | `temp 0` (`C3 00`, plus froid), `temp 100` (`C3 64`), **`mode avant` = `C4 A5`** (changement de lampes porte par une trame luminosite : A4 (a) valide), `lum 4C`/`FE`, `off` (`42 64`), `lum 60` **differe** (rien sur l'air), `on` (`C4 60`), `arriere on` (`C5 60`), `avant off` (`85 60`), `arriere off` (`03 64`, eteinte), `on` (`85 60`, memoire de selection), `sync` (`85 60` + `83 64` entrelacees), `rampe 4C FE 16 60` (valeurs intermediaires x1, `FE` x3, 9 preemptions) : **tout conforme, vu par Majid** |
+| T3 | `mode deux` (`C5 FE`), `auto` (`E1 01`) puis `auto` (`E1 02`) : baisse puis remontee a chaque fois ; `off` (`43 64`) ; `auto` refuse lampe eteinte, rien sur l'air |
+| T6 | lampe debranchee : 3 tours x 5 paquets MAX_RT (11,4 ms), reprises +1 s et +2 s, « injoignable », consigne ramenee a l'etat cru. Rebranchee : la lampe **reste eteinte et garde ses reglages** (temperature chaude conservee) ; `on` repart du premier coup (3/3) |
+| T8 | piles remises, `lampe ecoute 1` : switch puis molette suivis trame a trame (28 trames d'etat, 0 CRC faux) ; etat cru final arriere seule, FB, temp 64 = **ce que Majid voit**. Le switch renvoie le DERNIER type de reglage de la telecommande (ici `85 86`, luminosite), avec les nouveaux bits de lampe |
+
+Restent : T4/T5/T7/T9/T10 (reglages et questions ouvertes), T11-T13 (produit Matter), T14 (gamma), T15 (12 h).
