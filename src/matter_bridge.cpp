@@ -1,6 +1,7 @@
 #include "matter_bridge.h"
 
 #include <Matter.h>
+#include <Preferences.h>
 #include <stdarg.h>
 
 #include "config.h"
@@ -89,7 +90,9 @@ using namespace chip::app::Clusters;
 //                      unique (une trame ne porte qu'une valeur), temperature
 //  EP2 "Halo avant"    cette lampe est allumee (marche ET lampe avant)
 //  EP3 "Halo arriere"  idem pour la lampe arriere
-//  EP4 "Halo auto"     prise momentanee : un appui sur le bouton A
+//  EP4 "Halo auto"     prise momentanee : un appui sur le bouton A ; un A de
+//                      la telecommande entendu y fait la meme impulsion, sans
+//                      rien emettre
 //
 //  Les numeros viennent de l'ordre de creation ; les noms se donnent dans
 //  l'app. Matter est multi-admin : le meme noeud se jumelle a Apple Home,
@@ -175,9 +178,56 @@ static uint32_t sBootMs = 0, sAutoPulseAt = 0, sSeenVersion = 0, sLastReflect = 
 static bool sBootGuard = true;     // garde-fou de demarrage encore arme
 static bool sAutoPulse = false;    // EP4 a on : impulsion du bouton A en cours
 static bool sForceReflect = true;  // realigner Matter sur la consigne au prochain passage
+#if HALO1_EXPOSE_AUTO
+static uint32_t sSeenRemoteAuto = 0;  // lamp.remoteAutoCount() deja reflete
+static bool sAutoRaise = false;       // impulsion d'un A de la telecommande : EP4 a mettre a on
+#endif
 static struct {
-  uint32_t windows, bootIgnored, autoFired, autoRefused, reflects, writes, writeFails, lockBusy, logDropped;
+  uint32_t windows, bootIgnored, autoFired, autoRefused, autoHeard, reflects, writes, writeFails, lockBusy,
+      logDropped;
 } sStats = {};
+
+// ===========================================================================
+//  Duree de l'impulsion d'EP4, reglable sur le terrain
+//
+//  Terrain du 23/09 : apres un appui dans Apple Home, l'interrupteur met ~10 s
+//  a revenir a off dans l'app, alors que le firmware le remet a off au bout de
+//  1 s. Hypothese : Home ecarte un rapport contraire trop proche de sa propre
+//  ecriture, et ne relit l'attribut que plus tard. La duree se regle donc sans
+//  reflasher ('matter impulsion <ms>'), et reste en NVS : espace de noms du
+//  pilote, une cle a part. Lue et ecrite dans la tache loop seulement.
+// ===========================================================================
+
+static const char *const kNvsNs = "halo1";
+static const char *const kNvsPulseKey = "impulsion";
+static uint16_t sAutoPulseMs = HALO1_AUTO_PULSE_MS;
+
+static void loadAutoPulse() {
+  Preferences p;
+  // En ecriture meme pour lire, comme le pilote : en lecture seule, un espace
+  // de noms absent fait loguer une erreur NVS au premier demarrage.
+  if (!p.begin(kNvsNs, false)) return;
+  // isKey() d'abord : interroger une cle absente logue une erreur NVS.
+  if (p.isKey(kNvsPulseKey)) {
+    const uint16_t v = p.getUShort(kNvsPulseKey, HALO1_AUTO_PULSE_MS);
+    if (v >= kMatterPulseMinMs && v <= kMatterPulseMaxMs) sAutoPulseMs = v;  // sinon : defaut
+  }
+  p.end();
+}
+
+uint16_t matterAutoPulseMs() { return sAutoPulseMs; }
+
+bool matterSetAutoPulseMs(uint32_t ms, bool *saved) {
+  if (saved) *saved = false;
+  if (ms < kMatterPulseMinMs || ms > kMatterPulseMaxMs) return false;
+  sAutoPulseMs = (uint16_t)ms;  // une impulsion en cours finit a la nouvelle duree
+  Preferences p;
+  if (!p.begin(kNvsNs, false)) return true;
+  const bool ok = p.putUShort(kNvsPulseKey, sAutoPulseMs) == sizeof(uint16_t);
+  p.end();
+  if (saved) *saved = ok;
+  return true;
+}
 
 // Journal du pont : comme celui du pilote, perdu plutot que d'attendre le port.
 static void bridgeLog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -287,21 +337,24 @@ static void setValue(esp_matter_attr_val_t &v, uint16_t x) {
 // en gardant le type lu : CurrentLevel est nullable. updateAttributeVal passe
 // par PRE_UPDATE, donc le cache de la bibliotheque suit ; il corrige aussi une
 // valeur restauree depuis la NVS, que les setters sauteraient (cache egal).
+// false si l'attribut n'a pas pu etre lu ou ecrit.
 template <class F>
-static void syncAttr(MatterEndPoint &ep, uint32_t cluster, uint32_t attr, F want) {
+static bool syncAttr(MatterEndPoint &ep, uint32_t cluster, uint32_t attr, F want) {
   esp_matter_attr_val_t v = esp_matter_invalid(nullptr);
   uint16_t cur = 0;
   if (!ep.getAttributeVal(cluster, attr, &v) || !valueOf(v, cur)) {
     sStats.writeFails++;
-    return;
+    return false;
   }
   const uint16_t w = want(cur);
-  if (w == cur) return;
+  if (w == cur) return true;
   setValue(v, w);
-  if (ep.updateAttributeVal(cluster, attr, &v))
+  if (ep.updateAttributeVal(cluster, attr, &v)) {
     sStats.writes++;
-  else
-    sStats.writeFails++;
+    return true;
+  }
+  sStats.writeFails++;
+  return false;
 }
 
 // Sous le verrou de la pile : aucun ordre d'un controleur ne s'intercale. false
@@ -330,7 +383,8 @@ static bool reflect(uint32_t now) {
   const bool back = t.power && (t.lamps & halo1::F_BACK);
   syncAttr(mainLight, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)t.power; });
   // Affichage stable (E.2) : une valeur ecrite par un controleur, qui donne deja
-  // la consigne, ne saute jamais vers une voisine.
+  // la consigne, ne saute jamais vers une voisine. Jamais sous le plancher
+  // (kMatterLevelFloor) : Apple Home montrerait 0 %, donc une lampe pleine.
   syncAttr(mainLight, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id,
            [&](uint16_t cur) { return (uint16_t)halo1::displayLevel((uint8_t)cur, t.bright); });
   syncAttr(mainLight, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id,
@@ -338,10 +392,13 @@ static bool reflect(uint32_t now) {
   syncAttr(frontLamp, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)front; });
   syncAttr(backLamp, OnOff::Id, OnOff::Attributes::OnOff::Id, [&](uint16_t) { return (uint16_t)back; });
 #if HALO1_EXPOSE_AUTO
-  // Jamais remis a on : seul un controleur l'y met. Remis a off par un
-  // controleur pendant l'impulsion, il y reste.
-  syncAttr(autoButton, OnOff::Id, OnOff::Attributes::OnOff::Id,
-           [&](uint16_t cur) { return (uint16_t)(sAutoPulse && cur); });
+  // Mis a on par un controleur, ou ici une fois pour un A de la telecommande
+  // (sAutoRaise). Notre ecriture repasse par onAuto, mais dans la tache loop :
+  // ownEcho() l'ecarte, rien n'est emis. Remis a off par un controleur pendant
+  // l'impulsion, il y reste.
+  if (syncAttr(autoButton, OnOff::Id, OnOff::Attributes::OnOff::Id,
+               [&](uint16_t cur) { return (uint16_t)(sAutoPulse && (cur || sAutoRaise)); }))
+    sAutoRaise = false;
 #endif
   chip::DeviceLayer::PlatformMgr().UnlockChipStack();
   sSeenVersion = lamp.version();
@@ -359,6 +416,10 @@ void matterBridgeBegin() {
   // La table gamma est deja construite par lamp.begin().
   sLoopTask = xTaskGetCurrentTaskHandle();
   const halo1::State t = lamp.target();
+  loadAutoPulse();
+#if HALO1_EXPOSE_AUTO
+  sSeenRemoteAuto = lamp.remoteAutoCount();
+#endif
 
 #if MATTER_NET_THREAD
   // Avant le premier begin() d'accessoire : c'est lui qui cree le noeud, et le
@@ -366,6 +427,7 @@ void matterBridgeBegin() {
   if (!Matter.selectNetwork(MATTER_NETWORK_THREAD))
     Serial.println("!! selectNetwork(THREAD) refuse : le noeud resterait en Wi-Fi");
 #endif
+  // levelFromRaw : niveau rapporte, jamais sous le plancher (Apple Home).
   mainLight.begin(t.power, halo1::levelFromRaw(t.bright), halo1::miredFromTemp(t.temp));
   // La bibliotheque ne renseigne pas la plage physique de temperature : sans
   // elle, les applications affichent un curseur bien plus large que la lampe.
@@ -434,6 +496,21 @@ void matterBridgePoll() {
   portEXIT_CRITICAL(&sInboxMux);
 
   if (ready) applyIntents(in, first, now);
+#if HALO1_EXPOSE_AUTO
+  // A de la telecommande entendu par le pilote : meme impulsion d'EP4 qu'apres
+  // un appui dans l'app, pour que l'app (et ses automatisations) le voie. Rien
+  // n'est emis vers la lampe, et ce n'est pas un ordre Matter : aucune fenetre
+  // ni pressAuto(), et notre ecriture d'EP4 est un echo (ownEcho).
+  const uint32_t heard = lamp.remoteAutoCount();
+  if (heard != sSeenRemoteAuto) {
+    sSeenRemoteAuto = heard;
+    sAutoPulse = sAutoRaise = true;
+    sAutoPulseAt = now;
+    sForceReflect = true;
+    sStats.autoHeard++;
+    if (lamp.tracing()) bridgeLog("[matter] A de la telecommande -> impulsion EP4 (%u ms)", sAutoPulseMs);
+  }
+#endif
   // Jamais de reflet tant que la boite contient des intentions : un curseur en
   // cours ne revient pas en arriere.
   if (pending) return;
@@ -442,8 +519,13 @@ void matterBridgePoll() {
   // et le retour a zero de millis() (49,7 jours) ne peut pas le rouvrir.
   if (sBootGuard && (uint32_t)(now - sBootMs) >= HALO1_BOOT_IGNORE_MS + HALO1_COALESCE_MAX_MS)
     sBootGuard = false;
-  const bool pulseOver = sAutoPulse && (uint32_t)(now - sAutoPulseAt) >= HALO1_AUTO_PULSE_MS;
-  if (pulseOver) sAutoPulse = false;
+  const bool pulseOver = sAutoPulse && (uint32_t)(now - sAutoPulseAt) >= sAutoPulseMs;
+  if (pulseOver) {
+    sAutoPulse = false;
+#if HALO1_EXPOSE_AUTO
+    sAutoRaise = false;  // EP4 jamais mis a on apres la fin de l'impulsion
+#endif
+  }
   const bool changed =
       lamp.version() != sSeenVersion && (uint32_t)(now - sLastReflect) >= HALO1_REFLECT_MIN_MS;
   if (!sForceReflect && !pulseOver && !changed) return;
@@ -521,10 +603,18 @@ void matterPrintStatus(Print &out) {
   out.printf("  temperature     : %u-%u mireds = temp 00 (froid) a 64 (chaud), ~%u-%u K nominaux\n",
              halo1::kMiredCold, halo1::kMiredWarm, (unsigned)((1000000UL + halo1::kMiredCold / 2) / halo1::kMiredCold),
              (unsigned)((1000000UL + halo1::kMiredWarm / 2) / halo1::kMiredWarm));
-  out.printf("  luminosite      : niveau 1-254 -> 4C-FE, gamma %.2f\n", (double)halo1::mapGamma());
+  out.printf("  luminosite      : niveau 1-254 -> 4C-FE, gamma %.2f ; rapporte jamais sous %u (1-%u = 4C)\n",
+             (double)halo1::mapGamma(), halo1::kMatterLevelFloor, halo1::kMatterLevelFloor);
   out.printf("  ordres          : %lu fenetres, %lu ignorees au demarrage ; A : %lu appuis, %lu refuses\n",
              (unsigned long)sStats.windows, (unsigned long)sStats.bootIgnored, (unsigned long)sStats.autoFired,
              (unsigned long)sStats.autoRefused);
+#if HALO1_EXPOSE_AUTO
+  out.printf("  bouton A (EP4)  : impulsion %u ms ('matter impulsion <%u..%u>', NVS), %lu A de la telecommande "
+             "reflete(s)\n",
+             sAutoPulseMs, kMatterPulseMinMs, kMatterPulseMaxMs, (unsigned long)sStats.autoHeard);
+#else
+  out.printf("  bouton A (EP4)  : absent (HALO1_EXPOSE_AUTO 0), impulsion %u ms\n", sAutoPulseMs);
+#endif
   out.printf("  reflets         : %lu (%lu attributs ecrits, %lu echecs, %lu verrou occupe), %lu traces perdues\n",
              (unsigned long)sStats.reflects, (unsigned long)sStats.writes, (unsigned long)sStats.writeFails,
              (unsigned long)sStats.lockBusy, (unsigned long)sStats.logDropped);

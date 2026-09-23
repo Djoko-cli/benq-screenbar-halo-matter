@@ -18,6 +18,11 @@ static constexpr uint8_t kBlobVersion = 1;
 static constexpr uint32_t kPersistAfterTxMs = 500;
 // Module perdu (L3) : nouvel essai de relance toutes les 60 s.
 static constexpr uint32_t kLostRetryMs = 60000;
+// Un appui sur A de la telecommande = 3 copies du meme numero a ~100 ms
+// (btn-A4.log : E0 01 x3 en 200 ms). Meme numero moins de 1 s apres la trame
+// precedente : meme appui. Un nouvel appui change de numero ; la telecommande
+// ne repart a 01 qu'apres une pause bien plus longue.
+static constexpr uint32_t kRemoteAutoRepeatMs = 1000;
 
 // ---------------------------------------------------------------------------
 //  Textes
@@ -103,7 +108,7 @@ void Halo1Lamp::begin(BC5602 &chip, bool listen, RestartFn restart) {
   const uint32_t now = millis();
   // Comme si la derniere trame de la telecommande et la derniere emission
   // etaient anciennes : ni attente, ni sauvegarde retardee au demarrage.
-  remoteAt_ = lastTxEndAt_ = now - 60000;
+  remoteAt_ = lastTxEndAt_ = remoteAutoAt_ = now - 60000;
   radio.begin(chip, addrReg_);  // aucun acces SPI
   // Rien n'est emis : ecoute passive (jamais d'accuse) ou veille.
   radio.request(listen ? Mode::Rx : Mode::Sleep, now);
@@ -585,14 +590,20 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
       stats.rxInvalid++;
       trace("[lampe] RX PID %u len %u %02X %02X : invalide", f.pid, f.len, p.flags, p.value);
       break;
-    case Kind::Auto:
+    case Kind::Auto: {
       // Aucun changement de marche ni de lampes : le sens des bits d'une trame
       // A est inconnu ('60 01' observe).
       stats.rxAuto++;
       remoteAt_ = now;
+      const bool press = p.value != remoteAutoValue_ || (uint32_t)(now - remoteAutoAt_) >= kRemoteAutoRepeatMs;
+      if (press) remoteAutoPresses_++;  // reflete dans Matter par le pont (EP4)
+      remoteAutoValue_ = p.value;
+      remoteAutoAt_ = now;
       noteAuto(p.value, now);
-      trace("[lampe] RX tele PID %u %02X %02X -> A numero %u", f.pid, p.flags, p.value, p.value);
+      trace("[lampe] RX tele PID %u %02X %02X -> A numero %u%s", f.pid, p.flags, p.value, p.value,
+            press ? "" : " (copie)");
       break;
+    }
     default:  // Temp, Bright
       stats.rxState++;
       remoteAt_ = now;
@@ -809,7 +820,8 @@ void Halo1Lamp::printStatus(Print &out) const {
   out.printf("  radio       : %s, %lu config. (%lu silence, %lu apres echec TX, %lu verif. ratees), %lu rearm.\n",
              kModes[(uint8_t)radio.mode()], (unsigned long)rs.fullConfigs, (unsigned long)rs.silenceReconf,
              (unsigned long)rs.txReconf, (unsigned long)rs.verifyFail, (unsigned long)rs.rearms);
-  out.printf("  dernier A   : %u, memoire des lampes : %s\n", lastAuto_, lampsText(selMem_.memory(target_)));
+  out.printf("  dernier A   : %u (%lu appuis entendus de la telecommande), memoire des lampes : %s\n", lastAuto_,
+             (unsigned long)remoteAutoPresses_, lampsText(selMem_.memory(target_)));
   out.printf("  sauvegarde  : %s\n", persistDirty_ ? "en attente" : "a jour");
   out.printf("  reglages    : %u paquets (%u accuses, %u au plus), ecart %u ms, reprise %u ms x %u, gamma %.2f\n",
              tuning.repeats, tuning.minAcks, tuning.maxAttempts, tuning.gapMs, tuning.retryMs, tuning.planRetries,

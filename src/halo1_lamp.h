@@ -45,6 +45,11 @@ class Halo1Lamp {
   bool busy() const;                             // tranche active ou attente de reprise
   Halo1Link link() const { return link_; }
   uint8_t lastAuto() const { return lastAuto_; }
+  // Appuis sur A entendus de la telecommande depuis le demarrage, jamais remis a
+  // zero ('lampe stats raz' compris) : le pont Matter reflete chaque changement
+  // par une impulsion d'EP4, sans rien emettre. Les copies d'un meme appui
+  // comptent une fois ; nos propres trames A n'y passent jamais (onAir seul).
+  uint32_t remoteAutoCount() const { return remoteAutoPresses_; }
   // Niveau L3 : relance du module ratee (module muet), ou sans effet
   // (configuration toujours rejetee). Rien n'est emis ; nouvel essai de relance
   // toutes les 60 s.
@@ -135,6 +140,9 @@ class Halo1Lamp {
   Phase phase_ = Phase::Idle;
   uint32_t version_ = 1, nextTxAt_ = 0, retryAt_ = 0, remoteAt_ = 0, pendingSince_ = 0,
            lastTxEndAt_ = 0, persistFirst_ = 0, persistDue_ = 0, lastAckAt_ = 0, restartAt_ = 0;
+  // Derniere trame A de la telecommande (numero, instant) et appuis comptes.
+  uint32_t remoteAutoPresses_ = 0, remoteAutoAt_ = 0;
+  uint8_t remoteAutoValue_ = 0;
   uint16_t rawGapMs_ = 0;
   bool listening_ = false, trace_ = false, persistDirty_ = false, holding_ = false, lost_ = false,
        acked_ = false;

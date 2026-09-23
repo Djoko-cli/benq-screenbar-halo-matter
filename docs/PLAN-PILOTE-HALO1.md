@@ -826,7 +826,7 @@ Ils sont crees dans cet ordre, ce qui donne les numeros 1 a 4 sur un noeud neuf.
 | 1 | `MatterColorTemperatureLight mainLight` | OnOff = `t.power` ; CurrentLevel suit `t.bright` ; ColorTemperatureMireds suit `t.temp` ; PhysicalMin/MaxMireds = 153/370 via `setAttributeVal` (comme l'actuel 163-168) |
 | 2 | `MatterOnOffLight frontLamp` (ou Plugin si `HALO1_SELECTORS_AS_LIGHTS 0`) | OnOff = `t.power && (t.lamps & F_FRONT)` |
 | 3 | `MatterOnOffLight backLamp` (idem) | OnOff = `t.power && (t.lamps & F_BACK)` |
-| 4 | `MatterOnOffPlugin autoButton` (`HALO1_EXPOSE_AUTO`) | passe a on sur ecriture, repasse a off apres 1 s |
+| 4 | `MatterOnOffPlugin autoButton` (`HALO1_EXPOSE_AUTO`) | passe a on sur ecriture, repasse a off apres l'impulsion (1 s par defaut, `matter impulsion <300..15000>` en NVS `halo1/impulsion`) ; un A de la telecommande entendu fait la meme impulsion, sans rien emettre (E.5) |
 
 On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), la prise maitre et la luminosite arriere.
 
@@ -834,8 +834,9 @@ On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), l
 
 **Luminosite.** Table construite au demarrage (`mapInit(HALO1_LEVEL_GAMMA)`) :
 - `raw(L) = 0x4C + round(178 × ((L-1)/253)^γ)` pour L = 1..254, et `raw(0) = raw(1)`.
-- Avec γ = 1, formule entiere exacte : `raw(L) = 0x4C + ((L-1)*178 + 126)/253`, inverse `L(r) = 1 + ((r-0x4C)*253 + 89)/178`. L'aller-retour est l'identite.
-- Inverse general : `levelFromRaw(r)` = plus petit L tel que `raw(L) ≥ r`.
+- **Plancher `kMatterLevelFloor = 3`** (terrain du 23/09) : Apple Home affiche CurrentLevel en pourcentage entier ; le niveau 1 y devient 0 %, et une lumiere allumee a 0 % s'affiche au maximum (lampe a 0x4C, reglee a la molette, montree pleine). 3 donne 1,2 %, soit 1 % arrondi ou tronque. `raw(0..3) = 0x4C` quel que soit γ (rien ne change a γ = 2, ou les niveaux 1..14 donnent deja 0x4C), et aucun niveau sous 3 n'est jamais rapporte.
+- Avec γ = 1, formule entiere exacte au-dessus du plancher : `raw(L) = 0x4C + ((L-1)*178 + 126)/253`, inverse `L(r) = 1 + ((r-0x4C)*253 + 89)/178`. L'aller-retour est l'identite pour toute valeur atteinte depuis le plancher ; seule 0x4D (niveau 2 avant le plancher) ne l'est plus.
+- Inverse general (niveau rapporte) : `levelFromRaw(r)` = plus petit L ≥ 3 tel que `raw(L) ≥ r`.
 - Points a γ=2 (verifies) : L64 = 0x57, L127 = 0x78, L138 = 0x80, L171 = 0x9C, L191 = 0xB0, L254 = 0xFE.
 - 15 valeurs brutes du haut sont inaccessibles depuis Matter (pas de 2). La telecommande peut les atteindre.
 
@@ -847,10 +848,10 @@ On supprime l'interrupteur capteur (le Halo 1 n'a pas de capteur de presence), l
 - Les Kelvin reels ne sont pas mesures.
 
 **Affichage stable.** Au moment de refleter :
-- `L_affiche = (raw(L_attribut) == t.bright) ? L_attribut : levelFromRaw(t.bright)` ;
-- meme regle pour les mireds.
+- `L_affiche = (L_attribut ≥ 3 && raw(L_attribut) == t.bright) ? L_attribut : levelFromRaw(t.bright)` ;
+- meme regle pour les mireds (sans plancher).
 
-C'est idempotent, et la valeur qu'un controleur a ecrite ne « saute » jamais vers une voisine.
+C'est idempotent, et la valeur qu'un controleur a ecrite ne « saute » jamais vers une voisine, sauf sous le plancher : 1 ou 2 (0x4C) s'affichent 3.
 
 ### E.3 Callbacks et boite d'intentions
 
@@ -897,7 +898,7 @@ Notations : `baseF = base.power && (base.lamps & F_FRONT)`, et de meme `baseB`. 
 | R3b | `sel` et aucune lampe allumee | `power = false`, `lamps = mem` (jamais 0) |
 
 - Toute intention marche ou lampe ajoute `fields |= FLD_FLAGS` : la commande est toujours emise.
-- Niveau : `bright = rawFromLevel(max(1, L))`, `FLD_BRIGHT`, **y compris lampe eteinte** (differe jusqu'a l'allumage).
+- Niveau : `bright = rawFromLevel(max(1, L))`, `FLD_BRIGHT`, **y compris lampe eteinte** (differe jusqu'a l'allumage). Venu avec EP1 on, il est ecarte s'il n'ajoute rien : meme valeur brute que la consigne (1..3 pour 0x4C), ou niveau affiche pour elle.
 - Mireds : `temp = tempFromMired(m)`, `FLD_TEMP`, meme regle.
 - A : `fireAuto` seulement si la consigne finale est allumee **et** que la fenetre ne contient aucune intention marche ou lampe (garde-fou de groupe, A2).
 
@@ -914,6 +915,7 @@ Cas testes :
    - Sinon : `r = resolveMatter(lamp.target(), in, lamp.memoryLamps())`.
      - Si `r.fields`, `lamp.request(r.target, r.fields)`.
      - Si `r.fireAuto && lamp.pressAuto()`, `sAutoPulseAt = now`.
+   - **A de la telecommande** (`HALO1_EXPOSE_AUTO`) : si `lamp.remoteAutoCount()` a change (appuis entendus dans `onAir`, les 3 copies d'un appui comptees une fois), meme impulsion d'EP4, que le reflet met a on. Rien n'est emis, aucune intention : notre ecriture d'EP4 est ecartee par `ownEcho()`.
      - Dans tous les cas, `sForceReflect = true` : on realigne sur la consigne resolue, par exemple EP4 repasse a off tout de suite si A est refuse.
 2. **Reflet**, seulement si la boite est vide et si `sForceReflect` ou (`lamp.version() != sSeenVersion` et `now - sLastReflect ≥ 250`), ou si l'impulsion auto est echue :
    - `st = esp_matter::lock::chip_stack_lock(portMAX_DELAY)` ; si FAILED, on retente au passage suivant ;
@@ -939,7 +941,7 @@ Cas testes :
 3. `lamp`, la radio et la NVS pilote ne sont utilises que depuis la tache loop.
 4. Matter affiche la consigne. Elle ne change hors ecriture Matter que sur une trame de la telecommande, un abandon ou une commande CLI.
 5. On ne reflete jamais tant que la boite contient des intentions : un curseur en cours ne revient pas en arriere.
-6. EP1 OnOff = `t.power`, EP2 = `power && front`, EP3 = `power && back`, EP4 vaut false sauf pendant l'impulsion de 1 s.
+6. EP1 OnOff = `t.power`, EP2 = `power && front`, EP3 = `power && back`, EP4 vaut false sauf pendant l'impulsion (1 s par defaut, `matter impulsion`). CurrentLevel jamais sous 3.
 
 Une option, hors v1 : Identify fait clignoter la LED de IO15, jamais la lampe, ce qui voudrait dire emettre.
 

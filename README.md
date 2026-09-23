@@ -14,7 +14,7 @@ Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
 | EP1 "Halo" | Color Temperature Light | marche/arret, luminosite, temperature 153-370 mireds |
 | EP2 "Halo avant" | On/Off Light | lampe avant allumee (marche ET lampe avant) |
 | EP3 "Halo arriere" | On/Off Light | lampe arriere allumee (marche ET lampe arriere) |
-| EP4 "Halo auto" | On/Off Plug-in Unit | appui sur le bouton A (mode auto), revient seul a off apres 1 s |
+| EP4 "Halo auto" | On/Off Plug-in Unit | appui sur le bouton A (mode auto), revient seul a off apres 1 s (`matter impulsion <ms>`) ; un appui A sur la telecommande y fait la meme impulsion |
 
 - Une trame radio ne porte qu'une valeur : les deux lampes partagent la
   luminosite et la temperature, d'ou un seul curseur de chaque sur EP1.
@@ -203,6 +203,7 @@ la CSA et une certification — hors de portée d'un projet perso.
 |---|---|
 | `info` | materiel, configuration radio, etat du pilote |
 | `matter` | etat Matter, code d'appairage, compteurs du pont |
+| `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS |
 | `lampe` | pilote Halo 1 : consigne, etat cru, champs a livrer, lien, radio |
 | `lampe on` / `lampe off` | allumer / eteindre, memes regles que Matter |
 | `lampe avant on\|off` / `lampe arriere on\|off` | une lampe (comme EP2 / EP3) |

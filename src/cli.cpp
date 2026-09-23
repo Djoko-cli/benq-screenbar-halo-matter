@@ -87,6 +87,9 @@ static void cmdHelp() {
   Serial.println("  lampe on|off|sync     allumer, eteindre, tout renvoyer (memes regles que Matter)");
   Serial.println("  lampe lum|temp|mode   luminosite 4C..FE, temperature 0..100, avant|arriere|deux");
   Serial.println("  matter                etat Matter, code d'appairage");
+#ifndef DIAG_ONLY
+  Serial.println("  matter impulsion [ms] duree de l'impulsion d'EP4 'Halo auto' (300..15000, NVS)");
+#endif
   Serial.println("  debug                 bascule les traces RF");
   Serial.println("  regs                  dump des registres du BC5602");
   Serial.println("  rfinit                re-teste le module apres correction du cablage");
@@ -224,6 +227,33 @@ static void cmdHalo2Retired(bool pairing) {
 }
 
 #ifndef DIAG_ONLY
+// 'matter' : etat du pont. 'matter impulsion [ms]' : duree de l'impulsion
+// d'EP4 (bouton A), gardee en NVS.
+static void cmdMatter(char *arg) {
+  char *val = splitWord(arg);
+  if (!*arg) {
+    matterPrintStatus(Serial);
+    return;
+  }
+  if (strcmp(arg, "impulsion")) {
+    Serial.println("Usage : matter [impulsion [ms]]");
+    return;
+  }
+  if (*val) {
+    char *end = nullptr;
+    const long v = strtol(val, &end, 10);
+    while (end && *end == ' ') end++;
+    bool saved = false;
+    if (end == val || *end || v < 0 || !matterSetAutoPulseMs((uint32_t)v, &saved)) {
+      Serial.printf("Usage : matter impulsion <%u..%u> (ms)\n", kMatterPulseMinMs, kMatterPulseMaxMs);
+      return;
+    }
+    if (!saved) Serial.println("!! ecriture NVS ratee : valeur perdue au prochain demarrage");
+  }
+  Serial.printf("Impulsion d'EP4 'Halo auto' : %u ms (defaut %u)\n", matterAutoPulseMs(),
+                (unsigned)HALO1_AUTO_PULSE_MS);
+}
+
 static void cmdWifi(char *arg) {
   char *pass = splitWord(arg);
   if (!*arg) {
@@ -267,7 +297,7 @@ static void handleLine(char *line) {
 #endif
   } else if (!strcmp(line, "lampe")) cmdLampe(arg);
 #ifndef DIAG_ONLY
-  else if (!strcmp(line, "matter")) matterPrintStatus(Serial);
+  else if (!strcmp(line, "matter")) cmdMatter(arg);
 #endif
   else if (!strcmp(line, "poll")) cmdHalo2Retired(false);
   else if (!strcmp(line, "debug")) {

@@ -417,11 +417,18 @@ int selfTest(char *msg, size_t n) {
            "table gamma : bornes");
   for (unsigned l = 2; l <= 254; l++)
     c.expect(rawFromLevel((uint8_t)l) >= rawFromLevel((uint8_t)(l - 1)), "table gamma non monotone en %u", l);
+  // Plancher : le minimum se rapporte au plancher, et y revient (Apple Home
+  // montrerait sinon la lampe pleine).
+  c.expect(rawFromLevel(kMatterLevelFloor) == kBrightMin && levelFromRaw(kBrightMin) == kMatterLevelFloor &&
+               displayLevel(1, kBrightMin) == kMatterLevelFloor,
+           "plancher des niveaux");
   for (unsigned r = kBrightMin; r <= kBrightMax; r++) {
     const uint8_t l = levelFromRaw((uint8_t)r);
-    c.expect(rawFromLevel(l) >= r && (l == 1 || rawFromLevel((uint8_t)(l - 1)) < r), "levelFromRaw(%02X)", r);
+    c.expect(l >= kMatterLevelFloor && rawFromLevel(l) >= r &&
+                 (l == kMatterLevelFloor || rawFromLevel((uint8_t)(l - 1)) < r),
+             "levelFromRaw(%02X)", r);
     const uint8_t d = displayLevel(l, (uint8_t)r);
-    c.expect(displayLevel(d, (uint8_t)r) == d, "affichage du niveau instable (%02X)", r);
+    c.expect(d >= kMatterLevelFloor && displayLevel(d, (uint8_t)r) == d, "affichage du niveau instable (%02X)", r);
   }
   for (unsigned t = 0; t <= kTempMax; t++)
     c.expect(tempFromMired(miredFromTemp((uint8_t)t)) == t, "aller-retour mired (temp %u)", t);

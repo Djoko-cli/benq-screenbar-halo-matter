@@ -7,18 +7,27 @@ namespace halo1 {
 constexpr uint16_t kMiredCold = 153;  // temp 0x00 (le plus froid) ; ~6536 K NOMINAL, non mesure
 constexpr uint16_t kMiredWarm = 370;  // temp 0x64 (le plus chaud) ; ~2703 K NOMINAL, non mesure
 
+// Plancher des niveaux RAPPORTES a Matter. Apple Home affiche CurrentLevel en
+// pourcentage entier de 254 : le niveau 1 (0,39 %) y devient 0 %, et une
+// lumiere allumee a 0 % s'y affiche au MAXIMUM (terrain du 23/09 : lampe au
+// minimum 4C, reglee a la molette, montree pleine). Le niveau 2 (0,79 %)
+// depend du sens de l'arrondi ; 3 (1,18 %) donne 1 %, arrondi ou tronque.
+// Les niveaux 0..3 ecrits par un controleur donnent tous 4C, le minimum.
+constexpr uint8_t kMatterLevelFloor = 3;
+
 // Tant que mapInit n'a pas ete appele, la table est construite a gamma 2,0
 // (decision A3) au premier usage. Ce repli ignore HALO1_LEVEL_GAMMA : c'est
 // Halo1Lamp::begin (C4, les deux builds) qui appelle mapInit(HALO1_LEVEL_GAMMA).
 void mapInit(float gamma);            // table 254 entrees ; gamma 1.0 = formule lineaire exacte
 float mapGamma();
-uint8_t rawFromLevel(uint8_t level);  // 0..254 -> 0x4C..0xFE (0 traite comme 1)
-uint8_t levelFromRaw(uint8_t raw);    // plus petit L tel que rawFromLevel(L) >= raw
+uint8_t rawFromLevel(uint8_t level);  // 0..254 -> 0x4C..0xFE (0..kMatterLevelFloor -> 0x4C)
+// Niveau rapporte : plus petit L >= kMatterLevelFloor tel que rawFromLevel(L) >= raw.
+uint8_t levelFromRaw(uint8_t raw);
 uint8_t tempFromMired(uint16_t m);    // ((clamp(m,153,370) - 153) * 100 + 108) / 217
 uint16_t miredFromTemp(uint8_t t);    // 153 + (min(t,100) * 217 + 50) / 100
 // Affichage stable (E.2) : la valeur de l'attribut si elle donne deja la consigne,
-// sinon la valeur canonique. Idempotent ; hors plage (niveau 0, mireds hors
-// 153..370) -> canonique.
+// sinon la valeur canonique. Idempotent ; hors plage (niveau sous le plancher,
+// mireds hors 153..370) -> canonique. Jamais un niveau sous kMatterLevelFloor.
 uint8_t displayLevel(uint8_t attr, uint8_t bright);
 uint16_t displayMired(uint16_t attr, uint8_t temp);
 
@@ -30,9 +39,9 @@ struct MatterIntents {  // derniere valeur gagne dans la fenetre de coalescence
   uint16_t mireds = 0;
 };
 struct Resolution { State target; uint8_t fields = 0; bool fireAuto = false; };
-// Regles E.4. Un niveau venu avec EP1 off, ou avec EP1 on et egal au niveau
-// affiche pour la consigne, est ecarte : c'est la pile qui l'ecrit (LevelControl
-// avec la fonction OnOff).
+// Regles E.4. Un niveau venu avec EP1 off, ou avec EP1 on sans rien changer a
+// la consigne (meme valeur brute, ou niveau affiche pour elle), est ecarte :
+// c'est la pile qui l'ecrit (LevelControl avec la fonction OnOff).
 Resolution resolveMatter(const State &base, const MatterIntents &in, uint8_t memoryLamps);
 
 // Memoire de selection : derniere selection restee allumee >= stableMs.
