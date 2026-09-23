@@ -3926,6 +3926,112 @@ void BenqHalo::prxAck(Print &out, const uint8_t addrReg[4], uint8_t channel, uin
 }
 
 
+// ---------------------------------------------------------------------------
+//  Ecoute PASSIVE au format standard : decoder les commandes de la
+//  telecommande et les accuses de la lampe, sans jamais accuser nous-memes.
+//
+//  Un recepteur qui accuserait reception entrerait en collision avec l'accuse
+//  de la lampe. On coupe donc l'accuse automatique -- ce qui coupe aussi, sur
+//  cette puce, la charge dynamique et donc la lecture materielle du PCF. On lit
+//  une longueur fixe apres l'adresse et on decode en logiciel, bit a bit :
+//    PCF 9 bits (longueur 6, PID 2, NO_ACK 1) | charge | CRC-16
+//  CRC-16/CCITT 0x1021, init 0xFFFF, sur adresse + PCF + charge (audit 23/09).
+// ---------------------------------------------------------------------------
+static inline uint8_t bitAt(const uint8_t *b, uint16_t i) { return (b[i >> 3] >> (7 - (i & 7))) & 1; }
+
+void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms) {
+  if (!radio.present()) {
+    out.println("BM5602 absent.");
+    return;
+  }
+  char line[176];
+  snprintf(line, sizeof(line), "  Ecoute passive : adresse %02X %02X %02X %02X, canal %u, %lu ms.",
+           addrReg[0], addrReg[1], addrReg[2], addrReg[3], (unsigned)channel, (unsigned long)ms);
+  out.println(line);
+  Serial.flush();
+
+  configStdAutoAck(radio, addrReg, channel, dataRate_, true);
+  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);   // jamais d'accuse de notre part
+  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);   // charge fixe
+  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
+  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC verifie en logiciel
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 8);     // 64 bits apres l'adresse
+  radio.enterRxMode();
+
+  // Adresse sur l'air : ordre inverse de l'ecriture.
+  const uint8_t air[4] = {addrReg[3], addrReg[2], addrReg[1], addrReg[0]};
+  uint32_t cmds = 0, acks = 0, bad = 0, spin = 0;
+  uint32_t lastArm = millis();
+  const uint32_t until = millis() + ms;
+  while ((int32_t)(millis() - until) < 0) {
+    const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
+    if (irq & IRQ_RX_DR) {
+      uint8_t b[8];
+      radio.readFifo(b, 8, false);
+      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
+      radio.command(CMD_FLUSH_RX_FIFO);
+
+      uint8_t len = 0;
+      for (uint8_t k = 0; k < 6; k++) len = (uint8_t)((len << 1) | bitAt(b, k));
+      const uint8_t pid = (uint8_t)((bitAt(b, 6) << 1) | bitAt(b, 7));
+      const uint8_t noAck = bitAt(b, 8);
+      if (len > 4) {  // 64 bits lus : au plus 4 octets de charge + CRC
+        bad++;
+      } else {
+        uint16_t crc = 0xFFFF;
+        auto feed = [&](uint8_t bit) {
+          crc ^= (uint16_t)(bit << 15);
+          crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        };
+        for (uint8_t i = 0; i < 32; i++) feed((air[i >> 3] >> (7 - (i & 7))) & 1);
+        const uint16_t n = (uint16_t)(9 + 8 * len);
+        for (uint16_t i = 0; i < n; i++) feed(bitAt(b, i));
+        uint16_t got = 0;
+        for (uint16_t i = 0; i < 16; i++) got = (uint16_t)((got << 1) | bitAt(b, n + i));
+        uint8_t pay[4] = {0, 0, 0, 0};
+        for (uint8_t q = 0; q < len; q++)
+          for (uint8_t k = 0; k < 8; k++) pay[q] = (uint8_t)((pay[q] << 1) | bitAt(b, 9 + q * 8 + k));
+        const bool ok = (crc == got);
+        if (!ok) {
+          bad++;
+        } else if (len == 0) {
+          acks++;
+          snprintf(line, sizeof(line), "  accuse   PID %u  NO_ACK %u", pid, noAck);
+          out.println(line);
+        } else {
+          cmds++;
+          size_t w = (size_t)snprintf(line, sizeof(line), "  COMMANDE PID %u  NO_ACK %u  charge", pid, noAck);
+          for (uint8_t q = 0; q < len; q++) w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", pay[q]);
+          out.println(line);
+        }
+        Serial.flush();
+      }
+      // Rearmement explicite apres chaque trame. Mesure a l'appui (banc du
+      // 23/09) : sans lui, l'ecoute recevait une premiere rafale puis restait
+      // sourde a la suivante, une seconde plus tard.
+      radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+      radio.enterRxMode();
+      lastArm = millis();
+    }
+    if (radio.operationMode() != OMST_RX) {
+      radio.enterRxMode(300);
+      lastArm = millis();
+    } else if ((uint32_t)(millis() - lastArm) > 100) {
+      // Rearmement de securite, meme si l'etat affiche est RX.
+      radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+      radio.enterRxMode();
+      lastArm = millis();
+    }
+    if ((spin++ & 0x3FF) == 0) delay(1);
+  }
+  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
+  radio.command(CMD_LIGHT_SLEEP);
+  snprintf(line, sizeof(line), "  %lu commande(s), %lu accuse(s) au CRC valide, %lu trame(s) rejetee(s).",
+           (unsigned long)cmds, (unsigned long)acks, (unsigned long)bad);
+  out.println(line);
+}
+
+
 uint16_t BenqHalo::halo1Crc(const uint8_t payload[6]) const {
   uint16_t crc = 0xFFFF;
   for (uint8_t i = 0; i < 10; i++) {

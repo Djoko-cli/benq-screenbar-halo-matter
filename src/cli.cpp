@@ -116,6 +116,7 @@ static void cmdHelp() {
   Serial.println("  txraw <hex> [n] [ms]  emettre des octets bruts apres l'adresse, CRC materiel coupe");
   Serial.println("  txack <adr> <canal> <charge> [n] [ms]  format standard, accuse automatique");
   Serial.println("  prxack <adr> <canal> [ms]  recepteur de banc qui accuse automatiquement");
+  Serial.println("  ecoute <adr> <canal> [ms]  ecoute passive, decode commandes et accuses");
   Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
@@ -639,6 +640,22 @@ static void handleLine(char *line) {
         halo.setMode(HaloMode::Normal);
         halo.txAck(Serial, addrReg, (uint8_t)ch, pay, (uint8_t)np, (uint8_t)trials, (uint16_t)gap);
       }
+    }
+  } else if (!strcmp(line, "ecoute")) {
+    // ecoute <adresse 8 hex, ordre d'ecriture> <canal> [ms]
+    char *a = arg;
+    char *b = splitWord(a);
+    char *rest = splitWord(b);
+    uint8_t addrReg[4];
+    const int na = parseHexBytes(a, addrReg, 4);
+    const long ch = strtol(b, nullptr, 10);
+    long ms = 30000;
+    if (*rest) ms = strtol(rest, nullptr, 10);
+    if (na != 4 || ch < 0 || ch > 83 || ms < 500 || ms > 600000) {
+      Serial.println("Usage : ecoute <adresse 8 hex> <canal> [ms]");
+    } else {
+      halo.setMode(HaloMode::Normal);
+      halo.sniffStd(Serial, addrReg, (uint8_t)ch, (uint32_t)ms);
     }
   } else if (!strcmp(line, "prxack")) {
     // prxack <adresse 8 hex, ordre d'ecriture> <canal> [ms]
