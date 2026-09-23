@@ -50,13 +50,14 @@ bool matterSetMedMode(uint32_t mode, bool *saved);
 
 // Plafond de l'intervalle max des abonnements NEUFS, en secondes : 0 = celui
 // que demande le controleur, sinon kMatterMaxIntMinS..kMatterMaxIntMaxS.
-// kMatterMaxIntDefaultS tant que la NVS n'a rien. Mesure du 23/09 (Apple Home) :
-// la reprise par le noeud echoue toujours (adresse d'Apple introuvable, 0x32) ;
-// apres un redemarrage, Apple se reabonne seul a +170 s avec 180 s, a +93 s
-// avec 60 s. Cout : un rapport de maintien par minute.
-constexpr uint16_t kMatterMaxIntMinS = 60;
+// kMatterMaxIntDefaultS tant que la NVS n'a rien. Mesures du 23/09 (Apple Home,
+// redemarrage sans toucher a l'app) : la reprise par le noeud echoue toujours
+// (adresse d'Apple introuvable, 0x32) ; Apple se reabonne seul a +170 s avec
+// 180 s, +43..93 s avec 60 s, +49..56 s avec 20 s, +43 s avec 10 s. Plancher
+// d'Apple ~40 s : 20 s garde le pire cas vers 50 s pour 3 rapports par minute.
+constexpr uint16_t kMatterMaxIntMinS = 10;
 constexpr uint16_t kMatterMaxIntMaxS = 3600;
-constexpr uint16_t kMatterMaxIntDefaultS = 60;
+constexpr uint16_t kMatterMaxIntDefaultS = 20;
 uint16_t matterMaxIntervalCap();
 bool matterSetMaxIntervalCap(uint32_t s, bool *saved);
 #endif
