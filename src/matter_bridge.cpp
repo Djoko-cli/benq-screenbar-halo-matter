@@ -6,6 +6,16 @@
 #include "config.h"
 #include "halo1_lamp.h"
 
+#if MATTER_NET_THREAD
+#include <esp_openthread.h>
+#include <esp_openthread_lock.h>
+#include <openthread/link.h>
+#include <openthread/platform/radio.h>
+#include <openthread/thread.h>
+// Prendre le verrou OpenThread avant l'init de la pile planterait.
+static bool sMatterStarted = false;
+#endif
+
 using namespace chip::app::Clusters;
 
 // ===========================================================================
@@ -286,6 +296,12 @@ void matterBridgeBegin() {
   sLoopTask = xTaskGetCurrentTaskHandle();
   const halo1::State t = lamp.target();
 
+#if MATTER_NET_THREAD
+  // Avant le premier begin() d'accessoire : c'est lui qui cree le noeud, et le
+  // core refuse ensuite de changer de reseau. BLE garde pour l'appairage.
+  if (!Matter.selectNetwork(MATTER_NETWORK_THREAD))
+    Serial.println("!! selectNetwork(THREAD) refuse : le noeud resterait en Wi-Fi");
+#endif
   mainLight.begin(t.power, halo1::levelFromRaw(t.bright), halo1::miredFromTemp(t.temp));
   // La bibliotheque ne renseigne pas la plage physique de temperature : sans
   // elle, les applications affichent un curseur bien plus large que la lampe.
@@ -309,6 +325,16 @@ void matterBridgeBegin() {
 #endif
 
   Matter.begin();
+#if MATTER_NET_THREAD
+  sMatterStarted = true;
+#if MATTER_THREAD_MED
+  // esp_matter met Thread en routeur a chaque demarrage : on l'ecrase.
+  chip::DeviceLayer::PlatformMgr().LockChipStack();
+  chip::DeviceLayer::ConnectivityMgr().SetThreadDeviceType(
+      chip::DeviceLayer::ConnectivityManager::kThreadDeviceType_MinimalEndDevice);
+  chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+#endif
+#endif
   // Matter.begin() attend la fin de l'init de la pile, dont les ecritures de
   // demarrage passent par les callbacks : le delai du garde-fou part d'ici.
   sBootMs = millis();
@@ -360,7 +386,26 @@ void matterPrintStatus(Print &out) {
   out.println("=== Matter ===");
   out.printf("  mise en service : %s\n", Matter.isDeviceCommissioned() ? "faite" : "EN ATTENTE");
   out.printf("  reseau          : %s\n", Matter.isDeviceConnected() ? "connecte" : "non connecte");
-#if CONFIG_ENABLE_CHIPOBLE
+#if MATTER_NET_THREAD
+  out.printf("  reseau Matter   : %s, mise en service Thread sur EP%u, Wi-Fi %s\n",
+             Matter.getSelectedNetwork() == MATTER_NETWORK_THREAD ? "THREAD" : "PAS THREAD",
+             Matter.getNetworkEndPointId(MATTER_NETWORK_THREAD),
+             Matter.isWiFiConnected() ? "CONNECTE (anormal)" : "coupe");
+  otInstance *ot = sMatterStarted ? esp_openthread_get_instance() : nullptr;
+  if (ot && esp_openthread_lock_acquire(pdMS_TO_TICKS(50))) {
+    const uint8_t ch = otLinkGetChannel(ot);
+    int8_t rssi = 0, pw = 0;
+    const bool parent = otThreadGetParentAverageRssi(ot, &rssi) == OT_ERROR_NONE;
+    otPlatRadioGetTransmitPower(ot, &pw);
+    // Canal 11 = 2405 MHz, la frequence de la lampe : a eviter.
+    out.printf("  Thread          : role %s, canal %u (%u MHz), PAN 0x%04X, puissance %d dBm",
+               otThreadDeviceRoleToString(otThreadGetDeviceRole(ot)), ch, 2405u + 5u * (ch - 11u),
+               otLinkGetPanId(ot), pw);
+    if (parent) out.printf(", parent %d dBm", rssi);
+    out.println();
+    esp_openthread_lock_release();
+  }
+#elif CONFIG_ENABLE_CHIPOBLE
   out.println("  commissioning   : BLE (le Wi-Fi est fourni par le controleur)");
 #else
   out.println("  commissioning   : IP (Wi-Fi a configurer avec 'wifi <ssid> <mdp>')");
