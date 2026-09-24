@@ -340,14 +340,16 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `led` | LED d'etat : motif en cours, couleur affichee, etat du module radio |
 | `led test` / `led stop` | joue chaque motif de la LED a tour de role (18 s), sans bloquer / l'arrete |
 | `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
+| `txack <adr> <canal> <charge> [n] [ms]` | banc : emission au format standard, accuse automatique, verdict par essai |
 | `regs` | dump des registres du BC5602 |
 | `rfinit` | re-teste le module apres correction du cablage, sans reflasher |
 | `wifi <ssid> <mdp>` | identifiants Wi-Fi (ESP32 classique uniquement) |
 | `decommission` | retire toutes les fabriques Matter |
 | `reboot` | sauve l'etat de la lampe, puis redemarre |
 
-Les commandes du Halo 2 (`poll`, `send`, `find`, `pair`, `sniff`, `tail`) sont
-retirees : la lampe est un Halo 1, dont le protocole est different.
+`help` liste aussi les outils de banc et de retro-ingenierie : `prxack`,
+sondes de la puce, du spectre et de GIO3, module CC2500. `addr` et `chan` ne
+reglent que ces outils ; le pilote a sa propre adresse (`lampe adresse`).
 
 ## Protocole du Halo 1
 
@@ -363,11 +365,11 @@ sections Halo 1 a la fin).
 
 ```
 platformio.ini            4 cibles ESP32, plateforme pioarduino, partitions huge_app
-src/config.h              broches, minuteries, limites de la lampe, identite Matter
+src/config.h              broches, reglages du pilote Halo 1, identite Matter
 src/fw_version.h          version du firmware (FW_VERSION + revision git)
 src/app_desc.c            descripteur d'application : version rapportee par Matter
 src/bc5602.{h,cpp}        pilote bas niveau du transceiver
-src/halo.{h,cpp}          demarrage du module, outils de banc (couche Halo 2 neutralisee)
+src/halo.{h,cpp}          demarrage du module (aussi relance du pilote), outils de banc
 src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
 src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
 src/halo1_radio.{h,cpp}   sequences BC5602 prouvees, reconfiguration non bloquante
@@ -389,9 +391,10 @@ tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de Pla
 
 Le protocole du Halo 2 a été rétro-conçu par
 [kuzmin-no](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration)
-(MicroPython, Raspberry Pi Pico W, sortie MQTT). Ce projet en est un portage
-C++ pour ESP32 avec Matter natif, plus les outils nécessaires à la
-transposition vers la 1re génération.
+(MicroPython, Raspberry Pi Pico W, sortie MQTT). Ce projet est parti d'un
+portage C++ de ce travail, pour ESP32 avec Matter natif ; le Halo 1 s'est
+révélé parler un autre protocole (charge de deux octets, accusé vide), et la
+couche Halo 2 a été retirée une fois le pilote Halo 1 validé.
 
 L'identification du BC5602 dans le Halo 1 revient à `hertzg` et le teardown du
 PCB à `b4shful`, sur le
