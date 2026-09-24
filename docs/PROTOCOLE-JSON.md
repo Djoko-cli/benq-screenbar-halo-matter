@@ -478,7 +478,7 @@ cas (957 octets) depassait le budget de 896 (2.2).
 
 | Champ | Type | Sens | Source |
 |---|---|---|---|
-| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) ; 2 = transport reseau (section 10 : caps `udp` et `cle`, `session.transport` `udp`, bloc `reseau` `ip`, `reponse` `cle` et `empreinte`, code `interdite`) | `jsonp::kRev` (`json_out.h`) |
+| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) ; 2 = transport reseau (section 10 : caps `udp` et `cle`, `session.transport` `udp`, bloc `reseau` `ip`, `reponse` `cle` et `empreinte`, code `interdite`) ; 3 = `reseau.thread.matter.code_manuel` et `qr` aussi une fois en service (USB) | `jsonp::kRev` (`json_out.h`) |
 | `fw` | chaine | version complete du firmware, ex. `0.4.0-1a2b3c4` | `FW_VERSION_FULL` (`fw_version.h`) |
 | `fw_desc` | chaine | version du descripteur d'application, celle que Matter publie ; doit egaler `fw` | `esp_app_get_description()->version` |
 | `date`, `heure` | chaines | compilation | `esp_app_get_description()->date`, `->time` |
@@ -674,7 +674,7 @@ dernieres valeurs lues et `frais_ms` dit leur age.
 | `matter.en_service`, `connecte` | `Matter.isDeviceCommissioned()`, `matterIsConnected()` |
 | `matter.reseau` (`thread`, `wifi`), `matter.wifi` | `Matter.getSelectedNetwork()`, `Matter.isWiFiConnected()` |
 | `matter.fabriques` | nombre de fabriques (Apple Home, Google...) : `chip::Server::GetInstance().GetFabricTable().FabricCount()` sous verrou (a ajouter, facultatif) |
-| `matter.code_manuel`, `matter.qr` | seulement si pas mis en service : `Matter.getManualPairingCode()` et la charge `MT:...` = parametre `data=` de `getOnboardingQRCodeUrl()`, dont `GetQRCodeUrl` encode `:` en `%3A` (decoder les `%XX`) ; valeurs en cache dans la bibliotheque, sans verrou ; sinon null. Jamais sur le transport reseau. |
+| `matter.code_manuel`, `matter.qr` | l'etiquette du pont, sur l'USB, mis en service ou non (revision 3 ; avant : seulement hors service) : `Matter.getManualPairingCode()` et la charge `MT:...` = parametre `data=` de `getOnboardingQRCodeUrl()`, dont `GetQRCodeUrl` encode `:` en `%3A` (decoder les `%XX`) ; valeurs en cache dans la bibliotheque, sans verrou. Elles ne servent que pendant une fenetre de mise en service (pont neuf, remis a zero, ou retire de son dernier controleur). Toujours null sur le transport reseau. |
 | `thread.role` | `otThreadGetDeviceRole` -> `otThreadDeviceRoleToString` (`disabled`, `detached`, `child`, `router`, `leader`) |
 | `thread.canal`, `thread.mhz` | `otLinkGetChannel` ; `2405 + 5 x (canal - 11)` |
 | `thread.pan` | `otLinkGetPanId`, `"0x%04X"` |

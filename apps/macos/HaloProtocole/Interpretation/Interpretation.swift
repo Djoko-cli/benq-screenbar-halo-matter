@@ -94,6 +94,9 @@ public enum Interpretation {
         case .reseauAbonnements(let r):
             let actifs = r.abonnements?.actifs.map(String.init) ?? "?"
             return tr("Abonnements actifs : \(actifs)")
+        case .reseauIp(let r):
+            let nom = r.srp?.nom ?? "?", adresse = r.adresseOmr ?? "?"
+            return tr("Réseau : \(nom) · \(adresse)")
         case .inconnu:
             return tr("Message inconnu (ignoré)")
         }

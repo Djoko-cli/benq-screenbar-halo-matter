@@ -129,6 +129,8 @@ public enum CodeReponse: String, EnumeTolerante {
     case commandeInconnue = "inconnue"
     case tropLong = "trop_long"
     case cadence, interdite
+    /// Reseau : id deja traite, reponse plus disponible ; rien de reexecute (10.2).
+    case dejaTraite = "deja_traite"
     case inconnu
 }
 

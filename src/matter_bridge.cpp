@@ -2315,11 +2315,12 @@ void matterJsonNetThread(jsonp::Writer &w, uint32_t now, bool remote) {
 #endif
   const bool commissioned = Matter.isDeviceCommissioned();
   const bool connected = matterIsConnected();
-  // Codes d'appairage : caches par la bibliotheque, sans verrou ; seulement
-  // tant que le noeud n'est pas mis en service, et jamais sur le reseau (qui
-  // les lirait pourrait ajouter le pont a son propre controleur).
+  // Codes d'appairage : caches par la bibliotheque, sans verrou. L'etiquette du
+  // pont : toujours sur l'USB (l'app les montre ; ils ne servent que pendant
+  // une fenetre de mise en service), jamais sur le reseau (qui les lirait
+  // pourrait ajouter le pont a son propre controleur pendant une telle fenetre).
   char manual[24] = "", qr[64] = "";
-  if (!commissioned && !remote) {
+  if (!remote) {
     snprintf(manual, sizeof(manual), "%s", Matter.getManualPairingCode().c_str());
     qrPayload(Matter.getOnboardingQRCodeUrl(), qr, sizeof(qr));
   }
@@ -2333,8 +2334,8 @@ void matterJsonNetThread(jsonp::Writer &w, uint32_t now, bool remote) {
   w.boolean("wifi", Matter.isWiFiConnected());
   if (sFabricsJ.known) w.u32("fabriques", sFabricsJ.n);
   else w.null("fabriques");
-  w.str("code_manuel", !commissioned && manual[0] ? manual : nullptr);
-  w.str("qr", !commissioned && qr[0] ? qr : nullptr);
+  w.str("code_manuel", manual[0] ? manual : nullptr);
+  w.str("qr", qr[0] ? qr : nullptr);
   w.end();
 #if MATTER_NET_THREAD
   if (!sOtJ.known) {

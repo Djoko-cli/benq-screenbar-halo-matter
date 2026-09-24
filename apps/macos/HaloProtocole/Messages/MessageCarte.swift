@@ -27,6 +27,7 @@ public enum MessageCarte: Sendable, Equatable {
     case compteursMatter(CompteursMatter)
     case reseauThread(ReseauThread)
     case reseauAbonnements(ReseauAbonnements)
+    case reseauIp(ReseauIp)
     case battement(Battement)
     case fin(FinSession)
     case reponse(Reponse)
@@ -48,7 +49,7 @@ public enum MessageCarte: Sendable, Equatable {
         switch self {
         case .helloBase, .helloIdentite, .config, .etatLampe, .etatTranches, .etatSante,
              .compteursPilote, .compteursRadio, .compteursMatter, .reseauThread,
-             .reseauAbonnements, .battement:
+             .reseauAbonnements, .reseauIp, .battement:
             true
         default:
             false
@@ -130,6 +131,7 @@ public enum DecodeurMessages {
         case ("compteurs", "matter"): return .compteursMatter(try d.decode(CompteursMatter.self, from: json))
         case ("reseau", "thread"): return .reseauThread(try d.decode(ReseauThread.self, from: json))
         case ("reseau", "abonnements"): return .reseauAbonnements(try d.decode(ReseauAbonnements.self, from: json))
+        case ("reseau", "ip"): return .reseauIp(try d.decode(ReseauIp.self, from: json))
         case ("hb", _): return .battement(try d.decode(Battement.self, from: json))
         case ("fin", _): return .fin(try d.decode(FinSession.self, from: json))
         case ("reponse", _): return .reponse(try d.decode(Reponse.self, from: json))

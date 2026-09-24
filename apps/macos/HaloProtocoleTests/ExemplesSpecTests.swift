@@ -35,7 +35,7 @@ enum ExemplesSpec {
 struct ExemplesSpecTests {
     @Test func toutesLesLignesSontLues() throws {
         let lignes = try ExemplesSpec.lignes()
-        #expect(lignes.count == 43)
+        #expect(lignes.count == 48)
     }
 
     @Test(arguments: (try? ExemplesSpec.lignes()) ?? [])
@@ -226,6 +226,21 @@ struct ExemplesSpecTests {
         #expect(fin.first?.cause == .bail)
         let hb = l.compactMap { if case .battement(let v) = $0.message { return v } else { return nil } }
         #expect(hb.first?.jsonPerdus == 0)
+    }
+
+    @Test func transportReseau() throws {
+        // 12.8 : bloc ip, refus d'une commande hors liste blanche, reponse rejouee.
+        let l = try ExemplesSpec.decoder()
+        let ip = l.compactMap { if case .reseauIp(let v) = $0.message { return v } else { return nil } }
+        #expect(ip.count == 1)
+        #expect(ip.first?.srp?.nom == "561F9A6463953778")
+        #expect(ip.first?.adresseOmr == "fd77:9e:f4bb:0:6c06:6762:45d6:a3f0")
+        #expect(ip.first?.udp?.port == 5480)
+        #expect(ip.first?.udp?.empreinte == "630DCD29")
+        #expect(ip.first?.udp?.tamponsMin == 38)
+        let rep = l.compactMap { if case .reponse(let v) = $0.message { return v } else { return nil } }
+        #expect(rep.contains { $0.cmd == "reboot" && $0.code == .interdite && $0.ok == false })
+        #expect(rep.filter { $0.id == 3 && $0.cmd == "lampe auto" }.count == 2, "reponse rejouee sous le meme id")
     }
 
     @Test func continuiteDeNDansLesExemples() throws {

@@ -1631,6 +1631,22 @@
         }
       }
     },
+    "Réseau : %@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network: %1$@ · %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réseau : %1$@ · %2$@"
+          }
+        }
+      }
+    },
     "Santé : radio %@" : {
       "localizations" : {
         "en" : {
@@ -2195,6 +2211,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "already served"
+          }
+        }
+      }
+    },
+    "déjà traitée (rien de réexécuté)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "already handled (nothing run again)"
           }
         }
       }

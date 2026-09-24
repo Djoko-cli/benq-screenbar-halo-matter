@@ -280,6 +280,49 @@ public struct ReseauThread: Codable, Sendable, Equatable {
     public var thread: Thread?
 }
 
+/// `reseau`, bloc `ip` (build Thread, revision 2) : nom d'hote SRP, adresses du
+/// noeud, transport reseau de l'app (section 5.5).
+public struct ReseauIp: Codable, Sendable, Equatable {
+    public struct Srp: Codable, Sendable, Equatable {
+        public var nom: String?
+    }
+
+    public struct Adresse: Codable, Sendable, Equatable {
+        public var adr: String?
+        /// `omr` (joignable du LAN), `ml_eid` (maillage seulement), `autre`.
+        public var type: String?
+        public var pref: Bool?
+    }
+
+    public struct Udp: Codable, Sendable, Equatable {
+        public var port: Int?
+        public var ouvert: Bool?
+        public var empreinte: String?
+        public var sessions: Int?
+        public var provisoire: Bool?
+        public var rx: Int?
+        public var rejets: Int?
+        public var rxPerdus: Int?
+        public var defis: Int?
+        public var tx: Int?
+        public var txPerdus: Int?
+        public var txErreurs: Int?
+        public var tamponsLibres: Int?
+        public var tamponsMin: Int?
+    }
+
+    public var fraisMs: Int?
+    public var srp: Srp?
+    public var adresses: [Adresse]?
+    public var udp: Udp?
+
+    /// Adresse joignable du LAN (OMR), la preferee d'abord.
+    public var adresseOmr: String? {
+        let omr = (adresses ?? []).filter { $0.type == "omr" }
+        return (omr.first { $0.pref == true } ?? omr.first)?.adr
+    }
+}
+
 /// `reseau`, bloc `abonnements`.
 public struct ReseauAbonnements: Codable, Sendable, Equatable {
     public struct Abonnements: Codable, Sendable, Equatable {
