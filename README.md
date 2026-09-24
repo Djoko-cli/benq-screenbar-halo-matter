@@ -37,8 +37,9 @@ Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
 >
 > **Depuis l'ancienne disposition des endpoints** (alimentation, lumiere avant,
 > halo arriere, capteur, mode auto) : il faut remettre le noeud en service.
-> Retirer l'accessoire de chaque app, lancer `decommission` (ou appui long sur
-> BOOT), puis l'ajouter a nouveau avec le code d'appairage (`matter`).
+> Retirer l'accessoire de chaque app, lancer `decommission` (ou appui de 8 s
+> sur BOOT, puis relacher), puis l'ajouter a nouveau avec le code d'appairage
+> (`matter`).
 
 ### EP4 "Halo auto" : desactive pour l'instant
 
@@ -240,8 +241,9 @@ code manuel : 34970112332
 Un contrôleur Matter est nécessaire — HomePod, Apple TV, Google Nest,
 Echo, ou le module *Matter Server* de Home Assistant.
 
-Un appui long (5 s) sur le bouton **BOOT**, ou la commande `decommission`,
-retire toutes les fabriques pour ré-appairer de zéro.
+Un appui de 8 s sur le bouton **BOOT**, relâché ensuite, ou la commande
+`decommission`, retire toutes les fabriques pour ré-appairer de zéro (voir
+« 4. Bouton BOOT »).
 
 ### 3. LED d'etat
 
@@ -258,10 +260,13 @@ sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
 | eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
 | rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne (aussi quand le module radio est perdu ou en panne) |
 | arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
+| rouge, noir, violet, noir, vite | bouton BOOT tenu 8 s : relacher pour desappairer (voir « 4. Bouton BOOT ») |
+| eclat blanc (150 ms) | bouton BOOT, appui court relache : redemarrage |
 
-Priorite : arc-en-ciel > rouge x3 > rouge fixe > vert > etat du reseau (les
-noirs des trois clignements restent visibles sur le rouge fixe). Au banc,
-`led test` joue chaque motif a tour de role (18 s) et `led` dit le motif en
+Priorite : arc-en-ciel > bouton BOOT > rouge x3 > rouge fixe > vert > etat du
+reseau (les noirs des trois clignements restent visibles sur le rouge fixe).
+Au banc, `led test` joue chaque motif a tour de role (21 s ; le bouton passe
+par-dessus) et `led` dit le motif en
 cours et l'etat du module radio. Si le
 vert et le rouge sont inverses, la WS2812 de la carte n'est pas en GRB :
 `-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` dans `platformio.ini`.
@@ -300,6 +305,37 @@ la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`
 montre l'etat et la derniere relance, `lampe stats` les relances par cause et
 les dernieres, datees. Detail et seuils :
 [docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
+
+### 4. Bouton BOOT
+
+Dans le boitier imprime, seul **BOOT** (IO9, marque B) reste accessible : pas
+de RST. Il sert donc a redemarrer et a desappairer. Tout se decide **au
+relachement** :
+
+| Appui | LED pendant l'appui | Au relachement |
+|---|---|---|
+| moins de 2 s | rien de special | eclat blanc (150 ms), puis **redemarrage** (etat de la lampe sauve d'abord, comme `reboot`) |
+| de 2 a 8 s | rien de special | **annule** : rien ne se passe (garde-fou contre une erreur) |
+| 8 s ou plus | rouge, noir, violet, noir, vite (100 ms chacun) des 8 s : « relache pour desappairer » | **desappairage** : retrait de toutes les fabriques Matter (l'accessoire sort d'Apple Home), puis redemarrage |
+
+IO9 est une broche de strapping : **tenue basse au moment d'un reset, elle
+fait demarrer le C6 en mode telechargement**, ou il reste inerte jusqu'a une
+coupure d'alimentation. Le firmware n'agit donc jamais bouton enfonce : il
+attend le relachement (anti-rebond de 30 ms), puis 100 ms de releves hauts sans
+interruption, et relit encore la broche 100 ms juste avant le reset (rappuye
+et tenu a ce moment, l'action est abandonnee). Ne pas rappuyer avant la fin du
+redemarrage. D'autres garde-fous :
+- un bouton deja enfonce au demarrage est ignore jusqu'a son relachement ;
+- un nouvel appui pendant l'attente d'une action l'abandonne : il compte seul ;
+- si `loop()` a ete bloquee plus de 100 ms pendant l'appui ou a l'un de ses
+  fronts (outil de banc, relance du module radio), la duree est incertaine :
+  l'appui est ignore (sauf un appui long deja arme, certain) ;
+- chaque decision est annoncee sur la console, `[bouton] ...` (message `log`,
+  `src` `bouton`, en mode `json log 1`).
+
+Build diagnostic (sans Matter ni LED) : l'appui court redemarre ; l'appui long
+ne fait que l'expliquer sur la console. Logique pure, testee sur l'hote :
+`src/boot_button.*`.
 
 ### Certification : ce qui marche et ce qui demande une étape en plus
 
@@ -342,7 +378,7 @@ la CSA et une certification — hors de portée d'un projet perso.
 | `lampe adresse [8 hexa]` | adresse de la lampe (ordre d'ecriture), en NVS |
 | `lampe help` | toutes les commandes `lampe` (reglages et banc) |
 | `led` | LED d'etat : motif en cours, couleur affichee, etat du module radio |
-| `led test` / `led stop` | joue chaque motif de la LED a tour de role (18 s), sans bloquer / l'arrete |
+| `led test` / `led stop` | joue chaque motif de la LED a tour de role (21 s), sans bloquer / l'arrete |
 | `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
 | `txack <adr> <canal> <charge> [n] [ms]` | banc : emission au format standard, accuse automatique, verdict par essai |
 | `regs` | dump des registres du BC5602 |
@@ -427,9 +463,10 @@ src/halo1_events.h        evenements du pilote en donnees simples (trames, paque
 src/json_out.{h,cpp}      protocole JSON : ecrivain de lignes machine, messages, file (pur, teste sur l'hote)
 src/json_mode.{h,cpp}     mode machine : session, commandes 'json', etat periodique, evenements, livraisons
 src/status_led.{h,cpp}    LED d'etat : motifs et priorites (logique pure, testee sur l'hote)
+src/boot_button.{h,cpp}   bouton BOOT : appui court = redemarrage, 8 s = desappairage (logique pure, testee sur l'hote)
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
-src/main.cpp              assemblage, bouton de decommissioning
+src/main.cpp              assemblage
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/PROTOCOLE-JSON.md    protocole JSON entre la carte et l'app compagnon (mode machine)
 docs/WIRING.md            câblage et pièges matériels
@@ -437,7 +474,7 @@ docs/AUDIT-2026-09-23.md  audit du format de trame et des bogues, avec leur stat
 docs/PLAN-PILOTE-HALO1.md plan du pilote Halo 1, etapes et resultats du banc
 docs/BRIEF-BOITIER.md     brief du boitier imprime 3D
 docs/PISTES-FUTURES.md    idees hors du perimetre actuel
-tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module, de la LED d'etat et du protocole JSON, sans carte
+tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module, de la LED d'etat, du bouton BOOT et du protocole JSON, sans carte
 tools/json_check.py       verifie des lignes machine capturees (et les exemples de docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 ```

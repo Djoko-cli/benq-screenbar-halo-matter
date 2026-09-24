@@ -103,8 +103,10 @@ antennes est la seule parade materielle**. Regles :
   de la WS2812 (pas de la LED d'IO15). Signification : bleu clignotant = pas encore
   appaire, orange lent = pas de reseau, eteinte avec une breve lueur blanche toutes
   les 10 s = tout va bien (detail : README, « LED d'etat »).
-- **Bouton BOOT (IO9)** accessible par un trou d'epingle : **appui de 5 s = retrait
-  de Matter** (decommission). Trou RESET optionnel.
+- **Bouton BOOT (IO9)** accessible par un trou d'epingle : **appui court =
+  redemarrage**, **8 s puis relacher = retrait de Matter** (decommission) ;
+  entre 2 et 8 s, rien (detail : README, « Bouton BOOT »). Trou RESET
+  optionnel : le bouton BOOT suffit a redemarrer.
 - Maintien des cartes sans colle sur les antennes : berceaux, nervures, clips ;
   cale isolante (entretoise imprimee ou Kapton) entre le C6 et le BM5602.
 - Couvercle a clips ou vis M2 (hors zone antennes). Jeux de 0,2 a 0,3 mm.

@@ -113,7 +113,17 @@ ETAT = Obj(
         "mired": Int(153, 370),
     }
 )
-LED = Enum("identification", "injoignable", "panne_radio", "livree", "non_appaire", "hors_reseau", "operationnel")
+LED = Enum(
+    "identification",
+    "desappairage",
+    "redemarrage",
+    "injoignable",
+    "panne_radio",
+    "livree",
+    "non_appaire",
+    "hors_reseau",
+    "operationnel",
+)
 RELAUNCH = Enum("verif", "delais", "bruit", "sourde")
 SLOT = Enum("lum", "temp", "a", "brut")
 RESET = Enum(
@@ -585,7 +595,7 @@ SCHEMAS = {
     ("led", None): Obj({"motif": LED, "avant": LED, "test": BOOL}),
     ("log", None): Obj(
         {
-            "src": Enum("lampe", "matter"),
+            "src": Enum("lampe", "matter", "bouton"),
             "niv": Enum("notice", "trace"),
             "txt": Str(191),
             "sautes": Opt(U32),

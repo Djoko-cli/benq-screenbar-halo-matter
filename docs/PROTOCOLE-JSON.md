@@ -475,7 +475,7 @@ cas (957 octets) depassait le budget de 896 (2.2).
 
 | Champ | Type | Sens | Source |
 |---|---|---|---|
-| `rev` | entier | revision mineure du protocole (0 en v1.0) | constante (a ajouter) |
+| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) | `jsonp::kRev` (`json_out.h`) |
 | `fw` | chaine | version complete du firmware, ex. `0.4.0-1a2b3c4` | `FW_VERSION_FULL` (`fw_version.h`) |
 | `fw_desc` | chaine | version du descripteur d'application, celle que Matter publie ; doit egaler `fw` | `esp_app_get_description()->version` |
 | `date`, `heure` | chaines | compilation | `esp_app_get_description()->date`, `->time` |
@@ -1024,6 +1024,8 @@ change. Champs : `motif`, `avant` (motif precedent), `test`.
 | `motif` | `statusled::Pattern` | Voyant |
 |---|---|---|
 | `identification` | `Identify` | arc-en-ciel |
+| `desappairage` | `ButtonUnpair` | bouton BOOT tenu 8 s, puis jusqu'au desappairage : rouge, noir, violet, noir, 100 ms chacun (rev 1) |
+| `redemarrage` | `ButtonReboot` | bouton BOOT, appui court relache : eclat blanc (150 ms), noir, redemarrage (rev 1) |
 | `injoignable` | `Unreachable` | rouge, 3 clignements (1200 ms) |
 | `panne_radio` | `RadioFault` | rouge fixe |
 | `livree` | `Delivered` | eclat vert (150 ms) |
@@ -1032,16 +1034,23 @@ change. Champs : `motif`, `avant` (motif precedent), `test`.
 | `operationnel` | `Online` | eteint, lueur blanche toutes les 10 s |
 
 L'app anime son icone d'apres le motif et les constantes de `status_led.h`
-(la couleur instantanee n'est pas transmise). Absent en diag.
+(la couleur instantanee n'est pas transmise). Absent en diag. Priorite des
+motifs : ordre du tableau, `led test` se placant juste sous ceux du bouton.
+Apres `redemarrage`, ou `desappairage` puis relachement du bouton, la carte
+redemarre en general : re-enumeration de l'USB (3.1). Sinon l'appui a ete
+abandonne (nouvel appui, bouton rappuye juste avant le reset : `log` de `src`
+`bouton` en mode `json log 1`).
 
 ### 7.10 `log` : annonces et traces du firmware
 
 Seulement avec `json log 1`. Les lignes de `Halo1Lamp::notice()` (`niv`
-`notice`), `Halo1Lamp::trace()` (`niv` `trace`) et `bridgeLog()` (`src`
-`matter`, `niv` `notice`) partent alors en message `log` **au lieu** du texte.
-Champs : `src` (`lampe`, `matter`), `niv`, `txt` (la ligne, 191 caracteres au
-plus, ASCII). Les logs IDF et le texte des commandes ne passent jamais par
-`log`.
+`notice`), `Halo1Lamp::trace()` (`niv` `trace`), `bridgeLog()` (`src`
+`matter`, `niv` `notice`) et les annonces du bouton BOOT (`src` `bouton`,
+`niv` `notice`, lignes `[bouton] ...` de `boot_button.cpp` : armement a 8 s,
+annulation, appui ignore, redemarrage, desappairage ; rev 1) partent alors en
+message `log` **au lieu** du texte. Champs : `src` (`lampe`, `matter`,
+`bouton`), `niv`, `txt` (la ligne, 191 caracteres au plus, ASCII). Les logs
+IDF et le texte des commandes ne passent jamais par `log`.
 
 ## 8. Courbes : ce que l'app calcule
 
