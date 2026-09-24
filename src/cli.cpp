@@ -12,6 +12,7 @@
 
 #include "halo.h"
 #include "halo1_lamp.h"
+#include "halo1_proto.h"  // adresses d'appairage, airOrder
 #include "status_led.h"
 #include "swd.h"
 
@@ -67,11 +68,15 @@ static char *splitWord(char *s) {
 // capturee le 23/09), dans les deux ordres. Refusees partout ou l'on pourrait
 // emettre ou accuser : un accuse sur la balise suffit a clore l'appairage de
 // la telecommande alors que la lampe n'a rien appris (PROTOCOL.md, pair-4).
+// Meme liste que halo1::addressAllowed, sans refuser 0 ni FFFFFFFF : les
+// outils de banc restent libres sur ces deux-la.
 static bool isPairingAddr(const uint8_t a[4]) {
-  static const uint8_t kPairing[4][4] = {{0xE2, 0x08, 0x00, 0xB0}, {0xB0, 0x00, 0x08, 0xE2},
-                                         {0x59, 0x01, 0x00, 0xB0}, {0xB0, 0x00, 0x01, 0x59}};
-  for (const auto &p : kPairing)
-    if (!memcmp(a, p, 4)) return true;
+  static const uint8_t *const kPairing[2] = {halo1::kPairingH1Reg, halo1::kPairingH2Reg};
+  for (const uint8_t *p : kPairing) {
+    uint8_t air[4];
+    halo1::airOrder(p, air);
+    if (!memcmp(a, p, 4) || !memcmp(a, air, 4)) return true;
+  }
   return false;
 }
 
@@ -144,7 +149,8 @@ static void cmdHelp() {
   Serial.println("  txack <adr> <canal> <charge> [n] [ms]  format standard, accuse automatique");
   Serial.println("  prxack <adr> <canal> [ms]  recepteur de banc qui accuse automatiquement");
   Serial.println("  ecoute <adr> <canal> [ms]  ecoute passive, decode commandes et accuses");
-  Serial.println("  amont [ms] [adr]      ecoute a la maniere du projet amont, SANS reset");
+  Serial.println("  amont [ms] [adr [n]]  ecoute a la maniere du projet amont, SANS reset");
+  Serial.println("                        defaut : 9CEABB86 (adresse Halo 2 du projet amont), 13 octets");
   Serial.println("  ccpins s mi mo cs g0 g2 pa rx   broches du module CC2500");
   Serial.println("  cc                    le CC2500 repond-il ? numero de piece et version");
   Serial.println("  ccdiag                diagnostic electrique du module CC2500");
@@ -362,6 +368,7 @@ static void handleLine(char *line) {
   // pilote : elle y est en SPI 3 fils et ne repond pas aux lectures.
   const bool touchesRadio = !radioFree(line);
   if (touchesRadio) lamp.settleRadio();
+  bool known = true;  // une commande inconnue ne touche pas a la puce
 
   if (!strcmp(line, "help") || !strcmp(line, "?")) cmdHelp();
   else if (!strcmp(line, "info")) {
@@ -792,8 +799,9 @@ static void handleLine(char *line) {
       if (v == -1) Serial.println("Trim libre : le prochain reset logiciel le ramene a 0x10.");
     }
   } else if (!strcmp(line, "amont")) {
-    // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
-    // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
+    // amont [ms] [adresse hex 8 chiffres [n]] : sequence de reception du projet
+    // amont, sans reset logiciel. Sans adresse, celle du Halo 2 du projet amont,
+    // gardee expres : l'outil rejoue sa sequence telle quelle.
     char *end = nullptr;
     uint32_t dwell = 20000;
     const long v = strtol(arg, &end, 10);
@@ -998,11 +1006,13 @@ static void handleLine(char *line) {
     ESP.restart();
   } else {
     Serial.printf("Commande inconnue : \"%s\". Tape 'help'.\n", line);
+    known = false;
   }
   // La puce a pu etre reconfiguree : reconfiguration complete au prochain usage
   // par le pilote. Sans risque : la CLI tourne dans la meme tache que tick(),
-  // et une rafale interrompue reprend (PID a 0, trames absolues).
-  if (touchesRadio) lamp.invalidateRadio();
+  // et une rafale interrompue reprend (PID a 0, trames absolues). Une commande
+  // inconnue n'a rien touche : ni la puce ni les indices du chien de garde.
+  if (touchesRadio && known) lamp.invalidateRadio();
 }
 
 // ---------------------------------------------------------------------------

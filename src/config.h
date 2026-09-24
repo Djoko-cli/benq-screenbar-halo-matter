@@ -163,7 +163,7 @@
 #define HALO1_MAX_ATTEMPTS 5           // paquets au plus par trame, a chaque tour
 #endif
 #ifndef HALO1_GAP_MS
-#define HALO1_GAP_MS 100               // telecommande ~100 ; seul 500 est prouve depuis l'ESP32
+#define HALO1_GAP_MS 100               // telecommande ~100 ; 100 ms prouve au banc (T1, 23/09)
 #endif
 #ifndef HALO1_RETRY_MS
 #define HALO1_RETRY_MS 1000            // reprise apres un echec : 1 s x rang de l'echec

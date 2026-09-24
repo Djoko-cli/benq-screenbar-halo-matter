@@ -70,9 +70,9 @@ class BenqHalo {
   void probePresence(Print &out, uint8_t cycles = 3, uint32_t dwellMs = 3000);
 
   // Mesure la DUREE des rafales sur un canal ou l'on entend la telecommande.
-  // Une trame Halo 2 fait 19 octets (2 preambule + 4 adresse + 1 PCF + 10 payload +
-  // 2 CRC), soit 152 bits : 1216 us a 125 kbps, 608 a 250, 304 a 500. La
-  // duree mesuree donne donc le debit, et recoupe la longueur de trame.
+  // Une commande Halo 1 fait 81 bits (preambule 8 + adresse 32 + PCF 9 +
+  // charge 16 + CRC 16) et son accuse 65 : 648/520 us a 125 kbps, 324/260 a
+  // 250, 162/130 a 500. La duree mesuree donne donc le debit.
   void measureBursts(Print &out, uint32_t seconds = 20, uint8_t threshold = 60);
 
   // Etalonnage du recepteur avec le second module. Tant que cette boucle ne
