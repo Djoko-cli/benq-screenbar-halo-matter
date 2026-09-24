@@ -371,7 +371,8 @@ struct MoteurSessionTests {
         _ = m.ouvert(maintenant: 0)
         let e = m.recu(.texte(ClasseurTexte.classer(#"Commande inconnue : "id=1". Tape 'help'."#)), maintenant: 0.1)
         #expect(m.phase == .ancienFirmware)
-        #expect(e.contains { if case .note(_, true) = $0 { return true } else { return false } })
+        #expect(e.contains(.note(.ancienFirmware)))
+        #expect(MoteurSession.Note.ancienFirmware.grave, "montree en bandeau")
         #expect(Self.envois(m.tic(maintenant: 60)).isEmpty, "plus de json 1 vers un ancien firmware")
     }
 

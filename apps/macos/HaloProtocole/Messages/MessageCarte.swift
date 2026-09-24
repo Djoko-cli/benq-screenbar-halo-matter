@@ -103,7 +103,7 @@ public enum DecodeurMessages {
         do {
             enveloppe = try d.decode(Enveloppe.self, from: json)
         } catch {
-            return .abimee("enveloppe : \(Self.raison(error))")
+            return .abimee(tr("enveloppe : \(Self.raison(error))"))
         }
         guard versionsGerees.contains(enveloppe.v) else {
             return .versionInconnue(v: enveloppe.v, t: enveloppe.t)
@@ -155,13 +155,14 @@ public enum DecodeurMessages {
         switch e {
         case .keyNotFound(let cle, let ctx):
             let base = chemin(ctx.codingPath)
-            return "champ absent : \(base.isEmpty ? "" : base + ".")\(cle.stringValue)"
+            let champ = (base.isEmpty ? "" : base + ".") + cle.stringValue
+            return tr("champ absent : \(champ)")
         case .typeMismatch(_, let ctx), .valueNotFound(_, let ctx):
-            return "champ mal type : \(chemin(ctx.codingPath))"
+            return tr("champ mal typé : \(chemin(ctx.codingPath))")
         case .dataCorrupted(let ctx):
-            return "JSON invalide \(chemin(ctx.codingPath))"
+            return tr("JSON invalide \(chemin(ctx.codingPath))")
         @unknown default:
-            return "decodage impossible"
+            return tr("décodage impossible")
         }
     }
 }

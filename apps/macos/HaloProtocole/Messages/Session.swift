@@ -57,7 +57,7 @@ public enum ValeurScalaire: Codable, Sendable, Equatable, Hashable, CustomString
     public var description: String {
         switch self {
         case .entier(let i): String(i)
-        case .booleen(let b): b ? "oui" : "non"
+        case .booleen(let b): b ? tr("oui") : tr("non")
         case .texte(let s): s
         case .nul: "-"
         }

@@ -29,7 +29,7 @@ struct ScriptDemo: Sendable {
 
     static func charger() throws -> ScriptDemo {
         guard let url = Bundle.main.url(forResource: "demo-halo", withExtension: "jsonl") else {
-            throw ErreurDemo("demo-halo.jsonl absent du paquet de l'app")
+            throw ErreurDemo(tr("demo-halo.jsonl absent du paquet de l'app"))
         }
         return try ScriptDemo(texte: String(contentsOf: url, encoding: .utf8))
     }
@@ -39,7 +39,7 @@ struct ScriptDemo: Sendable {
         var boot = "3FA2C901"
         for ligne in texte.split(separator: "\n") where !ligne.isEmpty {
             guard let objet = try JSONSerialization.jsonObject(with: Data(ligne.utf8)) as? [String: Any],
-                  let ms = objet["ms"] as? Int else { throw ErreurDemo("ligne illisible : \(ligne.prefix(60))") }
+                  let ms = objet["ms"] as? Int else { throw ErreurDemo(tr("ligne illisible : \(String(ligne.prefix(60)))")) }
             if let t = objet["t"] as? String, objet["v"] != nil {
                 if t == "hello", let b = objet["boot"] as? String { boot = b }
                 elements.append(Element(ms: ms, genre: .machine(ligne: String(ligne), t: t, bloc: objet["bloc"] as? String)))
@@ -56,7 +56,7 @@ struct ScriptDemo: Sendable {
                 }
             }
         }
-        guard let premier = elements.first?.ms else { throw ErreurDemo("chronologie vide") }
+        guard let premier = elements.first?.ms else { throw ErreurDemo(tr("chronologie vide")) }
         // L'instantane : les lignes periodiques des toutes premieres millisecondes.
         let limite = premier + 50
         var instantane: [Element] = []

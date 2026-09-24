@@ -27,32 +27,32 @@ enum PortSerie {
 
     /// Ouvre `/dev/cu.*` (jamais `/dev/tty.*`, qui attend DCD) ; renvoie le descripteur.
     static func ouvrir(_ chemin: String) throws -> Int32 {
-        guard chemin.hasPrefix("/dev/cu.") else { throw ErreurPort(quoi: "chemin \(chemin) : /dev/cu.* attendu", errno: 0) }
+        guard chemin.hasPrefix("/dev/cu.") else { throw ErreurPort(quoi: tr("chemin \(chemin) : /dev/cu.* attendu"), errno: 0) }
         let fd = open(chemin, O_RDWR | O_NOCTTY | O_NONBLOCK)
-        guard fd >= 0 else { throw erreur("ouverture de \(chemin)") }
+        guard fd >= 0 else { throw erreur(tr("ouverture de \(chemin)")) }
         do {
             // 1. Acces exclusif.
-            guard ioctl(fd, tiocexcl) != -1 else { throw erreur("accès exclusif (TIOCEXCL)") }
+            guard ioctl(fd, tiocexcl) != -1 else { throw erreur(tr("accès exclusif (TIOCEXCL)")) }
 
             // 2. DTR = RTS = 0 dans un seul appel : jamais l'etat RTS=1, DTR=0.
             var lignes: Int32 = 0
             guard withUnsafeMutablePointer(to: &lignes, { ioctl(fd, tiocmget, $0) }) != -1 else {
-                throw erreur("lecture de DTR et RTS (TIOCMGET)")
+                throw erreur(tr("lecture de DTR et RTS (TIOCMGET)"))
             }
             lignes &= ~(TIOCM_DTR | TIOCM_RTS)
             guard withUnsafeMutablePointer(to: &lignes, { ioctl(fd, tiocmset, $0) }) != -1 else {
-                throw erreur("DTR et RTS à 0 (TIOCMSET)")
+                throw erreur(tr("DTR et RTS à 0 (TIOCMSET)"))
             }
 
             // 3. Mode brut, 8N1, CLOCAL | CREAD, HUPCL retire, 115200 (ignore par l'USB natif).
             var t = termios()
-            guard tcgetattr(fd, &t) != -1 else { throw erreur("lecture des réglages (tcgetattr)") }
+            guard tcgetattr(fd, &t) != -1 else { throw erreur(tr("lecture des réglages (tcgetattr)")) }
             cfmakeraw(&t)
             t.c_cflag |= tcflag_t(CLOCAL | CREAD | CS8)
             t.c_cflag &= ~tcflag_t(HUPCL | PARENB | CSTOPB | CRTSCTS)
             t.c_iflag &= ~tcflag_t(IXON | IXOFF | IXANY)
-            guard cfsetspeed(&t, debit) != -1 else { throw erreur("débit (cfsetspeed)") }
-            guard tcsetattr(fd, TCSANOW, &t) != -1 else { throw erreur("réglages (tcsetattr)") }
+            guard cfsetspeed(&t, debit) != -1 else { throw erreur(tr("débit (cfsetspeed)")) }
+            guard tcsetattr(fd, TCSANOW, &t) != -1 else { throw erreur(tr("réglages (tcsetattr)")) }
             return fd
         } catch {
             // Ouvrir a pose DTR = RTS = 1 : les baisser ensemble et retirer HUPCL
@@ -92,8 +92,8 @@ struct ErreurPort: Error, CustomStringConvertible {
         guard errno != 0 else { return quoi }
         let detail = String(cString: strerror(errno))
         if errno == EBUSY {
-            return "\(quoi) : port occupé (pio device monitor ou une autre app le tient)"
+            return tr("\(quoi) : port occupé (pio device monitor ou une autre app le tient)")
         }
-        return "\(quoi) : \(detail)"
+        return tr("\(quoi) : \(detail)")
     }
 }

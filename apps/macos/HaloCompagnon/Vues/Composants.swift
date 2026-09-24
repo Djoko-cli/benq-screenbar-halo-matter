@@ -3,14 +3,28 @@ import SwiftUI
 
 /// Carte du tableau de bord.
 struct Carte<Contenu: View>: View {
-    let titre: String
+    let titre: Text
     let icone: String
     var accent: Color = .secondary
     @ViewBuilder let contenu: Contenu
 
+    init(titre: LocalizedStringKey, icone: String, accent: Color = .secondary, @ViewBuilder contenu: () -> Contenu) {
+        self.init(titre: Text(titre), icone: icone, accent: accent, contenu: contenu)
+    }
+
+    /// Titre deja construit : `Text("...", tableName: "Titres")` pour un titre
+    /// dont le texte francais sert ailleurs avec une autre casse anglaise
+    /// (titre de section contre libelle de ligne).
+    init(titre: Text, icone: String, accent: Color = .secondary, @ViewBuilder contenu: () -> Contenu) {
+        self.titre = titre
+        self.icone = icone
+        self.accent = accent
+        self.contenu = contenu()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(titre, systemImage: icone)
+            Label { titre } icon: { Image(systemName: icone) }
                 .font(.headline)
                 .foregroundStyle(accent == .secondary ? .primary : accent)
             contenu
@@ -24,12 +38,21 @@ struct Carte<Contenu: View>: View {
 
 /// Ligne "libelle : valeur".
 struct LigneInfo: View {
-    let libelle: String
+    let libelle: Text
     let valeur: String
     var couleur: Color?
     var mono = false
 
-    init(_ libelle: String, _ valeur: String?, couleur: Color? = nil, mono: Bool = false) {
+    init(_ libelle: LocalizedStringKey, _ valeur: String?, couleur: Color? = nil, mono: Bool = false) {
+        self.init(libelle: Text(libelle), valeur, couleur: couleur, mono: mono)
+    }
+
+    /// Libelle deja calcule (dans la langue en vigueur).
+    init(verbatim libelle: String, _ valeur: String?, couleur: Color? = nil, mono: Bool = false) {
+        self.init(libelle: Text(verbatim: libelle), valeur, couleur: couleur, mono: mono)
+    }
+
+    private init(libelle: Text, _ valeur: String?, couleur: Color?, mono: Bool) {
         self.libelle = libelle
         self.valeur = valeur ?? "–"
         self.couleur = couleur
@@ -38,7 +61,7 @@ struct LigneInfo: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(libelle)
+            libelle
                 .foregroundStyle(.secondary)
             Spacer(minLength: 12)
             Text(valeur)
@@ -58,11 +81,23 @@ extension String {
 
 /// Petite etiquette coloree.
 struct Pastille: View {
-    let texte: String
+    let texte: Text
     var couleur: Color = .secondary
 
+    /// Texte du catalogue de l'app.
+    init(_ cle: LocalizedStringKey, couleur: Color = .secondary) {
+        texte = Text(cle)
+        self.couleur = couleur
+    }
+
+    /// Texte deja calcule (libelle, valeur de la carte), tel quel.
+    init(texte: String, couleur: Color = .secondary) {
+        self.texte = Text(verbatim: texte)
+        self.couleur = couleur
+    }
+
     var body: some View {
-        Text(texte)
+        texte
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
@@ -73,7 +108,7 @@ struct Pastille: View {
 
 /// Jauge "valeur / seuil".
 struct JaugeSeuil: View {
-    let libelle: String
+    let libelle: LocalizedStringKey
     let valeur: Int?
     let seuil: Int?
 
@@ -84,7 +119,7 @@ struct JaugeSeuil: View {
             HStack {
                 Text(libelle).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(valeur.map(String.init) ?? "–") / \(seuil.map(String.init) ?? "–")").monospacedDigit()
+                Text(verbatim: "\(valeur.map(String.init) ?? "–") / \(seuil.map(String.init) ?? "–")").monospacedDigit()
             }
             .font(.callout)
             ProgressView(value: min(v, s), total: s)
@@ -116,7 +151,7 @@ struct VoyantLed: View {
             .frame(width: taille, height: taille)
             .shadow(color: couleur.opacity(intensite * 0.9), radius: intensite * taille * 0.5)
         }
-        .accessibilityLabel(motif?.libelle ?? "voyant inconnu")
+        .accessibilityLabel(motif?.libelle ?? tr("voyant inconnu"))
     }
 
     /// Prochain instant (secondes depuis le debut du motif) ou le rendu change ;
@@ -206,16 +241,16 @@ struct HoraireVoyant: TimelineSchedule {
 
 enum Format {
     private static let styleHeure = Date.FormatStyle()
-        .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits)
+        .hour(.twoDigits(amPM: .abbreviated)).minute(.twoDigits).second(.twoDigits)
         .secondFraction(.fractional(3))
 
-    /// "14:02:11.512"
-    static func heure(_ d: Date) -> String { d.formatted(styleHeure) }
+    /// Heure a la milliseconde, aux formats de la langue en vigueur ("14:02:11,512").
+    static func heure(_ d: Date) -> String { d.formatted(styleHeure.locale(Localisation.partagee.locale)) }
 
     static func duree(secondes s: Int?) -> String {
         guard let s else { return "–" }
         let j = s / 86_400, h = (s % 86_400) / 3600, m = (s % 3600) / 60, sec = s % 60
-        if j > 0 { return "\(j) j \(h) h \(m) min" }
+        if j > 0 { return tr("\(j) j \(h) h \(m) min") }
         if h > 0 { return "\(h) h \(m) min \(sec) s" }
         if m > 0 { return "\(m) min \(sec) s" }
         return "\(sec) s"
@@ -228,12 +263,12 @@ enum Format {
 
     static func octets(_ v: Int?) -> String {
         guard let v else { return "–" }
-        return ByteCountFormatter.string(fromByteCount: Int64(v), countStyle: .memory)
+        return Int64(v).formatted(.byteCount(style: .memory).locale(Localisation.partagee.locale))
     }
 
     static func oui(_ b: Bool?) -> String {
         guard let b else { return "–" }
-        return b ? "oui" : "non"
+        return b ? tr("oui") : tr("non")
     }
 
     static func hexa(_ v: Int?) -> String {

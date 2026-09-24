@@ -2,6 +2,14 @@ import Charts
 import HaloProtocole
 import SwiftUI
 
+/// Etiquettes de valeurs tracees : des symboles, sans traduction.
+private enum Symbole {
+    static let serie = "s"
+    static let pourcent = "%"
+    static let delta = "Δ"
+    static let dbm = "dBm"
+}
+
 /// Ecran "Graphiques" : les courbes de la section 8, calculees par differences
 /// de blocs `compteurs` successifs (HaloProtocole.Courbes).
 struct Graphiques: View {
@@ -55,17 +63,15 @@ struct Graphiques: View {
                         graphePerte(dp, debut: debut, fin: fin)
                         legende("(Δ max_rt + Δ délais + Δ fifo) / Δ paquets ; pointillé : 1 − Δ accusés / Δ paquets.")
                     }
-                    Carte(titre: "Consignes abandonnées", icone: "xmark.octagon") {
+                    Carte(titre: Text("Consignes abandonnées", tableName: "Titres"), icone: "xmark.octagon") {
                         grapheBarres(points(dp, "abandons") { $0[.abandons].map(Double.init) },
                                      marques: marques.filter { $0.genre == .abandon }, debut: debut, fin: fin,
-                                     couleur: .red, unite: "par fenêtre")
+                                     couleur: .red, unite: tr("par fenêtre"))
                         legende("Δ tranches.abandons par fenêtre de \(Int(fenetre)) s ; traits : livraisons abandonnées.")
                     }
                     Carte(titre: "CRC faux", icone: "exclamationmark.bubble") {
                         grapheCrc(dp, seuils: seuils, debut: debut, fin: fin)
-                        legende("Δ rx.crc_faux par minute ; trait : seuil du déluge (\(seuils?.delugeTrames ?? 100) trames "
-                                + "dont \(seuils?.delugePct ?? 90) % de CRC faux sur \(Format.ms(seuils?.fenetreMs ?? 10000)), "
-                                + "ramené à la minute).")
+                        legende("Δ rx.crc_faux par minute ; trait : seuil du déluge (\(seuils?.delugeTrames ?? 100) trames dont \(seuils?.delugePct ?? 90) % de CRC faux sur \(Format.ms(seuils?.fenetreMs ?? 10000)), ramené à la minute).")
                         grapheLignes(points(dp, "part CRC faux") { Courbes.partCrcFaux($0).map { $0 * 100 } },
                                      debut: debut, fin: fin, unite: "%",
                                      seuil: seuils?.delugePct.map(Double.init), hauteur: 110)
@@ -73,8 +79,7 @@ struct Graphiques: View {
                     }
                     Carte(titre: "Refus en réception", icone: "ear.trianglebadge.exclamationmark") {
                         grapheRefus(dp: dp, dr: dr, seuils: seuils, debut: debut, fin: fin)
-                        legende("Δ radio.rearm_hors_rx (surdité), Δ tx.fifo, Δ garde.refus par fenêtre ; "
-                                + "trait : sourd_hors_rx (\(seuils?.sourdHorsRx ?? 1000) sur 10 s) ramené à la fenêtre.")
+                        legende("Δ radio.rearm_hors_rx (surdité), Δ tx.fifo, Δ garde.refus par fenêtre ; trait : sourd_hors_rx (\(seuils?.sourdHorsRx ?? 1000) sur 10 s) ramené à la fenêtre.")
                     }
                     Carte(titre: "Relances du module", icone: "arrow.triangle.2.circlepath") {
                         grapheRelances(debut: debut, fin: fin, marques: marques)
@@ -82,8 +87,7 @@ struct Graphiques: View {
                     }
                     Carte(titre: "Santé Matter", icone: "point.3.connected.trianglepath.dotted") {
                         grapheMatter(debut: debut, fin: fin, marques: marques.filter { $0.genre == .role })
-                        legende("Abonnements actifs et RSSI du parent Thread (reseau, toutes les 5 s) ; "
-                                + "traits violets : changements de rôle.")
+                        legende("Abonnements actifs et RSSI du parent Thread (reseau, toutes les 5 s) ; traits violets : changements de rôle.")
                     }
                 }
             }
@@ -94,15 +98,15 @@ struct Graphiques: View {
     private var reglages: some View {
         HStack(spacing: 16) {
             Picker("Fenêtre", selection: $fenetre) {
-                Text("10 s").tag(10.0)
-                Text("1 min").tag(60.0)
+                Text(verbatim: "10 s").tag(10.0)
+                Text(verbatim: "1 min").tag(60.0)
             }
             .pickerStyle(.segmented)
             .fixedSize()
             Picker("Durée", selection: $duree) {
-                Text("5 min").tag(300.0)
-                Text("15 min").tag(900.0)
-                Text("1 h").tag(3600.0)
+                Text(verbatim: "5 min").tag(300.0)
+                Text(verbatim: "15 min").tag(900.0)
+                Text(verbatim: "1 h").tag(3600.0)
                 Text("Tout").tag(0.0)
             }
             .pickerStyle(.segmented)
@@ -120,7 +124,7 @@ struct Graphiques: View {
         }
     }
 
-    private func legende(_ texte: String) -> some View {
+    private func legende(_ texte: LocalizedStringKey) -> some View {
         Text(texte).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
@@ -137,14 +141,14 @@ struct Graphiques: View {
         let sansAccuse = points(d, "sans accusé") { Courbes.tauxSansAccuse($0).map { $0 * 100 } }
         return Chart {
             ForEach(perte) { p in
-                LineMark(x: .value("Heure", p.fin), y: .value("%", p.valeur), series: .value("s", "perte-\(p.segment)"))
+                LineMark(x: .value("Heure", p.fin), y: .value(Symbole.pourcent, p.valeur), series: .value(Symbole.serie, "perte-\(p.segment)"))
                     .foregroundStyle(.red)
-                PointMark(x: .value("Heure", p.fin), y: .value("%", p.valeur))
+                PointMark(x: .value("Heure", p.fin), y: .value(Symbole.pourcent, p.valeur))
                     .foregroundStyle(.red)
                     .symbolSize(12)
             }
             ForEach(sansAccuse) { p in
-                LineMark(x: .value("Heure", p.fin), y: .value("%", p.valeur), series: .value("s", "sa-\(p.segment)"))
+                LineMark(x: .value("Heure", p.fin), y: .value(Symbole.pourcent, p.valeur), series: .value(Symbole.serie, "sa-\(p.segment)"))
                     .foregroundStyle(.orange)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
@@ -152,7 +156,7 @@ struct Graphiques: View {
         .chartXScale(domain: echelle(debut, fin))
         .chartPlotStyle { $0.clipped() }
         .chartYScale(domain: 0...100)
-        .chartYAxisLabel("%")
+        .chartYAxisLabel(Symbole.pourcent)
         .frame(height: 170)
     }
 
@@ -200,7 +204,7 @@ struct Graphiques: View {
     private func grapheLignes(_ p: [Point], debut: Date, fin: Date, unite: String, seuil: Double?, hauteur: CGFloat) -> some View {
         Chart {
             ForEach(p) { x in
-                LineMark(x: .value("Heure", x.fin), y: .value(unite, x.valeur), series: .value("s", "\(x.serie)-\(x.segment)"))
+                LineMark(x: .value("Heure", x.fin), y: .value(unite, x.valeur), series: .value(Symbole.serie, "\(x.serie)-\(x.segment)"))
                     .foregroundStyle(.gray)
             }
             if let seuil {
@@ -217,14 +221,16 @@ struct Graphiques: View {
     }
 
     private func grapheRefus(dp: [Difference], dr: [Difference], seuils: ConfigCarte.Seuils?, debut: Date, fin: Date) -> some View {
-        let horsRx = points(dr, "hors RX") { $0[.rearmHorsRx].map(Double.init) }
-        let garde = points(dr, "garde") { $0[.gardeRefus].map(Double.init) }
-        let fifo = points(dp, "FIFO") { $0[.fifo].map(Double.init) }
+        // Noms des series : ceux de la legende, dans la langue en vigueur.
+        let nomHorsRx = tr("hors RX"), nomGarde = tr("garde"), nomFifo = "FIFO"
+        let horsRx = points(dr, nomHorsRx) { $0[.rearmHorsRx].map(Double.init) }
+        let garde = points(dr, nomGarde) { $0[.gardeRefus].map(Double.init) }
+        let fifo = points(dp, nomFifo) { $0[.fifo].map(Double.init) }
         let seuil = Double(seuils?.sourdHorsRx ?? 1000) * fenetre / 10
         let maxi = (horsRx + garde + fifo).map(\.valeur).max() ?? 0
         return Chart {
             ForEach(horsRx + garde + fifo) { x in
-                LineMark(x: .value("Heure", x.fin), y: .value("Δ", x.valeur), series: .value("s", "\(x.serie)-\(x.segment)"))
+                LineMark(x: .value("Heure", x.fin), y: .value(Symbole.delta, x.valeur), series: .value(Symbole.serie, "\(x.serie)-\(x.segment)"))
                     .foregroundStyle(by: .value("Compteur", x.serie))
             }
             if maxi > seuil / 4 {
@@ -234,7 +240,7 @@ struct Graphiques: View {
                     .annotation(position: .top, alignment: .trailing) { Text("seuil de surdité").font(.caption2).foregroundStyle(.red) }
             }
         }
-        .chartForegroundStyleScale(["hors RX": Color.orange, "garde": Color.purple, "FIFO": Color.blue])
+        .chartForegroundStyleScale([nomHorsRx: Color.orange, nomGarde: Color.purple, nomFifo: Color.blue])
         .chartXScale(domain: echelle(debut, fin))
         .chartPlotStyle { $0.clipped() }
         .chartYScale(domain: 0...max(maxi * 1.15, maxi > seuil / 4 ? seuil * 1.15 : 10))
@@ -243,11 +249,12 @@ struct Graphiques: View {
     }
 
     private func grapheRelances(debut: Date, fin: Date, marques: [Marqueur]) -> some View {
-        let causes: [(Grandeur, String)] = [(.relancesVerif, "vérif"), (.relancesDelais, "délais"),
-                                           (.relancesBruit, "bruit"), (.relancesSourde, "sourde")]
+        // Noms des causes : ceux de la legende, dans la langue en vigueur.
+        let causes: [(Grandeur, String, Color)] = [(.relancesVerif, tr("vérif"), .gray), (.relancesDelais, tr("délais"), .red),
+                                                  (.relancesBruit, tr("bruit"), .yellow), (.relancesSourde, tr("sourde"), .orange)]
         let echantillons = pont.radio.elements
         var pts: [Point] = []
-        for (g, nom) in causes {
+        for (g, nom, _) in causes {
             for (i, c) in Courbes.cumul(echantillons, g, ecartMax: pont.ecartMaxCourbes).enumerated() where c.date >= debut {
                 pts.append(Point(id: "\(nom)-\(i)", debut: c.date, fin: c.date, serie: nom, segment: c.segment,
                                  valeur: Double(c.valeur)))
@@ -269,7 +276,7 @@ struct Graphiques: View {
                     }
             }
         }
-        .chartForegroundStyleScale(["vérif": Color.gray, "délais": Color.red, "bruit": Color.yellow, "sourde": Color.orange])
+        .chartForegroundStyleScale(domain: causes.map(\.1), range: causes.map(\.2))
         .chartXScale(domain: echelle(debut, fin))
         .chartPlotStyle { $0.clipped() }
         .chartYAxisLabel("cumul")
@@ -299,9 +306,9 @@ struct Graphiques: View {
             Chart {
                 ForEach(rssi) { p in
                     if let v = p.valeur {
-                        LineMark(x: .value("Heure", p.date), y: .value("dBm", v))
+                        LineMark(x: .value("Heure", p.date), y: .value(Symbole.dbm, v))
                             .foregroundStyle(.teal)
-                        PointMark(x: .value("Heure", p.date), y: .value("dBm", v))
+                        PointMark(x: .value("Heure", p.date), y: .value(Symbole.dbm, v))
                             .foregroundStyle(.teal)
                             .symbolSize(10)
                     }

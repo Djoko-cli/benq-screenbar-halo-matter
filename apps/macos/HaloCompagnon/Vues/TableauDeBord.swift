@@ -57,11 +57,11 @@ private struct CarteLampe: View {
         Carte(titre: "Lampe : consigne et état cru", icone: "lightbulb.2") {
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                 GridRow {
-                    Text("")
+                    Text(verbatim: "")
                     Text("Consigne").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Text("Cru").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 }
-                ligne("Marche", l?.consigne.marche.map { $0 ? "allumée" : "éteinte" }, l?.cru.marche.map { $0 ? "allumée" : "éteinte" },
+                ligne("Marche", l?.consigne.marche.map(Self.marche), l?.cru.marche.map(Self.marche),
                       aLivrer.contains(.marche))
                 ligne("Lampes", l?.consigne.lampes?.libelle, l?.cru.lampes?.libelle, aLivrer.contains(.marche))
                 ligne("Luminosité", lum(l?.consigne), lum(l?.cru), aLivrer.contains(.lum))
@@ -71,37 +71,38 @@ private struct CarteLampe: View {
             Divider()
             HStack(spacing: 6) {
                 Text("À livrer :").foregroundStyle(.secondary)
-                if aLivrer.isEmpty { Pastille(texte: "rien", couleur: .green) }
+                if aLivrer.isEmpty { Pastille("rien", couleur: .green) }
                 ForEach(l?.aLivrer ?? [], id: \.self) { Pastille(texte: $0.libelle, couleur: .orange) }
                 Spacer()
-                if let v = l?.version { Text("version \(v)").foregroundStyle(.secondary).monospacedDigit() }
+                if let v = l?.version { Text("version \(String(v))").foregroundStyle(.secondary).monospacedDigit() }
             }
             .font(.callout)
             LigneInfo("Pilote", l?.phase.map { p in
-                var s = p.libelle
-                if p == .reprise, let r = l?.repriseMs { s += " (dans \(Format.ms(r)))" }
-                return s
+                if p == .reprise, let r = l?.repriseMs { return tr("\(p.libelle) (dans \(Format.ms(r)))") }
+                return p.libelle
             }, couleur: l?.phase == .reprise ? .orange : nil)
             LigneInfo("Tours ratés", l?.echecs.map { e in
                 "\(e) / \(pont.etat.config?.valeur.reglages?.reprises.map(String.init) ?? "?")"
             })
             LigneInfo("Mémoire de sélection", l?.memoire?.libelle)
-            LigneInfo("Bouton A", l.map { "dernier n° \($0.dernierA ?? 0), \($0.aEntendus ?? 0) entendus" })
+            LigneInfo("Bouton A", l.map { tr("dernier n° \(String($0.dernierA ?? 0)), \($0.aEntendus ?? 0) entendus") })
             LigneInfo("Écoute de fond", Format.oui(l?.ecoute))
             if let t = pont.etat.tranches?.valeur.tranches, !t.isEmpty {
                 Divider()
                 Text("Tranches actives").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(Array(t.enumerated()), id: \.offset) { _, tr in
-                    LigneInfo(tr.tranche?.libelle ?? "?",
-                              "\(tr.charge ?? "") · essai \(tr.essais ?? 0) · \(tr.accuses ?? 0)/\(tr.paquets ?? 0) accusés",
+                ForEach(Array(t.enumerated()), id: \.offset) { _, tranche in
+                    LigneInfo(verbatim: tranche.tranche?.libelle.avecMajuscule ?? "?",
+                              tr("\(tranche.charge ?? "") · essai \(tranche.essais ?? 0) · \(tranche.accuses ?? 0)/\(tranche.paquets ?? 0) accusés"),
                               mono: true)
                 }
             }
         }
     }
 
+    private static func marche(_ m: Bool) -> String { m ? tr("allumée") : tr("éteinte") }
+
     @ViewBuilder
-    private func ligne(_ nom: String, _ c: String?, _ r: String?, _ enAttente: Bool) -> some View {
+    private func ligne(_ nom: LocalizedStringKey, _ c: String?, _ r: String?, _ enAttente: Bool) -> some View {
         GridRow {
             Text(nom).foregroundStyle(.secondary)
             Text(c ?? "–").fontWeight(enAttente ? .semibold : .regular).foregroundStyle(enAttente ? .orange : .primary)
@@ -112,7 +113,7 @@ private struct CarteLampe: View {
     private func lum(_ e: EtatLampe?) -> String? {
         guard let e, let lum = e.lum else { return nil }
         let niveau = e.niveau ?? pont.etat.correspondance.niveau(brut: lum)
-        return "\(Format.hexa(lum)) · niveau \(niveau) (\(CorrespondanceLuminosite.pourcent(niveau: niveau)) %)"
+        return tr("\(Format.hexa(lum)) · niveau \(niveau) (\(CorrespondanceLuminosite.pourcent(niveau: niveau)) %)")
     }
 
     private func temp(_ e: EtatLampe?) -> String? {
@@ -184,28 +185,26 @@ private struct CarteModule: View {
                 .background(.red, in: RoundedRectangle(cornerRadius: 6))
             }
             HStack(spacing: 6) {
-                Pastille(texte: s?.radio?.presente == false ? "absent" : "présent",
-                         couleur: s?.radio?.presente == false ? .red : .green)
-                if s?.radio?.perdue == true { Pastille(texte: "perdu (L3)", couleur: .red) }
+                if s?.radio?.presente == false { Pastille("absent", couleur: .red) } else { Pastille("présent", couleur: .green) }
+                if s?.radio?.perdue == true { Pastille("perdu (L3)", couleur: .red) }
                 Pastille(texte: s?.radio?.mode?.libelle ?? "–")
-                Pastille(texte: s?.radio?.configuree == true ? "configuré" : "non configuré",
-                         couleur: s?.radio?.configuree == true ? .green : .orange)
+                if s?.radio?.configuree == true { Pastille("configuré", couleur: .green) } else { Pastille("non configuré", couleur: .orange) }
                 if let sy = s?.surveil?.symptome { Pastille(texte: sy.libelle, couleur: .orange) }
             }
             LigneInfo("Quartz · calibration", "\(Format.oui(s?.radio?.quartz)) · \(Format.oui(s?.radio?.calib))")
             JaugeSeuil(libelle: "Délais TX de suite", valeur: s?.surveil?.delaisSuite, seuil: seuils?.delaisSuite)
             JaugeSeuil(libelle: "Réarmements hors RX (10 s)", valeur: s?.surveil?.horsRx10s, seuil: seuils?.sourdHorsRx)
             JaugeSeuil(libelle: "Relances sans guérison", valeur: s?.surveil?.sansGuerison, seuil: seuils?.sansGuerison)
-            LigneInfo("Fenêtre d'écoute", "\(s?.surveil?.fenTrames ?? 0) trames, \(s?.surveil?.fenCrcFaux ?? 0) CRC faux")
+            LigneInfo("Fenêtre d'écoute", tr("\(s?.surveil?.fenTrames ?? 0) trames, \(s?.surveil?.fenCrcFaux ?? 0) CRC faux"))
             LigneInfo("Relances automatiques", s?.surveil?.relances.map(String.init))
             if let d = s?.surveil?.derniere {
-                LigneInfo("Dernière relance", "\(d.cause?.libelle ?? "?"), il y a \(Format.duree(secondes: d.ilYaS))")
+                LigneInfo("Dernière relance", tr("\(d.cause?.libelle ?? "?"), il y a \(Format.duree(secondes: d.ilYaS))"))
             }
             if let r = pont.etat.derniereRelance {
                 Text(Interpretation.relance(r.valeur)).font(.caption).foregroundStyle(.secondary)
             }
             if let m = pont.etat.dernierModule {
-                Text("\(Format.heure(m.date)) · \(Interpretation.module(m.valeur))")
+                Text(verbatim: "\(Format.heure(m.date)) · \(Interpretation.module(m.valeur))")
                     .font(.caption)
                     .foregroundStyle(m.valeur.etat == .panne ? .red : .secondary)
             }
@@ -224,9 +223,9 @@ private struct CarteVoyant: View {
             HStack(spacing: 14) {
                 VoyantLed(motif: motif, depuis: pont.etat.motifLedDepuis, taille: 34)
                 VStack(alignment: .leading) {
-                    Text((motif?.libelle ?? "inconnu").avecMajuscule).font(.title3.weight(.semibold))
-                    Text((motif?.description ?? "motif pas encore reçu").avecMajuscule).foregroundStyle(.secondary)
-                    if pont.etat.ledTest { Pastille(texte: "Test du voyant en cours", couleur: .purple) }
+                    Text((motif?.libelle ?? tr("inconnu")).avecMajuscule).font(.title3.weight(.semibold))
+                    Text((motif?.description ?? tr("motif pas encore reçu")).avecMajuscule).foregroundStyle(.secondary)
+                    if pont.etat.ledTest { Pastille("Test du voyant en cours", couleur: .purple) }
                 }
             }
             if pont.etat.capacites.contains("led") {
@@ -254,10 +253,16 @@ private struct CarteThread: View {
         let m = pont.etat.sante?.valeur.matter
         Carte(titre: "Thread et Matter", icone: "point.3.connected.trianglepath.dotted") {
             HStack(spacing: 6) {
-                Pastille(texte: (r?.matter?.enService ?? m?.enService) == true ? "en service" : "pas en service",
-                         couleur: (r?.matter?.enService ?? m?.enService) == true ? .green : .orange)
-                Pastille(texte: (r?.matter?.connecte ?? m?.connecte) == true ? "connecté" : "déconnecté",
-                         couleur: (r?.matter?.connecte ?? m?.connecte) == true ? .green : .red)
+                if (r?.matter?.enService ?? m?.enService) == true {
+                    Pastille("en service", couleur: .green)
+                } else {
+                    Pastille("pas en service", couleur: .orange)
+                }
+                if (r?.matter?.connecte ?? m?.connecte) == true {
+                    Pastille("connecté", couleur: .green)
+                } else {
+                    Pastille("déconnecté", couleur: .red)
+                }
                 if m?.identify == true { Pastille(texte: "identify", couleur: .purple) }
                 if let role = r?.thread?.role {
                     Pastille(texte: role, couleur: role == "detached" || role == "disabled" ? .red : .blue)
@@ -266,9 +271,9 @@ private struct CarteThread: View {
             LigneInfo("Canal", r?.thread.map { "\($0.canal.map(String.init) ?? "?") (\($0.mhz.map(String.init) ?? "?") MHz)" })
             LigneInfo("PAN · puissance", r?.thread.map { "\($0.pan ?? "?") · \($0.txDbm.map { "\($0) dBm" } ?? "?")" })
             LigneInfo("RSSI du parent", r?.thread?.parentRssi.map { "\($0) dBm" })
-            LigneInfo("Mode", r?.thread.map { "\($0.mode ?? "?") (démarrage \($0.typeBoot ?? "?"), suivant \($0.typeSuivant ?? "?"))" })
+            LigneInfo("Mode", r?.thread.map { tr("\($0.mode ?? "?") (démarrage \($0.typeBoot ?? "?"), suivant \($0.typeSuivant ?? "?"))") })
             LigneInfo("Changements de rôle", r?.thread?.roles.map(String.init))
-            LigneInfo("SRP", r?.thread?.srp.map { "\($0.hote ?? "?") · \($0.enregistres ?? 0)/\($0.services ?? 0) services" })
+            LigneInfo("SRP", r?.thread?.srp.map { tr("\($0.hote ?? "?") · \($0.enregistres ?? 0)/\($0.services ?? 0) services") })
             LigneInfo("Fabriques", r?.matter?.fabriques.map(String.init))
             if let f = r?.fraisMs, f > 2000 { LigneInfo("Âge des valeurs", Format.ms(f), couleur: .orange) }
             if let code = r?.matter?.codeManuel {
@@ -312,19 +317,19 @@ private struct CarteAbonnements: View {
         let a = pont.etat.abonnements?.valeur
         Carte(titre: "Abonnements Matter", icone: "bell.badge") {
             HStack {
-                Text("\(a?.abonnements?.actifs ?? 0)").font(.largeTitle.weight(.semibold)).monospacedDigit()
+                Text(verbatim: "\(a?.abonnements?.actifs ?? 0)").font(.largeTitle.weight(.semibold)).monospacedDigit()
                 Text("actif(s)").foregroundStyle(.secondary)
                 Spacer()
-                if a?.reprise?.enCours == .booleen(true) { Pastille(texte: "reprise en cours", couleur: .orange) }
+                if a?.reprise?.enCours == .booleen(true) { Pastille("reprise en cours", couleur: .orange) }
             }
             LigneInfo("Lectures", a?.abonnements?.lectures.map(String.init))
             LigneInfo("Sauvés (NVS)", a?.abonnements?.sauves.map(String.init))
             LigneInfo("Demandés · neufs · terminés",
                       a?.abonnements.map { "\($0.demandes ?? 0) · \($0.neufs ?? 0) · \($0.termines ?? 0)" })
             LigneInfo("Repris (pont · pile)", a?.abonnements.map { "\($0.reprisPont ?? 0) · \($0.reprisPile ?? 0)" })
-            LigneInfo("Plafond", a?.abonnements.map { "\($0.plafondS ?? 0) s (\($0.plafonnes ?? 0) plafonnés)" })
+            LigneInfo("Plafond", a?.abonnements.map { tr("\($0.plafondS ?? 0) s (\($0.plafonnes ?? 0) plafonnés)") })
             LigneInfo("Reprise automatique", Format.oui(a?.abonnements?.repriseAuto))
-            LigneInfo("Passages de reprise", a?.reprise.map { "\($0.passages ?? 0) (\($0.auto ?? 0) auto, \($0.echecs ?? 0) échecs)" })
+            LigneInfo("Passages de reprise", a?.reprise.map { tr("\($0.passages ?? 0) (\($0.auto ?? 0) auto, \($0.echecs ?? 0) échecs)") })
         }
     }
 }
@@ -367,7 +372,7 @@ private struct CarteSanteLien: View {
             if let dernier = pont.rejets.elements.last {
                 Divider()
                 Text("Dernière ligne rejetée · \(Format.heure(dernier.date))").font(.caption).foregroundStyle(.secondary)
-                Text("\(dernier.raison)\n\(dernier.brut.prefix(160))")
+                Text(verbatim: "\(dernier.raison)\n\(dernier.brut.prefix(160))")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
@@ -437,7 +442,7 @@ private struct CarteSysteme: View {
             LigneInfo("Plus grand bloc", Format.octets(sys?.heapBloc))
             LigneInfo("Pile de loop() jamais utilisée", Format.octets(sys?.pileBoucle))
             Divider()
-            LigneInfo("Session", session.map { "\($0.transport ?? "?") · bail \($0.bailS.map { "\($0) s" } ?? "?")" })
+            LigneInfo("Session", session.map { tr("\($0.transport ?? "?") · bail \($0.bailS.map { "\($0) s" } ?? "?")") })
             LigneInfo("Périodes état · compteurs · réseau",
                       session.map { "\(Format.ms($0.periodeMs)) · \(Format.ms($0.compteursMs)) · \(Format.ms($0.reseauMs))" })
         }

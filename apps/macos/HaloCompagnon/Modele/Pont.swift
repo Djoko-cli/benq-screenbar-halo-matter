@@ -38,7 +38,16 @@ final class Pont {
     private(set) var source: Source?
     private(set) var ports: [PortUSB] = []
     private(set) var etatTransport: EtatTransport = .ferme
-    private(set) var nomTransport = ""
+    /// Nom du transport ouvert (chemin du port, demo), dans la langue en vigueur.
+    var nomTransport: String {
+        switch genreTransport {
+        case .demo: TransportDemo.nomLisible
+        case .usb, .udp: cheminTransport
+        case nil: ""
+        }
+    }
+    private var genreTransport: GenreTransport?
+    private var cheminTransport = ""
     private(set) var phase: MoteurSession.Phase = .ferme
     private(set) var etat = EtatPont()
     private(set) var reception = CompteursReception()
@@ -52,8 +61,9 @@ final class Pont {
     private(set) var abonnes = Borne<PointMesure>(capacite: 3000)
     private(set) var rssi = Borne<PointMesure>(capacite: 3000)
     private(set) var marqueurs = Borne<Marqueur>(capacite: 500)
-    /// Annonce grave (ancien firmware, aucune reponse...) montree en bandeau.
-    private(set) var alerte: String?
+    /// Annonce grave (ancien firmware, aucune reponse...) montree en bandeau ;
+    /// son texte suit la langue en vigueur.
+    private(set) var alerte: MoteurSession.Note?
     private(set) var derniereReception: Date?
     /// Commande de banc de plus de 20 min : proposer de fermer le port (6.5).
     var propositionFermeture = false
@@ -115,6 +125,31 @@ final class Pont {
                 self.tic()
             }
         }
+        suivreLangue()
+    }
+
+    /// Changement de langue (Reglages) : le sens decode du journal des trames
+    /// est recalcule (il est garde en texte pour la recherche).
+    private func suivreLangue() {
+        withObservationTracking {
+            _ = Localisation.partagee.langue
+        } onChange: { [weak self] in
+            // Appele avant le changement : relire la langue une fois qu'il est fait.
+            Task { @MainActor [weak self] in
+                self?.relocaliser()
+                self?.suivreLangue()
+            }
+        }
+    }
+
+    /// Recalcule le sens decode des trames dans la langue en vigueur.
+    private func relocaliser() {
+        var correspondances: [ParametresGamma: CorrespondanceLuminosite] = [:]
+        trames.transformer { e in
+            let c = correspondances[e.gamma] ?? e.gamma.correspondance
+            correspondances[e.gamma] = c
+            return e.relocalisee(correspondance: c)
+        }
     }
 
     private func maintenant() -> TimeInterval {
@@ -149,7 +184,7 @@ final class Pont {
         reconnexionAuto = true
         essaisReconnexion = 0
         if changement, let nom = nomSource {
-            note("Nouvelle source : \(nom). États, journal des trames et courbes remis à zéro.", grave: false)
+            note(tr("Nouvelle source : \(nom). États, journal des trames et courbes remis à zéro."))
         }
         ouvrir()
     }
@@ -166,8 +201,9 @@ final class Pont {
         let modeMachine = rendModeHumain
         fermerProprement()
         etatTransport = .libere
-        note("Port libéré : \(modeMachine ? "json 0 envoyé, " : "")port fermé. Flasher est possible ; "
-             + "« Reconnecter » pour reprendre.", grave: false)
+        note(modeMachine
+             ? tr("Port libéré : json 0 envoyé, port fermé. Flasher est possible ; « Reconnecter » pour reprendre.")
+             : tr("Port libéré : port fermé. Flasher est possible ; « Reconnecter » pour reprendre."))
     }
 
     /// Vrai si fermer doit d'abord rendre le mode humain a la carte (`json 0`) :
@@ -223,7 +259,7 @@ final class Pont {
     private var nomSource: String? {
         switch source {
         case .serie(let chemin, _): chemin
-        case .demo: "démo"
+        case .demo: tr("démo")
         case nil: nil
         }
     }
@@ -262,7 +298,8 @@ final class Pont {
             t = TransportSerie(chemin: port?.chemin ?? chemin)
         }
         transport = t
-        nomTransport = t.nom
+        genreTransport = t.genre
+        cheminTransport = t.nom
         etatTransport = .ouverture
         generation += 1
         let g = generation
@@ -274,7 +311,7 @@ final class Pont {
                     return
                 }
                 self.transportOuvert()
-                var raison = "flux terminé"
+                var raison = tr("flux terminé")
                 for await ev in flux {
                     guard self.generation == g else { break }
                     if case .ferme(let r) = ev { raison = r }
@@ -317,7 +354,7 @@ final class Pont {
         etatTransport = .ouvert
         debutActivite()
         recepteur.resynchroniser()
-        note("Port ouvert : \(nomTransport) (DTR = RTS = 0).", grave: false)
+        note(tr("Port ouvert : \(nomTransport) (DTR = RTS = 0)."))
         executer(moteur.ouvert(maintenant: maintenant()))
     }
 
@@ -326,7 +363,7 @@ final class Pont {
         finActivite()
         moteur.ferme(maintenant: maintenant())
         synchroniser()
-        note("Transport fermé : \(raison)", grave: false)
+        note(tr("Transport fermé : \(raison)"))
         if reconnexionAuto { planifierReconnexion(raison) } else { etatTransport = .ferme }
     }
 
@@ -337,7 +374,7 @@ final class Pont {
             planifierReconnexion(texte)
         } else if reconnexionAuto {
             // Plus d'essais minutes (~3 min), mais le retour du port (IOKit) rouvre encore.
-            etatTransport = .erreur(texte + " — en attente du retour du port")
+            etatTransport = .erreur(tr("\(texte) — en attente du retour du port"))
         } else {
             etatTransport = .erreur(texte)
         }
@@ -367,7 +404,7 @@ final class Pont {
         let revenu = nouveaux.contains { ($0.serie != nil && $0.serie == serie) || $0.chemin == chemin }
         if revenu {
             essaisReconnexion = 0
-            planifierReconnexion("port revenu")
+            planifierReconnexion(tr("port revenu"))
         }
     }
 
@@ -405,12 +442,12 @@ final class Pont {
             ajouterConsole(.fragment, s)
         case .abimee(let raison, let brut):
             // Une reponse abimee a json cle nouvelle porterait la cle en clair (10.4).
-            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "abîmée : \(raison)",
+            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("abîmée : \(raison)"),
                                  brut: PolitiqueCommandes.masquerCle(brut)))
         case .versionInconnue(let v, let t):
-            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "version \(v) inconnue", brut: t))
+            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("version \(v) inconnue"), brut: t))
         case .invalide(let t, let raison):
-            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "\(t) invalide : \(raison)", brut: ""))
+            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("\(t) invalide : \(raison)"), brut: ""))
         case .debordement(let s):
             ajouterConsole(.texte(.commande), s)
         }
@@ -431,20 +468,19 @@ final class Pont {
         case .reseauAbonnements(let v) where !historique:
             abonnes.ajouter(PointMesure(id: prochainId(), date: date, valeur: v.abonnements?.actifs.map(Double.init)))
         case .relance(let r):
-            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, genre: .relance, texte: r.cause.libelle))
+            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, etiquette: .relance(r.cause)))
         case .module(let m):
-            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, genre: .module, texte: m.etat.libelle))
+            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, etiquette: .module(m.etat)))
         case .thread(let t):
-            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, genre: .role, texte: "\(t.de ?? "?") → \(t.vers)"))
+            marqueurs.ajouter(Marqueur(id: prochainId(), date: date, etiquette: .role(de: t.de, vers: t.vers)))
         case .livraison(let liv):
             if liv.issue == .abandon {
-                marqueurs.ajouter(Marqueur(id: prochainId(), date: date, genre: .abandon,
-                                           texte: liv.cause?.libelle ?? "abandon"))
+                marqueurs.ajouter(Marqueur(id: prochainId(), date: date, etiquette: .abandon(liv.cause)))
             }
             for id in liv.ids ?? [] {
                 guard let s = moteur.correlateur.suivi(numero: id) else { continue }
                 ajouterConsole(.retour(ok: liv.issue == .livree, session: s.origine == .session),
-                               "‹ id=\(id) « \(s.commande) » : " + Interpretation.livraison(liv), numero: id)
+                               tr("‹ id=\(String(id)) « \(s.commande) » : \(Interpretation.livraison(liv))"), numero: id)
             }
         case .reponse(let r):
             if let s = moteur.correlateur.suivi(numero: r.id) {
@@ -459,12 +495,11 @@ final class Pont {
             break
         }
         if !l.message.estPeriodique {
-            let json = PolitiqueCommandes.masquerCle(l.json)
-            let resume = Interpretation.resume(l.message, correspondance: c)
+            let gamma = ParametresGamma(etat)
             trames.ajouter(EntreeTrame(id: prochainId(), date: date, n: l.enveloppe.n, ms: l.enveloppe.ms,
-                                       type: l.enveloppe.t, categorie: .de(l.message), message: l.message,
-                                       json: json, historique: historique, resume: resume,
-                                       cleRecherche: (resume + "\n" + json).lowercased()))
+                                       type: l.enveloppe.t, message: l.message,
+                                       json: PolitiqueCommandes.masquerCle(l.json), historique: historique,
+                                       gamma: gamma, correspondance: c))
         }
     }
 
@@ -475,24 +510,25 @@ final class Pont {
                 do {
                     try transport?.envoyer(d)
                 } catch {
-                    note("Envoi impossible : \(error)", grave: false)
+                    note(tr("Envoi impossible : \(String(describing: error))"))
                 }
                 journaliserEnvoi(d)
-            case .rouvrir(let raison):
-                note(raison, grave: false)
+            case .rouvrir(let n):
+                note(n.texte)
                 transport?.fermer()
             case .redemarrage(let ancien, let nouveau):
                 etat.viderDerives()
-                marqueurs.ajouter(Marqueur(id: prochainId(), date: Date(), genre: .redemarrage,
-                                           texte: "boot \(nouveau ?? "?")"))
-                note("Redémarrage de la carte détecté (boot \(ancien ?? "?") → \(nouveau ?? "?")) : "
-                     + "états vidés, nouveau segment de courbes.", grave: false)
-            case .note(let texte, let grave):
-                note(texte, grave: grave)
+                marqueurs.ajouter(Marqueur(id: prochainId(), date: Date(), etiquette: .redemarrage(boot: nouveau)))
+                let a = ancien ?? "?", n = nouveau ?? "?"
+                note(tr("Redémarrage de la carte détecté (boot \(a) → \(n)) : états vidés, nouveau segment de courbes."))
+            case .note(let n):
+                note(n.texte, grave: n.grave)
+                if n.grave { alerte = n }
             case .commandeSansReponse(let id):
                 if let s = moteur.correlateur.suivi(id) {
+                    let numero = String(s.numero ?? 0)
                     ajouterConsole(.retour(ok: false, session: s.origine == .session),
-                                   "‹ id=\(s.numero ?? 0) « \(s.commande) » : sans réponse sous 3 s (pas de réémission)",
+                                   tr("‹ id=\(numero) « \(s.commande) » : sans réponse sous 3 s (pas de réémission)"),
                                    numero: s.numero)
                 }
             case .proposerFermeture:
@@ -540,9 +576,9 @@ final class Pont {
                                      texte: PolitiqueCommandes.masquerCle(texte), numero: numero))
     }
 
-    private func note(_ texte: String, grave: Bool) {
+    /// Annonce de l'app dans la console (texte deja dans la langue en vigueur).
+    private func note(_ texte: String, grave: Bool = false) {
         ajouterConsole(.note(grave: grave), texte)
-        if grave { alerte = texte }
     }
 
     // MARK: - Commandes
@@ -562,7 +598,7 @@ final class Pont {
     @discardableResult
     func envoyer(_ commande: String, fusion: String? = nil) -> UUID? {
         guard peutCommander else {
-            note("Pas de session machine : « \(commande) » n'est pas envoyée.", grave: false)
+            note(tr("Pas de session machine : « \(commande) » n'est pas envoyée."))
             return nil
         }
         let (id, effets) = moteur.soumettre(commande, origine: .interface, fusion: fusion, maintenant: maintenant())
@@ -590,7 +626,7 @@ final class Pont {
         default:
             break
         }
-        guard let transport else { return .refusee("Aucune carte connectée.") }
+        guard let transport else { return .refusee(tr("Aucune carte connectée.")) }
         let propre = ligne.trimmingCharacters(in: .whitespaces)
         if consoleAvecId {
             let (_, effets) = moteur.soumettre(propre, origine: .console, maintenant: maintenant())
@@ -599,14 +635,16 @@ final class Pont {
             // Ancien firmware, mode humain... : ligne brute, sans id.
             switch moteur.ligneBrute(propre) {
             case .success(let d):
-                do { try transport.envoyer(d) } catch { return .refusee("Envoi impossible : \(error)") }
+                do { try transport.envoyer(d) } catch {
+                    return .refusee(tr("Envoi impossible : \(String(describing: error))"))
+                }
                 journaliserEnvoi(d)
             case .failure(let e):
                 return .refusee(e.description)
             }
         }
         if PolitiqueCommandes.attendReenumeration(propre) {
-            note("Attente de la ré-énumération USB (la carte redémarre).", grave: false)
+            note(tr("Attente de la ré-énumération USB (la carte redémarre)."))
         }
         return .envoyee
     }

@@ -1,0 +1,3774 @@
+{
+  "sourceLanguage" : "fr",
+  "strings" : {
+    "%@\nRéouverture %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@\nReopening %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@\nRéouverture %2$@"
+          }
+        }
+      }
+    },
+    "%@ (dans %@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (in %2$@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (dans %2$@)"
+          }
+        }
+      }
+    },
+    "%@ (démarrage %@, suivant %@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (boot %2$@, next %3$@)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (démarrage %2$@, suivant %3$@)"
+          }
+        }
+      }
+    },
+    "%@ : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ : %2$@"
+          }
+        }
+      }
+    },
+    "%@ : port occupé (pio device monitor ou une autre app le tient)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: port busy (pio device monitor or another app holds it)"
+          }
+        }
+      }
+    },
+    "%@ FAUX" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ BAD"
+          }
+        }
+      }
+    },
+    "%@ invalide : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "invalid %1$@: %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ invalide : %2$@"
+          }
+        }
+      }
+    },
+    "%@ juste" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ OK"
+          }
+        }
+      }
+    },
+    "%@ · %lld/%lld services" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$lld/%3$lld services"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$lld/%3$lld services"
+          }
+        }
+      }
+    },
+    "%@ · bail %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · lease %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · bail %2$@"
+          }
+        }
+      }
+    },
+    "%@ · essai %lld · %lld/%lld accusés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · attempt %2$lld · %3$lld/%4$lld acked"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · essai %2$lld · %3$lld/%4$lld accusés"
+          }
+        }
+      }
+    },
+    "%@ · niveau %lld (%lld %%)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · level %2$lld (%3$lld %%)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · niveau %2$lld (%3$lld %%)"
+          }
+        }
+      }
+    },
+    "%@ — en attente du retour du port" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — waiting for the port to come back"
+          }
+        }
+      }
+    },
+    "%@, il y a %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@ ago"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, il y a %2$@"
+          }
+        }
+      }
+    },
+    "%lld (%lld auto, %lld échecs)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld (auto: %2$lld, failed: %3$lld)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld (%2$lld auto, %3$lld échecs)"
+          }
+        }
+      }
+    },
+    "%lld / %lld octets" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld bytes"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld octets"
+          }
+        }
+      }
+    },
+    "%lld affichées sur %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld shown of %2$lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld affichées sur %2$lld"
+          }
+        }
+      }
+    },
+    "%lld j %lld h %lld min" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld d %2$lld h %3$lld min"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld j %2$lld h %3$lld min"
+          }
+        }
+      }
+    },
+    "%lld s (%lld plafonnés)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld s (%2$lld capped)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld s (%2$lld plafonnés)"
+          }
+        }
+      }
+    },
+    "%lld trames, %lld CRC faux" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "frames: %1$lld, bad CRC: %2$lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld trames, %2$lld CRC faux"
+          }
+        }
+      }
+    },
+    "(vide)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(empty)"
+          }
+        }
+      }
+    },
+    "(Δ max_rt + Δ délais + Δ fifo) / Δ paquets ; pointillé : 1 − Δ accusés / Δ paquets." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(Δ max_rt + Δ timeouts + Δ fifo) / Δ packets; dotted: 1 − Δ acks / Δ packets."
+          }
+        }
+      }
+    },
+    "Abonnements Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter Subscriptions"
+          }
+        }
+      }
+    },
+    "Abonnements actifs et RSSI du parent Thread (reseau, toutes les 5 s) ; traits violets : changements de rôle." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active subscriptions and Thread parent RSSI (reseau, every 5 s); purple lines: role changes."
+          }
+        }
+      }
+    },
+    "Abîmées · fragments" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Damaged · fragments"
+          }
+        }
+      }
+    },
+    "Actifs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
+          }
+        }
+      }
+    },
+    "Allumer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On"
+          }
+        }
+      }
+    },
+    "Annonces en messages log (json log 1)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Announcements as Log Messages (json log 1)"
+          }
+        }
+      }
+    },
+    "Annonces en texte (json log 0)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Announcements as Text (json log 0)"
+          }
+        }
+      }
+    },
+    "Annuler" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        }
+      }
+    },
+    "Arrière" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back"
+          }
+        }
+      }
+    },
+    "Arrière off" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back Off"
+          }
+        }
+      }
+    },
+    "Arrière on" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back On"
+          }
+        }
+      }
+    },
+    "Arrêter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        }
+      }
+    },
+    "Attendre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wait"
+          }
+        }
+      }
+    },
+    "Attente" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wait time"
+          }
+        }
+      }
+    },
+    "Attente de la ré-énumération USB (la carte redémarre)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for USB re-enumeration (the board is restarting)."
+          }
+        }
+      }
+    },
+    "Aucun port /dev/cu.*" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No /dev/cu.* port"
+          }
+        }
+      }
+    },
+    "Aucun état reçu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No State Received"
+          }
+        }
+      }
+    },
+    "Aucune carte connectée." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No board connected."
+          }
+        }
+      }
+    },
+    "Aucune commande de banc ne lit Serial : rien ne peut l'interrompre. Fermer le port ne l'arrête pas non plus, mais libère l'app." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No bench command reads Serial: nothing can interrupt it. Closing the port does not stop it either, but frees the app."
+          }
+        }
+      }
+    },
+    "Aucune commande envoyée." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No commands sent."
+          }
+        }
+      }
+    },
+    "Avant" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Front"
+          }
+        }
+      }
+    },
+    "Avant off" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Front Off"
+          }
+        }
+      }
+    },
+    "Avant on" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Front On"
+          }
+        }
+      }
+    },
+    "Bouton A" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A button"
+          }
+        }
+      }
+    },
+    "Bouton A (mode auto)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A Button (Auto Mode)"
+          }
+        }
+      }
+    },
+    "Brut" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw"
+          }
+        }
+      }
+    },
+    "Brut (8 octets après l'adresse)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw (8 bytes after the address)"
+          }
+        }
+      }
+    },
+    "Brut = 0x4C + round(178 × ((niveau − 1) / 253)^gamma) ; les niveaux 1 à %lld donnent 4C (plancher rapporté à Apple Home). Une commande toutes les 150 ms au plus pendant le glissement, la valeur finale au relâchement." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw = 0x4C + round(178 × ((level − 1) / 253)^gamma); levels 1 to %lld give 4C (floor reported to Apple Home). At most one command every 150 ms while dragging, the final value on release."
+          }
+        }
+      }
+    },
+    "Brute (0..100)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw (0..100)"
+          }
+        }
+      }
+    },
+    "Brute (hexa)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raw (hex)"
+          }
+        }
+      }
+    },
+    "CRC" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CRC"
+          }
+        }
+      }
+    },
+    "CRC faux" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bad CRC"
+          }
+        }
+      }
+    },
+    "CRC faux : longueur, PID et charge sont décodés de bits douteux." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bad CRC: length, PID and payload are decoded from dubious bits."
+          }
+        }
+      }
+    },
+    "Canal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Channel"
+          }
+        }
+      }
+    },
+    "Capacités de la carte pas encore reçues" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Board capabilities not received yet"
+          }
+        }
+      }
+    },
+    "Cause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cause"
+          }
+        }
+      }
+    },
+    "Ce firmware n'a pas les commandes lampe asynchrones (capacité lampe_async) : chaque commande lampe bloque la carte jusqu'à 6 s, sans livraison." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This firmware lacks asynchronous lampe commands (lampe_async capability): each lampe command blocks the board for up to 6 s, with no delivery."
+          }
+        }
+      }
+    },
+    "Champs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fields"
+          }
+        }
+      }
+    },
+    "Changements de rôle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Role changes"
+          }
+        }
+      }
+    },
+    "Chaque ligne part avec un id : le texte reçu entre reponse début et fin lui est rattaché." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each line goes out with an id: text received between reponse debut and fin is attached to it."
+          }
+        }
+      }
+    },
+    "Charge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Payload"
+          }
+        }
+      }
+    },
+    "Choisir un port USB (VID 303A) ou le mode démo dans la barre latérale." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a USB port (VID 303A) or demo mode in the sidebar."
+          }
+        }
+      }
+    },
+    "Choisir une source…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a Source…"
+          }
+        }
+      }
+    },
+    "Choisir une trame pour voir son détail." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a frame to see its details."
+          }
+        }
+      }
+    },
+    "Classement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Classification"
+          }
+        }
+      }
+    },
+    "Code manuel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual code"
+          }
+        }
+      }
+    },
+    "Commande de banc de plus de 20 minutes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bench Command Running for Over 20 Minutes"
+          }
+        }
+      }
+    },
+    "Commande de banc en cours : « %@ ». La carte ne lit plus la CLI et n'émet plus d'état jusqu'à la fin." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bench command running: “%@”. The board no longer reads the CLI and sends no state until it ends."
+          }
+        }
+      }
+    },
+    "Commandes de l'app" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App commands"
+          }
+        }
+      }
+    },
+    "Commandes et console" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Controls & Console"
+          }
+        }
+      }
+    },
+    "Commandes récentes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent Commands"
+          }
+        }
+      }
+    },
+    "Compilé le" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built on"
+          }
+        }
+      }
+    },
+    "Compteur" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counter"
+          }
+        }
+      }
+    },
+    "Confirmer la commande" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirm Command"
+          }
+        }
+      }
+    },
+    "Connecter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect"
+          }
+        }
+      }
+    },
+    "Connexions · redémarrages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connections · restarts"
+          }
+        }
+      }
+    },
+    "Consigne" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Target"
+          }
+        }
+      }
+    },
+    "Consignes abandonnées" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abandoned targets"
+          }
+        }
+      }
+    },
+    "Consignes livrées" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delivered targets"
+          }
+        }
+      }
+    },
+    "Console" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Console"
+          }
+        }
+      }
+    },
+    "Console seule (%@) : lignes envoyées sans id, sans corrélation." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Console only (%@): lines sent without id or correlation."
+          }
+        }
+      }
+    },
+    "Couper rx/tx (json trames 0)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off rx/tx (json trames 0)"
+          }
+        }
+      }
+    },
+    "Courbes de l'app seulement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Charts Only"
+          }
+        }
+      }
+    },
+    "Cru" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Believed"
+          }
+        }
+      }
+    },
+    "Côté carte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Board Side"
+          }
+        }
+      }
+    },
+    "DTR et RTS à 0 (TIOCMSET)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DTR and RTS to 0 (TIOCMSET)"
+          }
+        }
+      }
+    },
+    "Demandés · neufs · terminés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requested · new · ended"
+          }
+        }
+      }
+    },
+    "Dernière ligne rejetée · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last Rejected Line · %@"
+          }
+        }
+      }
+    },
+    "Dernière livraison · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last Delivery · %@"
+          }
+        }
+      }
+    },
+    "Dernière relance" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last restart"
+          }
+        }
+      }
+    },
+    "Descripteur (Matter)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descriptor (Matter)"
+          }
+        }
+      }
+    },
+    "Durée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duration"
+          }
+        }
+      }
+    },
+    "Durée (CE=1 à TX_DS/MAX_RT)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duration (CE=1 to TX_DS/MAX_RT)"
+          }
+        }
+      }
+    },
+    "Durée (boucle bloquée)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duration (loop blocked)"
+          }
+        }
+      }
+    },
+    "Débordements · versions inconnues" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Overflows · unknown versions"
+          }
+        }
+      }
+    },
+    "Début" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        }
+      }
+    },
+    "Déconnecter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disconnect"
+          }
+        }
+      }
+    },
+    "Défilement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-scroll"
+          }
+        }
+      }
+    },
+    "Délais TX de suite" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consecutive TX timeouts"
+          }
+        }
+      }
+    },
+    "Démarrage (boot)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startup (boot)"
+          }
+        }
+      }
+    },
+    "Démarrage et système" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startup and System"
+          }
+        }
+      }
+    },
+    "Démo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo"
+          }
+        }
+      }
+    },
+    "Démo (rejeu de demo-halo.jsonl)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo (replay of demo-halo.jsonl)"
+          }
+        }
+      }
+    },
+    "Démo : fin de la chronologie, la carte redémarre (ré-énumération USB simulée)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo: end of the timeline, the board restarts (simulated USB re-enumeration)"
+          }
+        }
+      }
+    },
+    "EN PANNE" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DOWN"
+          }
+        }
+      }
+    },
+    "En marche depuis" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up for"
+          }
+        }
+      }
+    },
+    "Environnement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Environment"
+          }
+        }
+      }
+    },
+    "Envoi impossible : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot send: %@"
+          }
+        }
+      }
+    },
+    "Envoyer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send"
+          }
+        }
+      }
+    },
+    "Envoyer « %@ »" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send “%@”"
+          }
+        }
+      }
+    },
+    "Erreur : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error: %@"
+          }
+        }
+      }
+    },
+    "Essai · prévus · accusés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attempt · planned · acked"
+          }
+        }
+      }
+    },
+    "Fabriques" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fabrics"
+          }
+        }
+      }
+    },
+    "Fenêtre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Window"
+          }
+        }
+      }
+    },
+    "Fenêtre d'écoute" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening window"
+          }
+        }
+      }
+    },
+    "Fermer le port" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close Port"
+          }
+        }
+      }
+    },
+    "Figer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freeze"
+          }
+        }
+      }
+    },
+    "Figer l'affichage sans rien demander à la carte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freeze the display without asking the board anything"
+          }
+        }
+      }
+    },
+    "Fin" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End"
+          }
+        }
+      }
+    },
+    "Firmware" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Firmware"
+          }
+        }
+      }
+    },
+    "Flux" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stream"
+          }
+        }
+      }
+    },
+    "Graphiques" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charts"
+          }
+        }
+      }
+    },
+    "Gris : CRC faux (bits douteux) · italique : lignes anciennes, avant le hello" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gray: bad CRC (dubious bits) · italic: stale lines, before the hello"
+          }
+        }
+      }
+    },
+    "Halo Compagnon" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Halo Compagnon"
+          }
+        }
+      }
+    },
+    "Heure" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time"
+          }
+        }
+      }
+    },
+    "Instantané complet (json etat)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full snapshot (json etat)"
+          }
+        }
+      }
+    },
+    "Issue" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outcome"
+          }
+        }
+      }
+    },
+    "JSON perdus · trop longs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSON lost · too long"
+          }
+        }
+      }
+    },
+    "JSON reçu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Received JSON"
+          }
+        }
+      }
+    },
+    "Kelvin nominaux, non mesurés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nominal kelvin, not measured"
+          }
+        }
+      }
+    },
+    "L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. Rien ne se rouvre avant « Reconnecter »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app sends json 0 and closes the port (DTR and RTS stay at 0) so pio run -t upload can flash. Nothing reopens until you click “Reconnect”."
+          }
+        }
+      }
+    },
+    "La carte redémarre (démo) : ré-énumération USB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The board restarts (demo): USB re-enumeration"
+          }
+        }
+      }
+    },
+    "Lampe : consigne et état cru" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lamp: Target and Believed State"
+          }
+        }
+      }
+    },
+    "Lampes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lamps"
+          }
+        }
+      }
+    },
+    "Lancer la démo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start Demo"
+          }
+        }
+      }
+    },
+    "Langue" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        }
+      }
+    },
+    "Langue du système" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System Default"
+          }
+        }
+      }
+    },
+    "Le contenu des fenêtres change tout de suite. Les menus de macOS (Halo Compagnon, Édition, Fenêtre…) et les boîtes du système suivent au prochain lancement. Les lignes déjà écrites dans la console gardent leur langue." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Window contents switch right away. macOS menus (Halo Compagnon, Edit, Window…) and system dialogs follow at the next launch. Lines already written to the console keep their language."
+          }
+        }
+      }
+    },
+    "Lectures" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reads"
+          }
+        }
+      }
+    },
+    "Les courbes se calculent sur les blocs compteurs reçus chaque seconde." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charts are computed from the counters blocks received every second."
+          }
+        }
+      }
+    },
+    "Les deux" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Both"
+          }
+        }
+      }
+    },
+    "Liaison avec la lampe" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Link with the Lamp"
+          }
+        }
+      }
+    },
+    "Libérer le port" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release Port"
+          }
+        }
+      }
+    },
+    "Libérer le port ?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release the Port?"
+          }
+        }
+      }
+    },
+    "Ligne ancienne : produite avant la réponse à json 1 (tampon de la carte à l'ouverture)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stale line: produced before the response to json 1 (board buffer at opening)."
+          }
+        }
+      }
+    },
+    "Lignes de l'hôte refusées" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Host lines refused"
+          }
+        }
+      }
+    },
+    "Lignes machine · texte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Machine lines · text"
+          }
+        }
+      }
+    },
+    "Livraisons" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deliveries"
+          }
+        }
+      }
+    },
+    "Logs système" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System logs"
+          }
+        }
+      }
+    },
+    "Luminosité" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brightness"
+          }
+        }
+      }
+    },
+    "Luminosité (curseur Matter)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brightness (Matter Slider)"
+          }
+        }
+      }
+    },
+    "MAC" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MAC"
+          }
+        }
+      }
+    },
+    "MAX_RT · délais · FIFO" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MAX_RT · timeouts · FIFO"
+          }
+        }
+      }
+    },
+    "Marche" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Power"
+          }
+        }
+      }
+    },
+    "Marche et lampes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Power and Lamps"
+          }
+        }
+      }
+    },
+    "Matter / Thread" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter / Thread"
+          }
+        }
+      }
+    },
+    "Matériel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hardware"
+          }
+        }
+      }
+    },
+    "Mise en service" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Commissioning"
+          }
+        }
+      }
+    },
+    "Mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode"
+          }
+        }
+      }
+    },
+    "Mode démo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo Mode"
+          }
+        }
+      }
+    },
+    "Mode démo (sans matériel)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo Mode (No Hardware)"
+          }
+        }
+      }
+    },
+    "Mode démo : une carte simulée rejoue demo-halo.jsonl (exemples de la spécification). Les commandes reçoivent des réponses simulées." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Demo mode: a simulated board replays demo-halo.jsonl (examples from the specification). Commands get simulated responses."
+          }
+        }
+      }
+    },
+    "Module" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Module"
+          }
+        }
+      }
+    },
+    "Module radio BM5602" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BM5602 Radio Module"
+          }
+        }
+      }
+    },
+    "Mémoire de sélection" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selection memory"
+          }
+        }
+      }
+    },
+    "Ni trames ni log dans ce build" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neither trames nor log in this build"
+          }
+        }
+      }
+    },
+    "Niveau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Level"
+          }
+        }
+      }
+    },
+    "Niveau %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Level %lld"
+          }
+        }
+      }
+    },
+    "Nouvelle source : %@. États, journal des trames et courbes remis à zéro." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New source: %@. States, frame log and charts reset."
+          }
+        }
+      }
+    },
+    "Ouvert · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open · %@"
+          }
+        }
+      }
+    },
+    "Ouverture…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening…"
+          }
+        }
+      }
+    },
+    "PAN · puissance" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PAN · power"
+          }
+        }
+      }
+    },
+    "PCF : longueur · PID · NO_ACK" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PCF: length · PID · NO_ACK"
+          }
+        }
+      }
+    },
+    "Paquets émis / accusés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Packets sent / acked"
+          }
+        }
+      }
+    },
+    "Pas de session machine : les commandes sont désactivées." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No machine session: controls are disabled."
+          }
+        }
+      }
+    },
+    "Pas de session machine : « %@ » n'est pas envoyée." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No machine session: “%@” was not sent."
+          }
+        }
+      }
+    },
+    "Pas de voyant d'état dans ce build (capacité led absente)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No status LED in this build (led capability missing)."
+          }
+        }
+      }
+    },
+    "Pas encore de compteurs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Counters Yet"
+          }
+        }
+      }
+    },
+    "Passages de reprise" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resumption passes"
+          }
+        }
+      }
+    },
+    "Pertes (trous de n) · reculs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Losses (gaps in n) · rollbacks"
+          }
+        }
+      }
+    },
+    "Pile de loop() jamais utilisée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "loop() stack never used"
+          }
+        }
+      }
+    },
+    "Pilote" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Driver"
+          }
+        }
+      }
+    },
+    "Plafond" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cap"
+          }
+        }
+      }
+    },
+    "Plus grand bloc" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Largest block"
+          }
+        }
+      }
+    },
+    "Plus long tour de loop()" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Longest loop() pass"
+          }
+        }
+      }
+    },
+    "Port fermé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port closed"
+          }
+        }
+      }
+    },
+    "Port libéré (json 0) : flasher est possible" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port released (json 0): ready to flash"
+          }
+        }
+      }
+    },
+    "Port libéré : json 0 envoyé, port fermé. Flasher est possible ; « Reconnecter » pour reprendre." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port released: json 0 sent, port closed. Ready to flash; click “Reconnect” to resume."
+          }
+        }
+      }
+    },
+    "Port libéré : port fermé. Flasher est possible ; « Reconnecter » pour reprendre." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port released: port closed. Ready to flash; click “Reconnect” to resume."
+          }
+        }
+      }
+    },
+    "Port ouvert : %@ (DTR = RTS = 0)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Port open: %@ (DTR = RTS = 0)."
+          }
+        }
+      }
+    },
+    "Ports série" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serial Ports"
+          }
+        }
+      }
+    },
+    "Produit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Product"
+          }
+        }
+      }
+    },
+    "Protocole" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Protocol"
+          }
+        }
+      }
+    },
+    "Puce · IDF · Arduino" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chip · IDF · Arduino"
+          }
+        }
+      }
+    },
+    "Périodes état · compteurs · réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Periods state · counters · network"
+          }
+        }
+      }
+    },
+    "Quartz · calibration" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crystal · calibration"
+          }
+        }
+      }
+    },
+    "RSSI du parent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parent RSSI"
+          }
+        }
+      }
+    },
+    "RSSI parent (dBm)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parent RSSI (dBm)"
+          }
+        }
+      }
+    },
+    "RT2 · IRQ1 · STATUS" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RT2 · IRQ1 · STATUS"
+          }
+        }
+      }
+    },
+    "Radio seulement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radio Only"
+          }
+        }
+      }
+    },
+    "Rafraîchir" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh"
+          }
+        }
+      }
+    },
+    "Rafraîchir l'état (json etat)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh State (json etat)"
+          }
+        }
+      }
+    },
+    "Rang" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Level"
+          }
+        }
+      }
+    },
+    "Rechercher (charge, type, texte)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search (payload, type, text)"
+          }
+        }
+      }
+    },
+    "Reconnecter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reconnect"
+          }
+        }
+      }
+    },
+    "Redémarrage de la carte détecté (boot %@ → %@) : états vidés, nouveau segment de courbes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Board restart detected (boot %1$@ → %2$@): states cleared, new chart segment."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redémarrage de la carte détecté (boot %1$@ → %2$@) : états vidés, nouveau segment de courbes."
+          }
+        }
+      }
+    },
+    "Refus en réception" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reception Refusals"
+          }
+        }
+      }
+    },
+    "Relancer l'app pour mettre aussi les menus dans cette langue." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Relaunch the app to switch the menus to this language too."
+          }
+        }
+      }
+    },
+    "Relances" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restarts"
+          }
+        }
+      }
+    },
+    "Relances automatiques" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic restarts"
+          }
+        }
+      }
+    },
+    "Relances du module" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Module Restarts"
+          }
+        }
+      }
+    },
+    "Relances sans guérison" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restarts without recovery"
+          }
+        }
+      }
+    },
+    "Remet à zéro les blocs pilote et radio de la carte (relances comprises). Les courbes ouvrent un nouveau segment." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resets the board's driver and radio blocks (restarts included). The charts start a new segment."
+          }
+        }
+      }
+    },
+    "Remettre les statistiques à zéro ?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Statistics?"
+          }
+        }
+      }
+    },
+    "Remise à zéro" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset"
+          }
+        }
+      }
+    },
+    "Reprendre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume"
+          }
+        }
+      }
+    },
+    "Reprendre rx/tx (json trames 1)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume rx/tx (json trames 1)"
+          }
+        }
+      }
+    },
+    "Repris (pont · pile)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resumed (bridge · stack)"
+          }
+        }
+      }
+    },
+    "Reprise automatique" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic resumption"
+          }
+        }
+      }
+    },
+    "Repères du banc : accusé ~1600-1720 µs, IRQ1 2E, RT2 00 ; MAX_RT ~11470 µs, IRQ1 1E, RT2 10." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bench reference: ack ~1600-1720 µs, IRQ1 2E, RT2 00; MAX_RT ~11470 µs, IRQ1 1E, RT2 10."
+          }
+        }
+      }
+    },
+    "Resynchroniser" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resync"
+          }
+        }
+      }
+    },
+    "Reçues (rx)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Received (rx)"
+          }
+        }
+      }
+    },
+    "Réarmements hors RX (10 s)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-arms outside RX (10 s)"
+          }
+        }
+      }
+    },
+    "Réessayer json 1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry json 1"
+          }
+        }
+      }
+    },
+    "Réponses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Responses"
+          }
+        }
+      }
+    },
+    "Résultat" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Result"
+          }
+        }
+      }
+    },
+    "SRP" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SRP"
+          }
+        }
+      }
+    },
+    "Sans accusés de la lampe" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Without lamp acks"
+          }
+        }
+      }
+    },
+    "Santé Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter Health"
+          }
+        }
+      }
+    },
+    "Santé du lien série" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serial Link Health"
+          }
+        }
+      }
+    },
+    "Sauvés (NVS)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved (NVS)"
+          }
+        }
+      }
+    },
+    "Sens décodé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decoded Meaning"
+          }
+        }
+      }
+    },
+    "Session" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session"
+          }
+        }
+      }
+    },
+    "Session (ping, json 1)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session (ping, json 1)"
+          }
+        }
+      }
+    },
+    "Session, log" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session, log"
+          }
+        }
+      }
+    },
+    "Seuil" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threshold"
+          }
+        }
+      }
+    },
+    "Silences · réouvertures · sans réponse" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Silences · reopenings · no response"
+          }
+        }
+      }
+    },
+    "Source" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Source"
+          }
+        }
+      }
+    },
+    "Statistiques de la carte (lampe stats raz)…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Board Statistics (lampe stats raz)…"
+          }
+        }
+      }
+    },
+    "Supervision" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monitoring"
+          }
+        }
+      }
+    },
+    "Série" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serial number"
+          }
+        }
+      }
+    },
+    "Tableau de bord" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dashboard"
+          }
+        }
+      }
+    },
+    "Tas libre · minimum" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free heap · minimum"
+          }
+        }
+      }
+    },
+    "Taux de perte TX" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TX Loss Rate"
+          }
+        }
+      }
+    },
+    "Température" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temperature"
+          }
+        }
+      }
+    },
+    "Test du voyant en cours" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Status LED test running"
+          }
+        }
+      }
+    },
+    "Tester le voyant" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test LED"
+          }
+        }
+      }
+    },
+    "Thread et Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread and Matter"
+          }
+        }
+      }
+    },
+    "Total · EN PANNE" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total · DOWN"
+          }
+        }
+      }
+    },
+    "Tours ratés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed rounds"
+          }
+        }
+      }
+    },
+    "Tout" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        }
+      }
+    },
+    "Trames en direct" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Frames"
+          }
+        }
+      }
+    },
+    "Trames entendues (CRC faux)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frames heard (bad CRC)"
+          }
+        }
+      }
+    },
+    "Tranche · charge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slice · payload"
+          }
+        }
+      }
+    },
+    "Tranches actives" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active Slices"
+          }
+        }
+      }
+    },
+    "Transport" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transport"
+          }
+        }
+      }
+    },
+    "Transport fermé : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transport closed: %@"
+          }
+        }
+      }
+    },
+    "Type" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type"
+          }
+        }
+      }
+    },
+    "Types (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Types (%lld)"
+          }
+        }
+      }
+    },
+    "Types inconnus · invalides" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown types · invalid"
+          }
+        }
+      }
+    },
+    "Une différence négative, un raz ou un redémarrage ouvre un nouveau segment." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A negative difference, a raz or a restart starts a new segment."
+          }
+        }
+      }
+    },
+    "Une lampe :" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One lamp:"
+          }
+        }
+      }
+    },
+    "Verdict" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verdict"
+          }
+        }
+      }
+    },
+    "Versions et identité" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versions and Identity"
+          }
+        }
+      }
+    },
+    "Vider" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        }
+      }
+    },
+    "Vider le journal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Log"
+          }
+        }
+      }
+    },
+    "Voyant" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Status LED"
+          }
+        }
+      }
+    },
+    "abandon" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "abandoned"
+          }
+        }
+      }
+    },
+    "abonnés" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "subscribers"
+          }
+        }
+      }
+    },
+    "absent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "missing"
+          }
+        }
+      }
+    },
+    "abîmée : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "damaged: %@"
+          }
+        }
+      }
+    },
+    "accès exclusif (TIOCEXCL)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "exclusive access (TIOCEXCL)"
+          }
+        }
+      }
+    },
+    "actif(s)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "active"
+          }
+        }
+      }
+    },
+    "affichage figé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "display frozen"
+          }
+        }
+      }
+    },
+    "allumée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "on"
+          }
+        }
+      }
+    },
+    "aucun accusé depuis le démarrage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no ack since startup"
+          }
+        }
+      }
+    },
+    "aucune (Matter, télécommande...)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "none (Matter, remote...)"
+          }
+        }
+      }
+    },
+    "bruit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "noise"
+          }
+        }
+      }
+    },
+    "brut" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "raw"
+          }
+        }
+      }
+    },
+    "chaud" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "warm"
+          }
+        }
+      }
+    },
+    "chemin %@ : /dev/cu.* attendu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "path %@: /dev/cu.* expected"
+          }
+        }
+      }
+    },
+    "chronologie vide" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "empty timeline"
+          }
+        }
+      }
+    },
+    "commande de la CLI (ex. lampe stats, help)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CLI command (e.g. lampe stats, help)"
+          }
+        }
+      }
+    },
+    "configuré" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "configured"
+          }
+        }
+      }
+    },
+    "connecté" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "connected"
+          }
+        }
+      }
+    },
+    "cru" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "believed"
+          }
+        }
+      }
+    },
+    "cumul" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cumulative"
+          }
+        }
+      }
+    },
+    "dans une fenêtre d'accusé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "in an ack window"
+          }
+        }
+      }
+    },
+    "demo-halo.jsonl absent du paquet de l'app" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "demo-halo.jsonl missing from the app bundle"
+          }
+        }
+      }
+    },
+    "dernier accusé il y a %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "last ack %@ ago"
+          }
+        }
+      }
+    },
+    "dernier n° %@, %lld entendus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "last #%1$@, %2$lld heard"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "dernier n° %1$@, %2$lld entendus"
+          }
+        }
+      }
+    },
+    "différée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "deferred"
+          }
+        }
+      }
+    },
+    "débit (cfsetspeed)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "baud rate (cfsetspeed)"
+          }
+        }
+      }
+    },
+    "déconnecté" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "disconnected"
+          }
+        }
+      }
+    },
+    "délais" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "timeouts"
+          }
+        }
+      }
+    },
+    "démo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "demo"
+          }
+        }
+      }
+    },
+    "démo arrêtée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "demo stopped"
+          }
+        }
+      }
+    },
+    "en service" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "commissioned"
+          }
+        }
+      }
+    },
+    "essai dans %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "retry in %@"
+          }
+        }
+      }
+    },
+    "flux rx/tx coupé (json trames 0)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rx/tx stream off (json trames 0)"
+          }
+        }
+      }
+    },
+    "flux terminé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "stream ended"
+          }
+        }
+      }
+    },
+    "froid" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cold"
+          }
+        }
+      }
+    },
+    "garde" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "guard"
+          }
+        }
+      }
+    },
+    "hors RX" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "outside RX"
+          }
+        }
+      }
+    },
+    "inconnu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "unknown"
+          }
+        }
+      }
+    },
+    "json 0 puis fermeture du port, pour flasher" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "json 0, then close the port so you can flash"
+          }
+        }
+      }
+    },
+    "lampe auto : refusé lampe éteinte. Pas de réémission automatique (non idempotent)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lampe auto: refused while the lamp is off. Never resent automatically (not idempotent)."
+          }
+        }
+      }
+    },
+    "lampe mode avant|arriere|deux (allume aussi)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lampe mode avant|arriere|deux (also turns on)"
+          }
+        }
+      }
+    },
+    "lampe stats raz" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lampe stats raz"
+          }
+        }
+      }
+    },
+    "lampe sync : tout est renvoyé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lampe sync: everything is sent again"
+          }
+        }
+      }
+    },
+    "lecture de DTR et RTS (TIOCMGET)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "reading DTR and RTS (TIOCMGET)"
+          }
+        }
+      }
+    },
+    "lecture des réglages (tcgetattr)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "reading settings (tcgetattr)"
+          }
+        }
+      }
+    },
+    "lecture impossible : %@ (ré-énumération USB ?)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cannot read: %@ (USB re-enumeration?)"
+          }
+        }
+      }
+    },
+    "ligne illisible : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "unreadable line: %@"
+          }
+        }
+      }
+    },
+    "motif pas encore reçu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pattern not received yet"
+          }
+        }
+      }
+    },
+    "niveau Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter level"
+          }
+        }
+      }
+    },
+    "non" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no"
+          }
+        }
+      }
+    },
+    "non configuré" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "not configured"
+          }
+        }
+      }
+    },
+    "oui" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "yes"
+          }
+        }
+      }
+    },
+    "ouverture de %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "opening %@"
+          }
+        }
+      }
+    },
+    "par fenêtre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "per window"
+          }
+        }
+      }
+    },
+    "par min" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "per min"
+          }
+        }
+      }
+    },
+    "pas en service" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "not commissioned"
+          }
+        }
+      }
+    },
+    "perdu (L3)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lost (L3)"
+          }
+        }
+      }
+    },
+    "port fermé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port closed"
+          }
+        }
+      }
+    },
+    "port fermé (EOF) : la carte a peut-être redémarré" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port closed (EOF): the board may have restarted"
+          }
+        }
+      }
+    },
+    "port fermé par l'app" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port closed by the app"
+          }
+        }
+      }
+    },
+    "port revenu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port is back"
+          }
+        }
+      }
+    },
+    "présent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "present"
+          }
+        }
+      }
+    },
+    "relances.* cumulés, empilés par cause ; traits : événements relance et module." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cumulative relances.*, stacked by cause; lines: relance and module events."
+          }
+        }
+      }
+    },
+    "reprise en cours" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "resumption in progress"
+          }
+        }
+      }
+    },
+    "reçu il y a %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "received %@ ago"
+          }
+        }
+      }
+    },
+    "rien" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "nothing"
+          }
+        }
+      }
+    },
+    "réglages (tcsetattr)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "settings (tcsetattr)"
+          }
+        }
+      }
+    },
+    "réussie" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "succeeded"
+          }
+        }
+      }
+    },
+    "seuil de surdité" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "deafness threshold"
+          }
+        }
+      }
+    },
+    "sourde" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "deaf"
+          }
+        }
+      }
+    },
+    "version %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "version %@"
+          }
+        }
+      }
+    },
+    "version %lld inconnue" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "unknown version %lld"
+          }
+        }
+      }
+    },
+    "voyant inconnu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "unknown status LED"
+          }
+        }
+      }
+    },
+    "vérif" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "check"
+          }
+        }
+      }
+    },
+    "· %lld %% · brut %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %1$lld %% · raw %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· %1$lld %% · brut %2$@"
+          }
+        }
+      }
+    },
+    "· ~%lld K · brute %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· ~%1$lld K · raw %2$lld"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· ~%1$lld K · brute %2$lld"
+          }
+        }
+      }
+    },
+    "À livrer :" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To deliver:"
+          }
+        }
+      }
+    },
+    "Âge des valeurs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Age of values"
+          }
+        }
+      }
+    },
+    "Échecs seulement" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failures only"
+          }
+        }
+      }
+    },
+    "Écoute de fond" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background listening"
+          }
+        }
+      }
+    },
+    "Écoute de fond active (lampe ecoute 1)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Listening On (lampe ecoute 1)"
+          }
+        }
+      }
+    },
+    "Écoute de fond coupée (lampe ecoute 0)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Listening Off (lampe ecoute 0)"
+          }
+        }
+      }
+    },
+    "Émises (tx)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent (tx)"
+          }
+        }
+      }
+    },
+    "Éteindre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off"
+          }
+        }
+      }
+    },
+    "échec" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "failed"
+          }
+        }
+      }
+    },
+    "écoute passive" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "passive listening"
+          }
+        }
+      }
+    },
+    "écriture impossible : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "cannot write: %@"
+          }
+        }
+      }
+    },
+    "éteinte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "off"
+          }
+        }
+      }
+    },
+    "Δ crc_faux / Δ trames (%%) ; trait : deluge_pct (%lld %%)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Δ crc_faux / Δ frames (%%); line: deluge_pct (%lld %%)."
+          }
+        }
+      }
+    },
+    "Δ radio.rearm_hors_rx (surdité), Δ tx.fifo, Δ garde.refus par fenêtre ; trait : sourd_hors_rx (%lld sur 10 s) ramené à la fenêtre." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Δ radio.rearm_hors_rx (deafness), Δ tx.fifo, Δ garde.refus per window; line: sourd_hors_rx (%lld per 10 s) scaled to the window."
+          }
+        }
+      }
+    },
+    "Δ rx.crc_faux par minute ; trait : seuil du déluge (%lld trames dont %lld %% de CRC faux sur %@, ramené à la minute)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Δ rx.crc_faux per minute; line: flood threshold (%1$lld frames with %2$lld %% bad CRC over %3$@, scaled to one minute)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Δ rx.crc_faux par minute ; trait : seuil du déluge (%1$lld trames dont %2$lld %% de CRC faux sur %3$@, ramené à la minute)."
+          }
+        }
+      }
+    },
+    "Δ tranches.abandons par fenêtre de %lld s ; traits : livraisons abandonnées." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Δ tranches.abandons per %lld s window; lines: abandoned deliveries."
+          }
+        }
+      }
+    },
+    "‹ id=%@ « %@ » : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ “%2$@”: %3$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ « %2$@ » : %3$@"
+          }
+        }
+      }
+    },
+    "‹ id=%@ « %@ » : sans réponse sous 3 s (pas de réémission)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ “%2$@”: no response within 3 s (not resent)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ « %2$@ » : sans réponse sous 3 s (pas de réémission)"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

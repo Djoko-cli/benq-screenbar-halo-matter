@@ -18,6 +18,11 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
+    # Textes : catalogues Localizable.xcstrings (francais, langue de developpement, et anglais),
+    # cles extraites par le compilateur.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: NO
 targets:
   HaloProtocole:
     type: framework

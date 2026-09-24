@@ -57,19 +57,19 @@ final class TransportSerie: Transport {
                 continue
             }
             if n == 0 {
-                terminer("port fermé (EOF) : la carte a peut-être redémarré")
+                terminer(tr("port fermé (EOF) : la carte a peut-être redémarré"))
                 return
             }
             let code = errno
             if code == EAGAIN || code == EWOULDBLOCK { return }
             if code == EINTR { continue }
-            terminer("lecture impossible : \(String(cString: strerror(code))) (ré-énumération USB ?)")
+            terminer(tr("lecture impossible : \(String(cString: strerror(code))) (ré-énumération USB ?)"))
             return
         }
     }
 
     func envoyer(_ donnees: Data) throws {
-        guard etat.withLock({ $0.fd }) >= 0 else { throw ErreurTransport("port fermé") }
+        guard etat.withLock({ $0.fd }) >= 0 else { throw ErreurTransport(tr("port fermé")) }
         file.async { [weak self] in self?.ecrire(donnees) }
     }
 
@@ -91,7 +91,7 @@ final class TransportSerie: Transport {
                 usleep(2000)
                 continue
             }
-            terminer("écriture impossible : \(String(cString: strerror(code)))")
+            terminer(tr("écriture impossible : \(String(cString: strerror(code)))"))
             return
         }
     }
@@ -110,7 +110,7 @@ final class TransportSerie: Transport {
     }
 
     func fermer() {
-        file.async { [weak self] in self?.terminer("port fermé par l'app") }
+        file.async { [weak self] in self?.terminer(tr("port fermé par l'app")) }
     }
 
     /// Le descripteur est `O_NONBLOCK` : a la fermeture, le tty jette ce qui
@@ -120,7 +120,7 @@ final class TransportSerie: Transport {
         let travail: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             self.vider(delaiMax: .milliseconds(300))
-            self.terminer("port fermé par l'app")
+            self.terminer(tr("port fermé par l'app"))
         }
         if synchrone { file.sync(execute: travail) } else { file.async(execute: travail) }
     }
