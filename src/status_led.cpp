@@ -8,14 +8,19 @@ namespace statusled {
 
 // Orange : le vert d'une WS2812 parait bien plus fort que son rouge.
 static constexpr Rgb kBlue{0, 0, kMax}, kOrange{kMax, kMax / 4, 0}, kGreen{0, kMax, 0}, kRed{kMax, 0, 0};
+// Violet : bleu plein, moitie de rouge (le magenta pur se confond avec le rouge
+// a cette intensite). Blanc de l'eclat : bien plus vif que la lueur (8).
+static constexpr Rgb kViolet{kMax / 2, 0, kMax}, kWhite{kMax, kMax, kMax};
 
-// Ordre du tableau du README ; les motifs bornes (vert, rouge x3) finissent sur
-// du noir, qui separe les pas. Le rouge fixe suit la lueur (noir a sa fin) et
-// precede le vert : colle au rouge x3 ou au rouge de depart de l'arc-en-ciel,
-// il ne s'en distinguerait pas.
+// Ordre du tableau du README ; les motifs bornes (vert, rouge x3, eclat blanc)
+// finissent sur du noir, qui separe les pas. Le rouge fixe suit la lueur (noir
+// a sa fin) et precede le vert : colle au rouge x3 ou au rouge de depart de
+// l'arc-en-ciel, il ne s'en distinguerait pas. Le motif du bouton tenu 8 s
+// dure 2000 ms, un multiple de son tour (400 ms) : il finit sur un noir.
 const TestStep kTest[kTestSteps] = {
-    {Pattern::Unpaired, 3000},  {Pattern::Offline, 4000},     {Pattern::Online, 2000},   {Pattern::RadioFault, 2000},
-    {Pattern::Delivered, 1000}, {Pattern::Unreachable, 2000}, {Pattern::Identify, 4000},
+    {Pattern::Unpaired, 3000},    {Pattern::Offline, 4000},      {Pattern::Online, 2000},
+    {Pattern::RadioFault, 2000},  {Pattern::Delivered, 1000},    {Pattern::Unreachable, 2000},
+    {Pattern::ButtonReboot, 1000}, {Pattern::ButtonUnpair, 2000}, {Pattern::Identify, 4000},
 };
 
 uint32_t testTotalMs() {
@@ -41,6 +46,13 @@ Rgb render(Pattern p, uint32_t t) {
       const uint32_t phase = t / kStepMs * kStepMs % kRainbowMs;
       return wheel((uint16_t)(phase * 768 / kRainbowMs));
     }
+    case Pattern::ButtonUnpair:
+      switch ((t / kUnpairStepMs) % 4) {
+        case 0: return kRed;
+        case 2: return kViolet;
+        default: return Rgb{};
+      }
+    case Pattern::ButtonReboot: return t < kRebootFlashMs ? kWhite : Rgb{};
     case Pattern::Unreachable: return t < kUnreachableMs && (t / kRedHalfMs) % 2 == 0 ? kRed : Rgb{};
     case Pattern::RadioFault: return kRed;  // fixe : le seul motif qui ne clignote pas
     case Pattern::Delivered: return t < kDeliveredMs ? kGreen : Rgb{};
@@ -62,12 +74,15 @@ Rgb render(Pattern p, uint32_t t) {
 bool renderMono(Pattern p, uint32_t t) {
   if (p == Pattern::Online) return false;  // une LED simple ne sait pas luire doucement
   if (p == Pattern::Identify) return (t / kIdentifyMonoHalfMs) % 2 == 0;
+  if (p == Pattern::ButtonUnpair) return (t / kUnpairMonoHalfMs) % 2 == 0;
   return render(p, t) != Rgb{};
 }
 
 const char *patternName(Pattern p) {
   switch (p) {
     case Pattern::Identify: return "identification (arc-en-ciel)";
+    case Pattern::ButtonUnpair: return "bouton tenu 8 s : relacher pour desappairer (rouge/violet rapide)";
+    case Pattern::ButtonReboot: return "bouton, appui court : redemarrage (eclat blanc)";
     case Pattern::Unreachable: return "lampe injoignable (rouge x3)";
     case Pattern::RadioFault: return "module radio en panne (rouge fixe)";
     case Pattern::Delivered: return "consigne livree (eclat vert)";
@@ -81,6 +96,8 @@ const char *patternName(Pattern p) {
 const char *patternCode(Pattern p) {
   switch (p) {
     case Pattern::Identify: return "identification";
+    case Pattern::ButtonUnpair: return "desappairage";
+    case Pattern::ButtonReboot: return "redemarrage";
     case Pattern::Unreachable: return "injoignable";
     case Pattern::RadioFault: return "panne_radio";
     case Pattern::Delivered: return "livree";
@@ -117,6 +134,12 @@ void Logic::setFault(bool on, uint32_t now) {
   fault_ = on;
 }
 
+void Logic::setButton(Button b, uint32_t now) {
+  if (b == button_) return;
+  button_ = b;
+  buttonAt_ = now;
+}
+
 void Logic::startTest(uint32_t now) {
   testing_ = true;
   testAt_ = now;
@@ -132,6 +155,11 @@ Pattern Logic::pick(uint32_t now, uint32_t &t) {
   if (identify_) {
     t = now - identAt_;
     return Pattern::Identify;
+  }
+  // Le bouton passe avant 'led test' : c'est une action de l'utilisateur.
+  if (button_ != Button::None) {
+    t = now - buttonAt_;
+    return button_ == Button::Unpair ? Pattern::ButtonUnpair : Pattern::ButtonReboot;
   }
   if (testing_) {
     uint32_t e = now - testAt_;
@@ -197,6 +225,7 @@ uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now) {
 #include <Arduino.h>
 #include <string.h>
 
+#include "boot_button.h"
 #include "config.h"
 #include "halo1_lamp.h"
 #ifndef DIAG_ONLY
@@ -288,6 +317,12 @@ void statusLedPoll() {
   }
   sLed.setIdentify(matterIdentifying(), now);
   sLed.setFault(lamp.moduleFault(), now);
+  switch (bootButtonPhase()) {
+    case bootbtn::Phase::Armed:
+    case bootbtn::Phase::Unpair: sLed.setButton(Button::Unpair, now); break;
+    case bootbtn::Phase::Reboot: sLed.setButton(Button::Reboot, now); break;
+    default: sLed.setButton(Button::None, now); break;
+  }
   const uint32_t delivered = lamp.deliveredCount(), giveUps = lamp.giveUpCount();
   if (delivered != sSeenDelivered) {
     sSeenDelivered = delivered;

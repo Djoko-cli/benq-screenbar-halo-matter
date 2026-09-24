@@ -1,7 +1,8 @@
 #!/bin/sh
 # Tests hote du protocole Halo 1 (src/halo1_proto.*, src/halo1_map.*), de la
 # surveillance du BM5602 (src/halo1_watch.*), de la logique de la LED d'etat
-# (src/status_led.*, sans ARDUINO) et des briques du protocole JSON
+# (src/status_led.*, sans ARDUINO), du bouton BOOT (src/boot_button.*, sans
+# ARDUINO) et des briques du protocole JSON
 # (src/json_out.*), sans carte. Les messages JSON produits par les tests sont
 # ensuite verifies par tools/json_check.py, comme les exemples de
 # docs/PROTOCOLE-JSON.md.
@@ -13,7 +14,8 @@ OUT="${TMPDIR:-/tmp}"
 # ferait pas sortir le script (une compilation ratee passerait inapercue).
 rm -f "$OUT/test_halo1" "$OUT/test_json" "$OUT/test_json_lignes.txt"
 clang++ -std=c++17 -Wall -Wextra -Werror -Isrc \
-  src/halo1_proto.cpp src/halo1_map.cpp src/halo1_watch.cpp src/status_led.cpp tools/host_tests/test_halo1.cpp \
+  src/halo1_proto.cpp src/halo1_map.cpp src/halo1_watch.cpp src/status_led.cpp src/boot_button.cpp \
+  tools/host_tests/test_halo1.cpp \
   -o "$OUT/test_halo1"
 "$OUT/test_halo1"
 clang++ -std=c++17 -Wall -Wextra -Werror -Isrc \

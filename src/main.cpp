@@ -25,6 +25,7 @@
 #endif
 #include <sdkconfig.h>
 
+#include "boot_button.h"
 #include "cli.h"
 #include "config.h"
 #include "halo.h"
@@ -67,30 +68,6 @@ void setChipLogging(bool on) {
   for (const char *tag : {"chip[DL]", "chip[SVR]", "chip[DIS]", "wifi"}) esp_log_level_set(tag, level);
 }
 
-// Appui long sur le bouton BOOT : retire toutes les fabriques Matter pour
-// pouvoir re-appairer l'accessoire de zero.
-static void decommissionButton() {
-  static uint32_t pressedAt = 0;
-  bool pressed = digitalRead(PIN_DECOMMISSION_BTN) == LOW;
-
-  if (!pressed) {
-    pressedAt = 0;
-    return;
-  }
-  if (!pressedAt) {
-    pressedAt = millis();
-    return;
-  }
-  if (millis() - pressedAt >= DECOMMISSION_HOLD_MS) {
-    pressedAt = 0;
-    Serial.println();
-    Serial.println("Bouton maintenu : retrait des fabriques Matter...");
-#ifndef DIAG_ONLY
-    matterDecommissionNow();
-#endif
-  }
-}
-
 // Sur l'USB natif du C6, un redemarrage fait re-enumerer le port et le moniteur
 // ne se rattache pas : une panique passe donc inapercue, sans meme un message.
 // Cette cause reste lisible pendant toute la session, d'ou la commande 'cause'.
@@ -128,7 +105,9 @@ void setup() {
   jsonBegin();
 
   statusLedBegin();  // WS2812 au noir, IO15 en entree (bogue B9)
-  pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
+  // Bouton BOOT (redemarrage, desappairage) : releve des le premier tour de
+  // loop() ; tenu a ce moment, il est ignore jusqu'a son relachement.
+  bootButtonBegin();
 
   // Tant que le noeud n'est pas mis en service, la pile Matter repete une
   // erreur reseau toutes les 5 s. C'est normal (pas encore d'identifiants
@@ -212,8 +191,10 @@ void loop() {
   // Apres toute consigne (tick, Matter, CLI) et avant la LED : la livraison
   // precede l'eclat vert ou rouge (docs/PROTOCOLE-JSON.md, 12.2).
   jsonPoll();
+  // Avant la LED, qui montre sa phase ; peut redemarrer la carte (seulement
+  // bouton relache, broche relue haute : IO9 est une broche de strapping).
+  bootButtonPoll();
   statusLedPoll();
-  decommissionButton();
   // Cede la main a IDLE et aux taches moins prioritaires : tick() tourne ainsi
   // a ~1 kHz, assez pour l'ecoute passive.
   delay(1);

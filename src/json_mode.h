@@ -79,7 +79,7 @@ void jsonPendingId(uint32_t id);
 // machine (ou ligne deja en cours). Sinon, la remplir puis jsonEventSend().
 jsonp::Writer *jsonEventOpen(const char *type);
 void jsonEventSend();
-// Mode 'json log 1' : la ligne part en message log (src lampe|matter, niv
+// Mode 'json log 1' : la ligne part en message log (src lampe|matter|bouton, niv
 // notice|trace) ; true si elle est prise (emise, plafonnee ou perdue), false
 // pour l'afficher en texte comme avant.
 bool jsonLog(const char *src, const char *niv, const char *txt);

@@ -13,8 +13,13 @@
 //    - module radio en panne      : rouge fixe, tant que dure la panne (relances
 //      automatiques sans effet, ou module perdu : Halo1Lamp::moduleFault())
 //    - Identify (Apple Home)      : arc-en-ciel pendant toute l'identification
-//  Priorite : Identify > rouge x3 > rouge fixe > vert > etat du reseau. Les
-//  trois clignements restent visibles sur le rouge fixe (noir entre eux).
+//    - bouton BOOT tenu 8 s       : rouge, noir, violet, noir (100 ms chacun)
+//      tant qu'on tient, puis jusqu'au desappairage : "relache pour
+//      desappairer" (src/boot_button.h)
+//    - bouton BOOT, appui court   : eclat blanc (150 ms), noir, redemarrage
+//  Priorite : Identify > bouton > rouge x3 > rouge fixe > vert > etat du
+//  reseau ('led test' passe sous le bouton). Les trois clignements restent
+//  visibles sur le rouge fixe (noir entre eux).
 //  Intensite basse (elle est sous un bureau) : 24/255 au plus par canal, 8/255
 //  pour la lueur.
 //
@@ -40,8 +45,22 @@ inline bool operator!=(Rgb a, Rgb b) { return !(a == b); }
 
 enum class Net : uint8_t { Unpaired, Offline, Online };
 
-// Motifs, du plus prioritaire au moins prioritaire.
-enum class Pattern : uint8_t { Identify, Unreachable, RadioFault, Delivered, Unpaired, Offline, Online };
+// Motifs, du plus prioritaire au moins prioritaire. ButtonUnpair et
+// ButtonReboot (bouton BOOT) ne coexistent jamais.
+enum class Pattern : uint8_t {
+  Identify,
+  ButtonUnpair,
+  ButtonReboot,
+  Unreachable,
+  RadioFault,
+  Delivered,
+  Unpaired,
+  Offline,
+  Online
+};
+
+// Ce que le bouton BOOT demande a la LED (bootbtn::Phase, cote carte).
+enum class Button : uint8_t { None, Unpair, Reboot };
 
 constexpr uint8_t kMax = 24;                 // plafond par canal
 constexpr uint8_t kGlowMax = 8;              // sommet de la lueur blanche
@@ -56,18 +75,22 @@ constexpr uint32_t kUnreachableMs = kRedBlinks * 2 * kRedHalfMs;
 constexpr uint32_t kRainbowMs = 2000;        // un tour de roue
 constexpr uint32_t kStepMs = 40;             // pas de l'arc-en-ciel (25 images/s)
 constexpr uint32_t kIdentifyMonoHalfMs = 100;  // LED simple : clignotement rapide
+constexpr uint32_t kUnpairStepMs = 100;        // bouton tenu 8 s : rouge, noir, violet, noir...
+constexpr uint32_t kUnpairMonoHalfMs = 50;     // ... LED simple : clignotement tres rapide
+constexpr uint32_t kRebootFlashMs = 150;       // appui court : eclat blanc avant le redemarrage
 
 // Couleur d'un motif, t ms apres son depart. Les motifs bornes (vert, rouge)
 // rendent du noir une fois finis.
 Rgb render(Pattern p, uint32_t t);
-// Meme chose pour une LED simple : pas de lueur, clignotement rapide pour Identify.
+// Meme chose pour une LED simple : pas de lueur, clignotement rapide pour
+// Identify, tres rapide pour le bouton tenu 8 s.
 bool renderMono(Pattern p, uint32_t t);
 // Roue des couleurs a l'intensite kMax : hue 0..767 (rouge, vert, bleu).
 Rgb wheel(uint16_t hue);
 const char *patternName(Pattern p);
 // Code du motif pour le protocole JSON (docs/PROTOCOLE-JSON.md, 7.9) :
-// identification, injoignable, panne_radio, livree, non_appaire, hors_reseau,
-// operationnel.
+// identification, desappairage, redemarrage, injoignable, panne_radio,
+// livree, non_appaire, hors_reseau, operationnel.
 const char *patternCode(Pattern p);
 
 // Sequence de banc ('led test') : chaque motif a tour de role.
@@ -75,7 +98,7 @@ struct TestStep {
   Pattern p;
   uint32_t ms;
 };
-constexpr uint8_t kTestSteps = 7;
+constexpr uint8_t kTestSteps = 9;
 extern const TestStep kTest[kTestSteps];
 uint32_t testTotalMs();
 
@@ -92,6 +115,7 @@ class Logic {
   void delivered(uint32_t now);                // eclat vert, relance s'il est en cours
   void unreachable(uint32_t now);              // trois clignements rouges, relances
   void setFault(bool on, uint32_t now);        // rouge fixe tant que le module radio est en panne
+  void setButton(Button b, uint32_t now);      // bouton BOOT ; le motif part du debut a chaque changement
   void startTest(uint32_t now);                // 'led test' : kTest, puis retour a la normale
   void stopTest() { testing_ = false; }
   bool testing() const { return testing_; }
@@ -102,8 +126,9 @@ class Logic {
  private:
   Pattern pick(uint32_t now, uint32_t &t);
   Net net_ = Net::Unpaired;
+  Button button_ = Button::None;
   bool identify_ = false, red_ = false, green_ = false, testing_ = false, fault_ = false;
-  uint32_t netAt_ = 0, identAt_ = 0, redAt_ = 0, greenAt_ = 0, testAt_ = 0, faultAt_ = 0;
+  uint32_t netAt_ = 0, identAt_ = 0, redAt_ = 0, greenAt_ = 0, testAt_ = 0, faultAt_ = 0, buttonAt_ = 0;
 };
 
 // --- Identify par TriggerEffect (matter_bridge.cpp) ------------------------
@@ -136,8 +161,9 @@ uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now);
 // passe en sortie, eteinte. Build diagnostic : IO15 en entree, et la WS2812 mise
 // au noir une seule fois (elle garde sa derniere couleur a travers un reset).
 void statusLedBegin();
-// A chaque tour de loop() : lit l'etat (reseau toutes les 200 ms, compteurs et
-// panne du module radio, Identify) et n'ecrit la LED que si sa couleur change.
+// A chaque tour de loop(), apres bootButtonPoll() : lit l'etat (reseau toutes
+// les 200 ms, compteurs et panne du module radio, Identify, bouton BOOT) et
+// n'ecrit la LED que si sa couleur change.
 void statusLedPoll();
 // Commande 'led [test|stop]'.
 void statusLedCommand(const char *arg);

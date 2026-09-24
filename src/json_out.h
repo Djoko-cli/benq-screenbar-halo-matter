@@ -24,7 +24,9 @@
 namespace jsonp {
 
 constexpr uint8_t kVersion = 1;         // v : version majeure
-constexpr uint8_t kRev = 0;             // hello.rev : revision mineure (ajouts)
+// hello.rev : revision mineure (ajouts). 1 : motifs led desappairage et
+// redemarrage, log src bouton (bouton BOOT).
+constexpr uint8_t kRev = 1;
 constexpr size_t kLineMax = 1024;       // RS et LF compris
 constexpr size_t kBudget = 896;         // pire cas vise par message (marge de 128 pour les ajouts)
 constexpr size_t kCmdMax = 127;         // ligne de l'hote, prefixe id= compris

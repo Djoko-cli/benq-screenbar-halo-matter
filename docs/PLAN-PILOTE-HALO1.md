@@ -849,7 +849,7 @@ Nos propres trames ne sont jamais entendues : un seul emetteur, en PTX pendant l
 Regles d'ecriture de `etat` :
 - l'echeance est a +10 s du dernier changement de l'etat cru, et jamais plus de 60 s apres le premier changement non sauvegarde ;
 - on n'ecrit qu'au repos (pas de tranche active), au moins 500 ms apres une emission, et seulement si le blob differe du dernier ecrit ;
-- ecriture immediate sur `reboot` et `lampe sauve`.
+- ecriture immediate sur `reboot`, `lampe sauve` et les actions du bouton BOOT (redemarrage, desappairage : C9).
 
 L'usure est de quelques dizaines d'entrees par jour, dans une partition de 20 Ko partagee avec Matter : negligeable.
 
@@ -1217,6 +1217,48 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 - Restent au banc : U1 a U10 (PROTOCOLE-JSON.md, section 11), captures
   verifiees par `python3 tools/json_check.py <capture>`.
 
+**C9 « Bouton BOOT : redemarrage et desappairage » (24/09/2026)**
+- Demande de Majid : dans le boitier imprime, seul BOOT (IO9, marque B) est
+  accessible, pas RST. Appui court (< 2 s) : eclat blanc puis redemarrage, au
+  relachement ; relache entre 2 et 8 s : annule ; tenu 8 s : rouge/violet
+  rapide (« relache pour desappairer »), puis au relachement retrait de
+  Matter (`matterDecommissionNow()`) et redemarrage. Remplace l'ancien appui
+  de 5 s, qui desappairait bouton encore enfonce.
+- Contrainte : IO9 est une broche de strapping. Basse au reset, le C6 demarre
+  en mode telechargement et reste inerte jusqu'a une coupure d'alimentation.
+  Aucune action avant le relachement vu (anti-rebond 30 ms) ET 100 ms de
+  releves hauts sans interruption ; `pinSettled()` relit encore la broche
+  100 ms juste avant `ESP.restart()` ou `matterDecommissionNow()` (abandon si
+  elle ne tient pas haute dans la seconde).
+- Fichiers : `boot_button.*` (machine pure `bootbtn::Machine`, testee sur
+  l'hote : seuils 1999/2000 et 7999/8000 ms, rebonds, tenu au demarrage,
+  trous de releves, retour a zero de millis(), proprietes sur releves
+  aleatoires), `status_led.*` (motifs `ButtonUnpair` et `ButtonReboot`, juste
+  sous Identify, au-dessus de `led test`), `main.cpp` (`bootButtonPoll()`
+  avant `statusLedPoll()`), `config.h` (`DECOMMISSION_HOLD_MS` retire),
+  protocole JSON rev 1 (motifs `desappairage`, `redemarrage`, `log` de `src`
+  `bouton`).
+- Etat du pilote sauve avant chaque redemarrage (`lamp.persistNow()`, comme
+  `reboot`). Build diagnostic : appui court = redemarrage, appui long
+  explique sur la console, sans rien faire.
+- Duree d'un appui = premier releve haut - premier releve bas ; l'armement a
+  8 s exige un releve encore bas a +7999 ms sans trou de releves de plus de
+  100 ms depuis le debut. Un trou de plus de 100 ms pendant l'appui ou a l'un
+  de ses fronts (loop() bloquee : outils de banc, relance du module) rend la
+  duree incertaine : appui ignore, sauf appui long deja arme.
+- **Fait le 24/09/2026**, sans rien flasher : builds thread, supermini et diag
+  sans avertissement, tests hote. Restent au banc, sur la carte dans son
+  boitier :
+  - B1 : appui bref, puis ~1,5 s : eclat blanc, redemarrage, `cause` =
+    redemarrage logiciel, etat de la lampe garde ;
+  - B2 : 3 s, puis 7,5 s : rien, ligne `[bouton] ... annule` ;
+  - B3 : 8 s tenus : rouge/violet a 8 s ; relache : desappairage, l'accessoire
+    disparait d'Apple Home, bleu clignotant apres le redemarrage ;
+  - B4 : relacher et rappuyer aussitot apres un appui court : jamais de mode
+    telechargement (la carte repond toujours sur l'USB) ;
+  - B5 : bouton tenu pendant le demarrage (apres le chargeur) : ignore
+    jusqu'au relachement.
+
 ---
 
 ## I. Essais sur la vraie lampe
@@ -1278,6 +1320,7 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 | 18 | Re-appairage en rejouant la balise (non essaye, fenetre d'appairage necessaire) | hors perimetre ; adresse d'appairage refusee partout |
 | 19 | Outils de banc (`txack`, `xo`) qui modifient la puce ou `gXoTrim` | invalidation apres chaque commande hors liste blanche ; B11 corrige |
 | 20 | Puce bloquee que la verification ne voit pas (incident du 24/09 : quartz touche, registres conformes, tous les envois en delai) | L2 sur symptome : 3 delais TX de suite, deluge de CRC faux en ecoute, ou ecoute sourde (1000 rearmements hors RX en moins de 10 s, vue en ~2-3 s au rythme de l'incident) ; jamais sur une lampe muette (C.5) |
+| 21 | Reset avec IO9 (BOOT) tenu bas : mode telechargement, carte inerte jusqu'a une coupure d'alimentation | actions du bouton seulement relache, apres 100 ms haut sans interruption, et relecture juste avant le reset (C9) ; reste la fenetre de quelques ms entre `matterDecommissionNow()` et le redemarrage par la tache CHIP : ne pas rappuyer avant la fin |
 ---
 
 ## Resultats du banc (23/09/2026, build diag, carte A = 144401, temoin B = 11301)

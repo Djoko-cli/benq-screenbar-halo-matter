@@ -115,8 +115,9 @@
 #define MATTER_SERIAL_PREFIX "HALO1-"
 #endif
 
-// Appui long sur ce bouton = retrait de toutes les fabriques Matter
-// (decommissioning), pour re-appairer l'accessoire de zero.
+// Bouton BOOT : appui court = redemarrage, appui de 8 s puis relachement =
+// retrait de toutes les fabriques Matter (decommissioning), pour re-appairer
+// l'accessoire de zero. Durees et garde-fous : src/boot_button.h.
 #ifndef PIN_DECOMMISSION_BTN
 #ifdef BOOT_PIN
 #define PIN_DECOMMISSION_BTN BOOT_PIN
@@ -124,7 +125,6 @@
 #define PIN_DECOMMISSION_BTN 0
 #endif
 #endif
-#define DECOMMISSION_HOLD_MS 5000
 
 // Certaines cartes cablent la LED d'etat a l'envers (broche -> LED -> 3V3).
 #ifndef STATUS_LED_ACTIVE_LOW
