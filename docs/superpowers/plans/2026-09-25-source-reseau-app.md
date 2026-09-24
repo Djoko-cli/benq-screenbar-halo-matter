@@ -26,11 +26,13 @@
 - Cle : trousseau de session, mot de passe generique, service `fr.djoko.halo.pont`, compte = nom SRP (sans `.local`), valeur = 64 hexa MAJUSCULES, commentaire = empreinte, libelle `Halo - pont <nom>`, non synchronise. **Jamais** dans la console, le journal, les suivis de commandes, les preferences ou un fichier.
 - Textes : chaque cible a sa fonction `tr(...)` et son catalogue (`HaloProtocole/Localizable.xcstrings`, `HaloCompagnon/Ressources/Localizable.xcstrings`) ; francais = source, anglais obligatoire ; specificateurs numerotes (`%1$@`, `%2$lld`) des qu'il y en a deux ; `LocalisationTests` doivent passer.
 - Code : identifiants et commentaires en francais **sans accents** ; textes affiches avec accents. Tests en Swift Testing (`import Testing`, `@Suite`, `@Test`, `#expect`, `#require`).
-- Commandes (depuis `apps/macos`) :
+- Commandes (depuis `apps/macos`) ; produits de compilation HORS de `~/Documents` (sous `~/Documents`, macOS ajoute des attributs etendus que la
+  signature ad hoc du paquet de tests refuse : "resource fork, Finder information, or similar detritus not allowed") :
+  `DD=$HOME/Library/Developer/Xcode/DerivedData/halo-sdd` (a definir dans chaque shell) ;
   - apres ajout ou retrait d'un fichier : `xcodegen generate` ;
-  - une suite : `xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath build/dd test -only-testing:<Cible>/<Suite>` ;
+  - une suite : `xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test -only-testing:<Cible>/<Suite>` ;
   - tout : la meme sans `-only-testing` ;
-  - catalogues apres un changement de texte : `I=build/dd/Build/Intermediates.noindex/HaloCompagnon.build/Debug` puis `xcrun xcstringstool sync HaloProtocole/Localizable.xcstrings --stringsdata $I/HaloProtocole.build/Objects-normal/arm64/*.stringsdata` et `xcrun xcstringstool sync HaloCompagnon/Ressources/*.xcstrings --stringsdata $I/HaloCompagnon.build/Objects-normal/arm64/*.stringsdata`, puis traductions par `python3 Outils/traduire.py` (tache 3).
+  - catalogues apres un changement de texte : `I=$DD/Build/Intermediates.noindex/HaloCompagnon.build/Debug` puis `xcrun xcstringstool sync HaloProtocole/Localizable.xcstrings --stringsdata $I/HaloProtocole.build/Objects-normal/arm64/*.stringsdata` et `xcrun xcstringstool sync HaloCompagnon/Ressources/*.xcstrings --stringsdata $I/HaloCompagnon.build/Objects-normal/arm64/*.stringsdata`, puis traductions par `python3 Outils/traduire.py` (tache 3).
 - Commits : un par tache, message en francais sans accents, termine par la ligne `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` ; **seulement si Djoko a autorise les commits pour cette execution**. Jamais de push sans sa demande.
 - Interdits pour les agents : flasher, ouvrir un port serie, `sudo`, changer une route ou un reglage reseau, ecrire dans le vrai trousseau hors du test explicitement active (tache 5).
 
@@ -194,7 +196,7 @@ struct EnveloppeH1Tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath build/dd test -only-testing:HaloProtocoleTests/EnveloppeH1Tests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test -only-testing:HaloProtocoleTests/EnveloppeH1Tests`
 Expected: echec de compilation (`cannot find 'H1' in scope`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -504,7 +506,7 @@ struct ReseauSessionTests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath build/dd test -only-testing:HaloProtocoleTests/ReseauSessionTests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test -only-testing:HaloProtocoleTests/ReseauSessionTests`
 Expected: echec de compilation (`value of type 'Correlateur' has no member 'politique'`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -722,7 +724,7 @@ struct CleReseauTests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath build/dd test -only-testing:HaloProtocoleTests/CleReseauTests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath "$DD" test -only-testing:HaloProtocoleTests/CleReseauTests`
 Expected: echec de compilation (`cannot find 'CleReseau' in scope`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -849,7 +851,7 @@ if __name__ == "__main__":
 ```
 
 Puis les textes du framework :
-1. Compiler (`xcodebuild ... -derivedDataPath build/dd build`), puis `I=build/dd/Build/Intermediates.noindex/HaloCompagnon.build/Debug && xcrun xcstringstool sync HaloProtocole/Localizable.xcstrings --stringsdata $I/HaloProtocole.build/Objects-normal/arm64/*.stringsdata`.
+1. Compiler (`xcodebuild ... -derivedDataPath "$DD" build`), puis `I=$DD/Build/Intermediates.noindex/HaloCompagnon.build/Debug && xcrun xcstringstool sync HaloProtocole/Localizable.xcstrings --stringsdata $I/HaloProtocole.build/Objects-normal/arm64/*.stringsdata`.
 2. Ecrire `build/traductions-t3.json` :
 ```json
 {
@@ -1084,7 +1086,7 @@ struct TransportUDPTests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath build/dd test -only-testing:HaloProtocoleTests/TransportUDPTests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath "$DD" test -only-testing:HaloProtocoleTests/TransportUDPTests`
 Expected: echec de compilation (`cannot find 'TransportUDP' in scope`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1489,7 +1491,7 @@ struct TrousseauTests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath build/dd test -only-testing:HaloCompagnonTests/TrousseauTests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath "$DD" test -only-testing:HaloCompagnonTests/TrousseauTests`
 Expected: echec de compilation (`cannot find 'TrousseauMemoire' in scope`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1677,7 +1679,7 @@ et les deux tests d'alignement ecartent la table `InfoPlist` (ses cles viennent 
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodebuild ... -derivedDataPath build/dd test -only-testing:HaloProtocoleTests/CataloguesTests`
+Run: `cd apps/macos && xcodebuild ... -derivedDataPath "$DD" test -only-testing:HaloProtocoleTests/CataloguesTests`
 Expected: FAIL sur `catalogues()` (pas de `HaloCompagnon/InfoPlist`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1765,9 +1767,9 @@ cd apps/macos && printf 'DEVELOPMENT_TEAM = %s\nCODE_SIGN_IDENTITY = Apple Devel
 
 Run:
 ```bash
-cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath build/dd test
-codesign -dv --entitlements - "build/dd/Build/Products/Debug/Halo Compagnon.app" 2>&1 | grep -E 'TeamIdentifier|network.client|app-sandbox'
-ls "build/dd/Build/Products/Debug/Halo Compagnon.app/Contents/Resources/en.lproj/"
+cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test
+codesign -dv --entitlements - "$DD/Build/Products/Debug/Halo Compagnon.app" 2>&1 | grep -E 'TeamIdentifier|network.client|app-sandbox'
+ls "$DD/Build/Products/Debug/Halo Compagnon.app/Contents/Resources/en.lproj/"
 git status --short apps/macos
 ```
 Expected: tous les tests passent ; `TeamIdentifier=` suivi de l'equipe (pas `not set`), `com.apple.security.network.client` et `app-sandbox` presents ; `InfoPlist.strings` dans `en.lproj` ; `Local.xcconfig` n'apparait pas dans `git status`.
@@ -1852,7 +1854,7 @@ struct PontReseauTests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath build/dd test -only-testing:HaloCompagnonTests/PontReseauTests`
+Run: `cd apps/macos && xcodegen generate && xcodebuild ... -derivedDataPath "$DD" test -only-testing:HaloCompagnonTests/PontReseauTests`
 Expected: echec de compilation (`type 'Pont.Source' has no member 'reseau'`).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -2446,7 +2448,7 @@ Textes : sync du catalogue de l'app, puis `build/traductions-t9.json` avec l'ang
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `... test` (toutes les cibles), puis essai manuel en demo : `open "build/dd/Build/Products/Debug/Halo Compagnon.app" --args -demo`.
+Run: `... test` (toutes les cibles), puis essai manuel en demo : `open "$DD/Build/Products/Debug/Halo Compagnon.app" --args -demo`.
 Expected: tous les tests passent. En demo : la carte "Thread et Matter" montre "Accès réseau : aucune clé" et "Activer l'accès réseau…" ; apres confirmation, "Clé XXXXXXXX connue de ce Mac" ; le menu de la source montre la section "Réseau" avec `56B1E064401F74EF.local · clé XXXXXXXX` ; "Oublier ce pont…" le retire apres confirmation. (La demo range sa cle dans le vrai trousseau du Mac : l'oublier a la fin de l'essai.)
 
 - [ ] **Step 5: Commit**
@@ -2701,7 +2703,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: Verifier le tout**
 
-Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath build/dd test && python3 ../../tools/test_halo_udp.py`
+Run: `cd apps/macos && xcodegen generate && xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test && python3 ../../tools/test_halo_udp.py`
 Expected: tous les tests passent (les 96 + 17 d'origine et les nouveaux).
 
 - [ ] **Step 3: Essais au banc, avec Djoko (pont reel ; route par l'assistant `halo-routes` ou a la main ; Djoko present pour toute commande lampe)**
