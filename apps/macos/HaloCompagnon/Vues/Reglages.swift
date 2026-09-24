@@ -22,7 +22,7 @@ struct Reglages: View {
                 .pickerStyle(.menu)
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Le contenu des fenêtres change tout de suite. Les menus de macOS (Halo Compagnon, Édition, Fenêtre…) et les boîtes du système suivent au prochain lancement. Les lignes déjà écrites dans la console gardent leur langue.")
+                    Text("Le contenu des fenêtres change tout de suite. Les menus de macOS (Halo Compagnon, Édition, Fenêtre…) et les boîtes du système suivent au prochain lancement. Les textes déjà consignés gardent leur langue jusqu'au suivant : lignes de la console, erreur de connexion, dernière ligne rejetée, erreur de saisie de la console.")
                     if ReglageLangue.relancePourLesMenus {
                         Label("Relancer l'app pour mettre aussi les menus dans cette langue.",
                               systemImage: "arrow.clockwise.circle")

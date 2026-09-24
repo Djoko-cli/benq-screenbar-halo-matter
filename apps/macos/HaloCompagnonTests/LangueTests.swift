@@ -19,13 +19,21 @@ extension Trait where Self == LangueImposee {
     static func langue(_ l: Langue) -> Self { LangueImposee(langue: l) }
 }
 
-@Suite("Langue de l'app")
+@Suite("Langue de l'app", .serialized)
 @MainActor
 struct LangueAppTests {
-    /// Preferences jetables : le choix de l'utilisateur n'est pas touche.
-    static func defauts() throws -> (UserDefaults, String) {
-        let nom = "fr.djoko.halo.compagnon.tests.langue.\(UUID().uuidString)"
-        return (try #require(UserDefaults(suiteName: nom)), nom)
+    /// Preferences des tests, videes avant et apres : le choix de
+    /// l'utilisateur n'est pas touche, et un seul fichier sert a chaque passage.
+    static let nomDefauts = "fr.djoko.halo.compagnon.tests.langue"
+
+    static func defauts() throws -> UserDefaults {
+        let d = try #require(UserDefaults(suiteName: nomDefauts))
+        d.removePersistentDomain(forName: nomDefauts)
+        return d
+    }
+
+    static func propre(_ d: UserDefaults, _ cle: String) -> Any? {
+        d.persistentDomain(forName: nomDefauts)?[cle]
     }
 
     @Test(.langue(.anglais)) func textesDeLAppEnAnglais() {
@@ -79,26 +87,55 @@ struct LangueAppTests {
     }
 
     @Test func choixPersisteEtApplique() throws {
-        let (d, nom) = try Self.defauts()
-        defer { d.removePersistentDomain(forName: nom) }
+        let d = try Self.defauts()
+        defer { d.removePersistentDomain(forName: Self.nomDefauts) }
+        let nom = Self.nomDefauts
         let l = Localisation(langue: .francais)
         #expect(ReglageLangue.choix(d) == .systeme, "par defaut : la langue du systeme")
 
-        ReglageLangue.appliquer(.anglais, defauts: d, localisation: l)
+        ReglageLangue.appliquer(.anglais, defauts: d, domaine: nom, localisation: l)
         #expect(ReglageLangue.choix(d) == .anglais)
-        #expect(d.persistentDomain(forName: nom)?[ReglageLangue.cleAppleLanguages] as? [String] == ["en"],
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) as? [String] == ["en"],
                 "les menus de macOS suivront au prochain lancement")
         #expect(l.langue == .anglais)
         #expect(l.locale.language.languageCode == .english)
 
-        ReglageLangue.appliquer(.francais, defauts: d, localisation: l)
+        ReglageLangue.appliquer(.francais, defauts: d, domaine: nom, localisation: l)
         #expect(l.langue == .francais)
-        #expect(d.persistentDomain(forName: nom)?[ReglageLangue.cleAppleLanguages] as? [String] == ["fr"])
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) as? [String] == ["fr"])
 
-        ReglageLangue.appliquer(.systeme, defauts: d, localisation: l)
+        ReglageLangue.appliquer(.systeme, defauts: d, domaine: nom, localisation: l)
         #expect(ReglageLangue.choix(d) == .systeme)
-        #expect(d.persistentDomain(forName: nom)?[ReglageLangue.cleAppleLanguages] == nil,
-                "la langue du systeme reprend la main")
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) == nil, "la langue du systeme reprend la main")
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguagesAvantChoix) == nil)
+        #expect(l.langue == Langue.preferee(parmi: ReglageLangue.languesSysteme(d)))
+    }
+
+    /// Une langue choisie pour l'app dans Reglages Systeme (son `AppleLanguages`)
+    /// revient avec « Langue du systeme », apres un passage par English/Francais.
+    @Test func langueDeReglagesSystemeRendue() throws {
+        let d = try Self.defauts()
+        defer { d.removePersistentDomain(forName: Self.nomDefauts) }
+        let nom = Self.nomDefauts
+        let l = Localisation(langue: .francais)
+        d.set(["en-GB"], forKey: ReglageLangue.cleAppleLanguages)
+
+        // Au lancement, "Langue du systeme" la garde.
+        ReglageLangue.appliquer(.systeme, defauts: d, domaine: nom, lancement: true, localisation: l)
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) as? [String] == ["en-GB"])
+        // (-AppleLanguages de la ligne de commande, `-testLanguage`, passe devant.)
+        #expect(l.langue == Langue.preferee(parmi: ReglageLangue.languesSysteme(d)))
+
+        ReglageLangue.appliquer(.francais, defauts: d, domaine: nom, localisation: l)
+        ReglageLangue.appliquer(.anglais, defauts: d, domaine: nom, localisation: l)
+        ReglageLangue.appliquer(.francais, defauts: d, domaine: nom, lancement: true, localisation: l)
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) as? [String] == ["fr"])
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguagesAvantChoix) as? [String] == ["en-GB"],
+                "gardee a travers les choix et les lancements")
+
+        ReglageLangue.appliquer(.systeme, defauts: d, domaine: nom, localisation: l)
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguages) as? [String] == ["en-GB"])
+        #expect(Self.propre(d, ReglageLangue.cleAppleLanguagesAvantChoix) == nil)
         #expect(l.langue == Langue.preferee(parmi: ReglageLangue.languesSysteme(d)))
     }
 }

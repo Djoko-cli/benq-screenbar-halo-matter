@@ -66,7 +66,8 @@ public enum Interpretation {
         case .battement(let b):
             return tr("Battement") + (b.upS.map { tr(" · en marche depuis \($0) s") } ?? "")
         case .helloBase(let h):
-            let fw = h.fw ?? "?", env = h.env ?? "?", boot = h.boot ?? "?", reset = h.reset ?? "?"
+            let fw = h.fw ?? "?", env = h.env ?? "?", boot = h.boot ?? "?"
+            let reset = h.reset.map(ValeurFirmware.causeDemarrage) ?? "?"
             return tr("Hello : firmware \(fw) · \(env) · démarrage \(boot) (\(reset))")
         case .helloIdentite(let h):
             let serie = h.id?.serie ?? "?", caps = (h.caps ?? []).joined(separator: ", ")
@@ -119,7 +120,8 @@ public enum Interpretation {
         case .temp:
             if let t = sens?.temp {
                 let m = CorrespondanceLuminosite.mired(temp: t)
-                let k = CorrespondanceLuminosite.kelvin(mired: m)
+                // Kelvin et microsecondes sans separateur de milliers, comme sur les autres ecrans.
+                let k = String(CorrespondanceLuminosite.kelvin(mired: m))
                 s = tr("Température \(t) (\(m) mireds, ~\(k) K)") + contexte()
             } else {
                 s = tr("Température") + contexte()
@@ -151,7 +153,7 @@ public enum Interpretation {
         s += " · \(t.tranche?.libelle ?? "?") \(t.charge ?? "")"
         if let e = t.essai { s += t.paquets.map { tr(" · essai \(e)/\($0)") } ?? tr(" · essai \(e)") }
         s += " · \(t.verdict.libelle)"
-        if let us = t.us { s += tr(" en \(us) µs") }
+        if let us = t.us { s += tr(" en \(String(us)) µs") }
         if let a = t.accuses { s += tr(" · \(a) accusé(s)") }
         if let n = t.sautes, n > 0 { s += tr(" · \(n) omis avant") }
         return s
@@ -235,7 +237,7 @@ public enum Interpretation {
             s += c.isEmpty ? tr(" · écarté") : tr(" · champs \(champs(c))")
         }
         if let c = i.consigne { s += " → \(etat(c))" }
-        if let a = i.a { s += tr(" · A : \(a)") }
+        if let a = i.a.map(ValeurFirmware.boutonA) { s += tr(" · A : \(a)") }
         return s
     }
 
@@ -248,20 +250,21 @@ public enum Interpretation {
             if let m = a.maxS { s += " · max \(m) s" }
             if let ap = a.appliqueS { s += tr(" (appliqué \(ap) s)") }
         case .etabli:
-            let origine = a.origine ?? "?"
+            let origine = a.origine.map(ValeurFirmware.origineAbonnement) ?? "?"
             s = tr("Abonnement établi (\(origine))")
             if let mi = a.minS, let ma = a.maxS { s += " · \(mi)..\(ma) s" }
         case .termine:
             s = tr("Abonnement terminé")
         case .reprise:
-            let mode = a.mode ?? "?", verdict = a.verdict ?? "?"
+            let mode = a.mode.map(ValeurFirmware.modeReprise) ?? "?"
+            let verdict = a.verdict.map(ValeurFirmware.verdictReprise) ?? "?"
             s = tr("Reprise des abonnements (\(mode)) : \(verdict)")
         case .session:
             let erreur = a.erreur ?? ""
             s = a.ok == true ? tr("Session de reprise vers \(abonne) : ouverte")
                 : tr("Session de reprise vers \(abonne) : échec \(erreur)")
         case .repriseAbonne:
-            let verdict = a.verdict ?? "?"
+            let verdict = a.verdict.map(ValeurFirmware.verdictReprise) ?? "?"
             s = tr("Reprise pour \(abonne) : \(verdict)")
         case .inconnu:
             s = tr("Abonnement")

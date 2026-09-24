@@ -121,7 +121,7 @@ private struct PanneauCommandes: View {
                     let t = CorrespondanceLuminosite.temp(mired: m)
                     HStack {
                         Text(verbatim: "\(m) mireds").font(.title3.weight(.semibold)).monospacedDigit()
-                        Text("· ~\(CorrespondanceLuminosite.kelvin(mired: m)) K · brute \(t)")
+                        Text("· ~\(String(CorrespondanceLuminosite.kelvin(mired: m))) K · brute \(t)")
                             .foregroundStyle(.secondary).monospacedDigit()
                         Spacer()
                     }

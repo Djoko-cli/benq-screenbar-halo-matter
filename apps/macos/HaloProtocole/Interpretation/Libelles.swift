@@ -246,3 +246,69 @@ extension MoteurSession.Phase {
         }
     }
 }
+
+/// Valeurs de texte du firmware prises dans des listes fermees
+/// (`docs/PROTOCOLE-JSON.md`), pour l'interface. Une valeur inconnue (firmware
+/// plus recent) reste brute.
+public enum ValeurFirmware {
+    /// `hello.reset` (5.1) : cause du dernier demarrage (`esp_reset_reason()`).
+    public static func causeDemarrage(_ v: String) -> String {
+        switch v {
+        case "mise_sous_tension": tr("mise sous tension")
+        case "broche": tr("broche de reset")
+        case "logiciel": tr("logiciel")
+        case "panique": tr("panique")
+        case "chien_int": tr("chien de garde (interruption)")
+        case "chien_tache": tr("chien de garde (tâche)")
+        case "chien": tr("autre chien de garde")
+        case "baisse_tension": tr("baisse de tension")
+        case "usb": "USB"
+        case "inconnue": tr("inconnue")
+        default: v
+        }
+    }
+
+    /// `hello.build` (5.1) : build produit ou de banc.
+    public static func build(_ v: String) -> String {
+        v == "produit" ? tr("produit") : v
+    }
+
+    /// `intent.a` (7.6) : sort du bouton A.
+    public static func boutonA(_ v: String) -> String {
+        switch v {
+        case "appui": tr("appui")
+        case "ignore": tr("ignoré")
+        case "refuse": tr("refusé")
+        default: v
+        }
+    }
+
+    /// `abonnement` `etabli` (7.7) : origine de l'abonnement.
+    public static func origineAbonnement(_ v: String) -> String {
+        switch v {
+        case "neuf": tr("neuf")
+        case "pont": tr("repris par le pont")
+        case "pile": tr("repris par la pile")
+        default: v
+        }
+    }
+
+    /// `abonnement` `reprise` (7.7) : reprise automatique ou demandee.
+    public static func modeReprise(_ v: String) -> String {
+        v == "manuelle" ? tr("manuelle") : v
+    }
+
+    /// Verdict d'une reprise d'abonnements (`reprise`, `reprise_abonne`, 7.7).
+    public static func verdictReprise(_ v: String) -> String {
+        switch v {
+        case "lance": tr("lancée")
+        case "rien": tr("rien à reprendre")
+        case "sans_stockage": tr("sans stockage")
+        case "iterateur_occupe": tr("itérateur occupé")
+        case "repris": tr("repris")
+        case "deja_servi": tr("déjà servi")
+        case "file_pleine": tr("file pleine")
+        default: v
+        }
+    }
+}
