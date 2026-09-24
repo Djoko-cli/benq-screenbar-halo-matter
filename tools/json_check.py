@@ -16,7 +16,8 @@ Pour chaque ligne machine :
     hello, etat, compteurs, reseau ; entiers seulement, jamais de flottant ;
   - contenu (5 a 7) : champs obligatoires, types, bornes, enumerations,
     hexadecimal, tailles des chaines, coherences simples (etape et code
-    d'une reponse, ids, adresse et adresse sur l'air...) ;
+    d'une reponse, ids, adresse et adresse sur l'air...) ; un champ inconnu
+    de la v1 est un avertissement (9.1 : un ajout garde v, l'app l'ignore) ;
   - continuite : trous de n (pertes), n qui recule (redemarrage).
 
 Usage :
@@ -630,7 +631,9 @@ RELAUNCH_DETAIL = {
 # ---------------------------------------------------------------------------
 
 
-def check(spec, value, path, errs):
+def check(spec, value, path, errs, warns):
+    """Verifie value contre spec. Champ inconnu : avertissement (9.1 : les ajouts
+    gardent v et l'app les ignore) ; --strict en fait une erreur."""
     if isinstance(spec, Opt):
         spec = spec.spec
     if isinstance(spec, Null):
@@ -673,7 +676,7 @@ def check(spec, value, path, errs):
         if spec.maxlen is not None and len(value) > spec.maxlen:
             errs.append(f"{path} : {len(value)} elements, {spec.maxlen} au plus")
         for i, v in enumerate(value):
-            check(spec.item, v, f"{path}[{i}]", errs)
+            check(spec.item, v, f"{path}[{i}]", errs, warns)
     elif isinstance(spec, Obj):
         if not isinstance(value, dict):
             errs.append(f"{path} : objet attendu ({value!r})")
@@ -683,11 +686,11 @@ def check(spec, value, path, errs):
                 if not isinstance(sub, Opt):
                     errs.append(f"{path}.{k} : champ obligatoire absent")
                 continue
-            check(sub, value[k], f"{path}.{k}", errs)
+            check(sub, value[k], f"{path}.{k}", errs, warns)
         if not spec.extra_ok:
             for k in value:
                 if k not in spec.fields:
-                    errs.append(f"{path}.{k} : champ inconnu de la v1")
+                    warns.append(f"{path}.{k} : champ inconnu de la v1 (ignore par l'app)")
 
 
 def find_floats(value, path, errs):
@@ -859,7 +862,7 @@ def check_line(raw):
         warns.append(f"type inconnu de la v1 : {t!r} (ignore par l'app)")
         return obj, errs, warns
     content = {k: v for k, v in obj.items() if k not in ("v", "t", "n", "ms", "bloc")}
-    check(schema, content, f"{t}" + (f"/{bloc}" if bloc else ""), errs)
+    check(schema, content, f"{t}" + (f"/{bloc}" if bloc else ""), errs, warns)
     coherence(t, obj, errs, warns)
     return obj, errs, warns
 

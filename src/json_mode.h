@@ -16,6 +16,9 @@
 //  - lignes periodiques : une par tour de loop(), et seulement s'il reste
 //    ensuite 1024 octets libres (place d'un evenement) ; perdues apres 500 ms
 //    de retard ;
+//  - reponses differees (apres un instantane, ou fin d'une commande
+//    historique dont le texte a rempli le tampon) : par la meme file, jamais
+//    perdues pour retard, parties des que 1024 octets sont libres ;
 //  - rien n'est persiste : chaque demarrage repart en mode humain.
 //
 //  Le texte humain des commandes historiques reste ecrit comme avant, par
@@ -56,13 +59,18 @@ bool jsonCadenceOk(uint32_t now);
 void jsonRefuse(const JsonCmd &c, const char *code, const char *msg);
 // Reponse immediate (evenement, non bloquante), en tout mode.
 void jsonReply(const jsonp::Reply &r);
+// Reponse fin d'une commande historique (sans msg) : tout de suite si une
+// ligne entiere tient, sinon par la file des qu'elle tient (le texte bloquant
+// de la commande a pu remplir le tampon d'emission de HWCDC).
+void jsonReplyEnd(const jsonp::Reply &r);
 // Fin d'une commande : bail, et config renvoyee si un reglage a change.
 void jsonAfterCommand();
 // Observateur de livraison tout de suite : une consigne finie avant une
 // commande lampe asynchrone part avant que son id ne rejoigne la liste.
 void jsonDeliveryFlush();
 // id d'une commande lampe acceptee (code accepte) : porte par la livraison
-// suivante. 8 au plus, les plus anciens sortent (ids_perdus).
+// suivante, qui viendra toujours (annulee si la periode occupee finit sans
+// compteur change). 8 au plus, les plus anciens sortent (ids_perdus).
 void jsonPendingId(uint32_t id);
 
 // --- Pont Matter (matter_bridge.cpp) -----------------------------------------

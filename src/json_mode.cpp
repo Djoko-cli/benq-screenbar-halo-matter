@@ -26,11 +26,11 @@ using namespace halo1;
 //  Etat
 // ===========================================================================
 
-static constexpr uint32_t kLateMs = 500;         // ligne periodique perdue apres ce retard
 static constexpr uint32_t kHbMs = 2000;          // battement quand les etat sont coupes ou lents
 static constexpr uint32_t kPeriodDefault = 1000, kCountersDefault = 1000, kNetDefault = 5000;
 static constexpr uint16_t kLeaseDefault = 30;
 static constexpr uint8_t kReplies = 4;           // reponses differees (apres un instantane)
+static constexpr uint32_t kHeapBlocMs = 10000;   // plus grand bloc du tas relu au plus toutes les 10 s
 
 static Writer sW;              // le seul tampon de formatage (1024 octets)
 static bool sBusy = false;     // une ligne en cours de formatage dans sW
@@ -48,10 +48,13 @@ static struct {
 static uint32_t sLastRx = 0, sLastCmd = 0;  // bail : dernier octet recu, fin de la derniere commande
 
 static Queue sQ;
+// Reponse differee : part par la file (apres les lignes deja en file, ou
+// quand une ligne entiere tient dans le tampon d'emission).
 static struct PendingReply {
   bool used;
-  uint32_t id, t0;
-  bool lease;
+  Reply r;         // r.cmd pointe sur cmd ; r.code litteral ; r.msg nul
+  uint32_t t0;     // durAtSend : duree_ms mesuree a l'envoi (instantane)
+  bool durAtSend;
   char cmd[kCmdTextMax + 1];
 } sReplies[kReplies];
 
@@ -59,17 +62,14 @@ static RateCap sRxCap(50), sCrcCap(10), sTxCap(50), sLogCap(20);
 static Cadence sCadence;
 static uint32_t sConfigSig = 0;
 static bool sRefreshSaved = false;             // 'json etat' : abonnements sauves relus
-static uint32_t sLoopAt = 0, sLoopMaxMs = 0;   // plus long tour de loop() depuis le bloc sante precedent
+static uint32_t sLoopAt = 0, sLoopMaxMs = 0;   // plus long tour de loop() depuis le bloc sante emis
+// heap_caps_get_largest_free_block() parcourt tout le tas en section critique
+// (interruptions masquees sur ce C6 mono-coeur) : relu au plus toutes les
+// kHeapBlocMs, et a chaque 'json 1' ou 'json etat'.
+static uint32_t sHeapBloc = 0, sHeapBlocAt = 0;
+static bool sHeapBlocStale = true;
 
-// Observateur de livraison (section 7.3).
-static struct {
-  bool wasBusy, sawTarget;
-  uint32_t since;
-  uint32_t seenDelivered, seenGiveUps;
-  uint32_t ids[kIdsMax];
-  uint8_t nIds;
-  uint32_t idsLost;
-} sDel = {};
+static DeliveryWatch sDel;  // observateur de livraison (section 7.3)
 
 static uint32_t upS() { return (uint32_t)(esp_timer_get_time() / 1000000); }
 
@@ -443,10 +443,14 @@ static void etatSante(uint32_t now) {
   sW.obj("sys");
   sW.u32("heap", esp_get_free_heap_size());
   sW.u32("heap_min", esp_get_minimum_free_heap_size());
-  sW.u32("heap_bloc", (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  if (sHeapBlocStale || now - sHeapBlocAt >= kHeapBlocMs) {
+    sHeapBloc = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    sHeapBlocAt = now;
+    sHeapBlocStale = false;
+  }
+  sW.u32("heap_bloc", sHeapBloc);
   sW.u32("pile_boucle", (uint32_t)uxTaskGetStackHighWaterMark(nullptr));  // octets sous ESP-IDF
-  sW.u32("boucle_max_ms", sLoopMaxMs);
-  sLoopMaxMs = 0;
+  sW.u32("boucle_max_ms", sLoopMaxMs);  // remis a 0 quand la ligne part (produce)
   sW.u32("json_perdus", sLost);
   sW.u32("json_trop_longs", sTooLong);
   sW.u32("rejets", sRejected);
@@ -572,13 +576,13 @@ static void produce(const Queued &q, uint32_t now) {
     case Item::Heartbeat: heartbeat(sW, sN, now, sBoot, upS(), sLost); break;
     case Item::Reply: {
       PendingReply &p = sReplies[q.arg < kReplies ? q.arg : 0];
-      Reply r;
-      r.id = p.id;
+      Reply r = p.r;
       r.cmd = p.cmd;
-      r.durMs = now - p.t0;
-      r.hasLease = p.lease;
-      r.leaseS = sS.leaseS;
-      r.upS = upS();
+      if (p.durAtSend) r.durMs = now - p.t0;
+      if (r.hasLease) {
+        r.leaseS = sS.leaseS;
+        r.upS = upS();
+      }
       reply(sW, sN, now, r);
       p.used = false;
       break;
@@ -587,27 +591,21 @@ static void produce(const Queued &q, uint32_t now) {
       sBusy = false;
       return;
   }
-  send();
-}
-
-// Ligne periodique perdue par retard : n consomme (trou visible), comptee.
-static void dropLate(const Queued &q) {
-  sN++;
-  sLost++;
-  if (q.item == Item::Reply && q.arg < kReplies) sReplies[q.arg].used = false;
+  // Le maximum n'est remis a 0 que s'il est parti : perdue, la ligne suivante le porte.
+  if (send() && q.item == Item::EtatSante) sLoopMaxMs = 0;
 }
 
 static void drain(uint32_t now) {
-  while (const Queued *q = sQ.front()) {
-    if (now - q->at <= kLateMs) break;
-    dropLate(*q);
-    sQ.pop();
-  }
+  // Ligne periodique perdue par retard : n consomme (trou visible), comptee.
+  // Jamais une reponse (Queue::dropLate).
+  const uint8_t late = sQ.dropLate(now);
+  sN += late;
+  sLost += late;
   const Queued *q = sQ.front();
   if (!q || sBusy) return;
-  // Une ligne fait 1024 octets au plus : avec 2048 libres, il en reste 1024
-  // apres elle pour un evenement. Sinon, au tour suivant.
-  if (Serial.availableForWrite() < (int)(2 * kLineMax)) return;
+  // Periodique : avec 2048 octets libres, il en reste 1024 apres elle pour un
+  // evenement. Reponse : des que 1024 sont libres. Sinon, au tour suivant.
+  if (!sQ.frontReady(Serial.availableForWrite())) return;
   const Queued item = *q;
   sQ.pop();
   produce(item, now);
@@ -663,29 +661,50 @@ void jsonReply(const Reply &r) {
   send();
 }
 
-// Reponse apres les lignes deja en file (instantane) ; sans place : tout de suite.
-static void replyAfterQueue(const JsonCmd &c, bool lease) {
-  if (!c.hasId) return;
+// Reponse par la file (apres les lignes deja en file) ; sans place (4
+// reponses en attente, file pleine) : tout de suite, comme un evenement.
+static void queueReply(const Reply &r, uint32_t t0, bool durAtSend) {
   for (uint8_t i = 0; i < kReplies; i++) {
     PendingReply &p = sReplies[i];
     if (p.used) continue;
     p.used = true;
-    p.id = c.id;
-    p.t0 = c.t0;
-    p.lease = lease;
-    copyCmd(p.cmd, c.cmd);
+    p.r = r;
+    p.r.msg = nullptr;  // jamais de msg differe : il pointerait sur un tampon disparu
+    p.t0 = t0;
+    p.durAtSend = durAtSend;
+    copyCmd(p.cmd, r.cmd);
     if (sQ.push(Item::Reply, millis(), false, i)) return;
     p.used = false;
     break;
   }
+  Reply now = r;
+  if (durAtSend) now.durMs = millis() - t0;
+  if (now.hasLease) {
+    now.leaseS = sS.leaseS;
+    now.upS = upS();
+  }
+  jsonReply(now);
+}
+
+// Reponse apres les lignes d'un instantane deja en file.
+static void replyAfterQueue(const JsonCmd &c, bool lease) {
+  if (!c.hasId) return;
   Reply r;
   r.id = c.id;
   r.cmd = c.cmd;
-  r.durMs = millis() - c.t0;
   r.hasLease = lease;
-  r.leaseS = sS.leaseS;
-  r.upS = upS();
-  jsonReply(r);
+  queueReply(r, c.t0, true);
+}
+
+void jsonReplyEnd(const Reply &r) {
+  // Rien a doubler et la place d'une ligne entiere : tout de suite, juste
+  // apres le texte. Sinon (le texte de la commande a rempli le tampon
+  // d'emission : 'help' en ecrit 7 Ko), par la file, des que la place revient.
+  if (!sQ.has(Item::Reply) && Serial.availableForWrite() >= (int)kLineMax) {
+    jsonReply(r);
+    return;
+  }
+  queueReply(r, 0, false);
 }
 
 static void replyNow(const JsonCmd &c, bool ok, const char *code, const char *msg, bool lease = false) {
@@ -722,6 +741,7 @@ static void resetTimers(uint32_t now) {
 
 static void enterMachine(uint16_t leaseS, uint32_t now) {
   sS.machine = true;
+  sLoopMaxMs = 0;  // pas les tours du mode humain (commandes de banc) avant la session
   sS.periodMs = kPeriodDefault;
   sS.countersMs = kCountersDefault;
   sS.netMs = kNetDefault;
@@ -834,6 +854,7 @@ void jsonCommand(char *arg, const JsonCmd &c) {
       // Idempotent : renvoyer 'json 1' resynchronise (instantane complet).
       enterMachine((uint16_t)lease, now);
       sRefreshSaved = true;
+      sHeapBlocStale = true;
       pushHello(now, true);
       pushState(now, true);
       pushCounters(now, true);
@@ -852,6 +873,7 @@ void jsonCommand(char *arg, const JsonCmd &c) {
     }
   } else if (!strcmp(sub, "etat")) {
     sRefreshSaved = true;
+    sHeapBlocStale = true;
     pushState(now, false);
     pushCounters(now, false);
     pushNet(now, false);
@@ -993,58 +1015,28 @@ static void onLed(statusled::Pattern now, statusled::Pattern before, bool testin
 //  Observateur de livraison (section 7.3)
 // ===========================================================================
 
-void jsonPendingId(uint32_t id) {
-  if (sDel.nIds == kIdsMax) {
-    memmove(sDel.ids, sDel.ids + 1, sizeof(sDel.ids[0]) * (kIdsMax - 1));
-    sDel.nIds--;
-    sDel.idsLost++;
-  }
-  sDel.ids[sDel.nIds++] = id;
-}
+void jsonPendingId(uint32_t id) { sDel.pendingId(id, lamp.pendingSince()); }
 
-// Front de busy() vrai -> faux, ou compteur de livraison ou d'abandon change
-// (consigne commencee et finie dans une commande bloquante). abandon l'emporte
-// sur livree ; ni l'un ni l'autre : annulee. Une periode occupee par la seule
-// tranche brute du banc ne donne rien.
+// Pur et teste sur l'hote (DeliveryWatch, json_out) ; ici, le releve du pilote
+// et l'emission.
 static void deliveryPoll(uint32_t now) {
-  const bool busy = lamp.busy();
-  const uint32_t delivered = lamp.deliveredCount(), giveUps = lamp.giveUpCount();
-  const bool changed = delivered != sDel.seenDelivered || giveUps != sDel.seenGiveUps;
-  if (changed || (!busy && sDel.wasBusy)) {
-    if ((changed || sDel.sawTarget) && (sS.machine || sDel.nIds)) {
-      Delivery d;
-      d.issue = giveUps != sDel.seenGiveUps ? Issue::GaveUp : delivered != sDel.seenDelivered ? Issue::Delivered
-                                                                                              : Issue::Cancelled;
-      d.cause = lamp.lastGiveUp();
-      d.last = lamp.lastDelivered();
-      d.version = lamp.version();
-      d.target = lamp.target();
-      d.believed = lamp.believed();
-      d.dirty = lamp.dirty();
-      d.ids = sDel.ids;
-      d.nIds = sDel.nIds;
-      d.idsLost = sDel.idsLost;
-      d.hasWait = sDel.wasBusy && sDel.since;  // pas vue : commande bloquante
-      d.waitMs = now - sDel.since;
-      d.delivered = delivered;
-      d.giveUps = giveUps;
-      if (claim()) {
-        delivery(sW, sN, now, d);
-        send();
-      }
-      sDel.nIds = 0;
-      sDel.idsLost = 0;
-    }
-    sDel.seenDelivered = delivered;
-    sDel.seenGiveUps = giveUps;
-    sDel.wasBusy = sDel.sawTarget = false;
-    sDel.since = 0;
-  }
-  if (busy) {
-    sDel.wasBusy = true;
-    if (lamp.targetBusy()) sDel.sawTarget = true;
-    // endBurst() et giveUp() le remettent a 0 avant le front : releve ici.
-    if (lamp.pendingSince()) sDel.since = lamp.pendingSince();
+  LampSample s;
+  s.busy = lamp.busy();
+  s.targetBusy = lamp.targetBusy();
+  s.delivered = lamp.deliveredCount();
+  s.giveUps = lamp.giveUpCount();
+  s.pendingSince = lamp.pendingSince();
+  Delivery d;
+  if (!sDel.poll(s, now, sS.machine, &d)) return;
+  d.cause = lamp.lastGiveUp();
+  d.last = lamp.lastDelivered();
+  d.version = lamp.version();
+  d.target = lamp.target();
+  d.believed = lamp.believed();
+  d.dirty = lamp.dirty();
+  if (claim()) {
+    delivery(sW, sN, now, d);
+    send();
   }
 }
 
@@ -1060,14 +1052,12 @@ void jsonBegin() {
   bootloader_random_enable();
   sBoot = esp_random();
   bootloader_random_disable();
-  sLoopAt = millis();
 }
 
 void jsonAttach() {
   lamp.setHooks(&kLampHooks);
   statusLedSetObserver(onLed);
-  sDel.seenDelivered = lamp.deliveredCount();
-  sDel.seenGiveUps = lamp.giveUpCount();
+  sDel.reset(lamp.deliveredCount(), lamp.giveUpCount());
   sConfigSig = configSig();
 }
 
@@ -1082,18 +1072,17 @@ static bool due(uint32_t &next, uint32_t period, uint32_t now) {
 
 void jsonPoll() {
   const uint32_t now = millis();
-  const uint32_t turn = now - sLoopAt;
-  if (turn > sLoopMaxMs) sLoopMaxMs = turn;
-  sLoopAt = now;
+  // Premier tour : pas de mesure (le reste de setup(), Matter.begin() compris,
+  // n'est pas un tour de loop()).
+  if (sLoopAt) {
+    const uint32_t turn = now - sLoopAt;
+    if (turn > sLoopMaxMs) sLoopMaxMs = turn;
+  }
+  sLoopAt = now ? now : 1;
 
   deliveryPoll(now);
 
-  if (sS.machine && sS.leaseS) {
-    // Le bail court depuis le plus recent : dernier octet recu, ou fin de la
-    // derniere commande (une commande de banc de 60 s ne le fait pas expirer).
-    const uint32_t last = (int32_t)(sLastRx - sLastCmd) > 0 ? sLastRx : sLastCmd;
-    if (now - last >= (uint32_t)sS.leaseS * 1000u) leaveMachine(true, now);
-  }
+  if (sS.machine && leaseExpired(now, sLastRx, sLastCmd, sS.leaseS)) leaveMachine(true, now);
 
   if (sS.machine) {
     if (due(sS.nextEtat, sS.periodMs, now)) pushState(now, true);

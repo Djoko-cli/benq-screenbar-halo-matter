@@ -222,6 +222,8 @@ class Cadence {
 //  File des lignes periodiques (section 2.3)
 // ---------------------------------------------------------------------------
 
+constexpr uint32_t kLateMs = 500;  // ligne periodique perdue apres ce retard
+
 enum class Item : uint8_t {
   HelloBase, HelloId, Config, EtatLampe, EtatTranches, EtatSante, CptPilote, CptRadio, CptMatter,
   NetThread, NetSubs, Heartbeat, Reply
@@ -230,20 +232,29 @@ struct Queued {
   Item item;
   uint8_t arg;   // Reply : place de la reponse differee
   bool session;  // periodique ou instantane de 'json 1' : retire a la fin du mode machine
-  uint32_t at;   // mise en file
+  uint32_t at;   // mise en file (ou derniere demande explicite fondue dedans)
 };
 
 class Queue {
  public:
   static constexpr uint8_t kN = 24;
   // Ajoute en queue. Un element deja en file (hors Reply) n'est pas double ;
-  // s'il etait de session et que celui-ci ne l'est pas, il ne l'est plus.
+  // une demande explicite (session faux) fondue dedans le rend explicite et
+  // repart de maintenant (son retard ne compte que depuis la demande).
   // false : file pleine.
   bool push(Item item, uint32_t now, bool session, uint8_t arg = 0);
   const Queued *front() const { return n_ ? &q_[head_] : nullptr; }
   void pop();
   uint8_t size() const { return n_; }
   bool has(Item item) const;
+  // Retire de la tete les lignes en retard de plus de kLateMs et rend leur
+  // nombre (n consomme, json_perdus). Une reponse n'est jamais perdue pour
+  // retard : elle arrete le balayage, les lignes derriere elle attendent.
+  uint8_t dropLate(uint32_t now);
+  // La tete peut-elle partir avec 'room' octets libres dans le tampon
+  // d'emission ? Ligne periodique : 2 x kLineMax (elle, puis la place d'un
+  // evenement). Reponse : kLineMax (elle tient, quelle qu'elle soit).
+  bool frontReady(int room) const;
   // Retire les elements de session ; ceux qui restent gardent leur ordre.
   uint8_t dropSession();
   void clear() { head_ = n_ = 0; }
@@ -251,6 +262,57 @@ class Queue {
  private:
   Queued q_[kN] = {};
   uint8_t head_ = 0, n_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+//  Bail (section 3.5)
+// ---------------------------------------------------------------------------
+
+// Le bail court depuis le plus recent : dernier octet recu, ou fin de la
+// derniere commande (une commande de banc de 60 s ne le fait pas expirer).
+// leaseS nul : sans bail, jamais expire.
+bool leaseExpired(uint32_t now, uint32_t lastRx, uint32_t lastCmd, uint16_t leaseS);
+
+// ---------------------------------------------------------------------------
+//  Observateur de livraison (section 7.3)
+// ---------------------------------------------------------------------------
+
+// Releve du pilote (Halo1Lamp) a un tour de loop().
+struct LampSample {
+  bool busy = false;          // busy()
+  bool targetBusy = false;    // targetBusy() : une tranche de consigne (lum, temp, a)
+  uint32_t delivered = 0;     // deliveredCount()
+  uint32_t giveUps = 0;       // giveUpCount()
+  uint32_t pendingSince = 0;  // pendingSince(), 0 : aucune demande en attente
+};
+
+// Front de busy() vrai -> faux, ou compteur de livraison ou d'abandon change
+// (consigne commencee et finie dans une commande bloquante) : une livraison.
+// abandon l'emporte sur livree ; ni l'un ni l'autre : annulee. Une periode
+// occupee par la seule tranche brute du banc ne donne rien. Hors mode machine,
+// seulement s'il reste des id en attente.
+class DeliveryWatch {
+ public:
+  // Point de depart : compteurs du moment, rien en attente.
+  void reset(uint32_t delivered, uint32_t giveUps);
+  // id d'une commande lampe acceptee (busy() vrai a cet instant) : la
+  // periode occupee compte comme vue, une livraison suivra toujours, meme si
+  // la periode finit avant le tour suivant sans compteur change (annulee).
+  // 8 id au plus, les plus anciens sortent (ids_perdus).
+  void pendingId(uint32_t id, uint32_t pendingSince);
+  // Un tour. true : livraison a emettre maintenant ; *d rempli pour issue,
+  // ids (pointe sur la liste interne, valable jusqu'au prochain pendingId),
+  // ids_perdus, attente_ms, livrees, abandons ; le reste (version, consigne,
+  // cru, a_livrer, cause, derniere) vient du pilote.
+  bool poll(const LampSample &s, uint32_t now, bool machine, Delivery *d);
+  uint8_t pending() const { return nIds_; }
+
+ private:
+  bool wasBusy_ = false, sawTarget_ = false;
+  uint32_t since_ = 0, seenDelivered_ = 0, seenGiveUps_ = 0;
+  uint32_t ids_[kIdsMax] = {};
+  uint8_t nIds_ = 0;
+  uint32_t idsLost_ = 0;
 };
 
 }  // namespace jsonp
