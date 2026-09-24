@@ -2,6 +2,7 @@
 
 #include <Matter.h>
 #include <Preferences.h>
+#include <app/server/Server.h>
 #include <esp_app_desc.h>
 #include <esp_mac.h>
 #include <platform/ConfigurationManager.h>
@@ -10,6 +11,7 @@
 
 #include "config.h"
 #include "halo1_lamp.h"
+#include "json_mode.h"
 #include "status_led.h"
 
 #if MATTER_NET_THREAD
@@ -320,6 +322,8 @@ static void bridgeLog(const char *fmt, ...) {
   int n = vsnprintf(line, sizeof(line), fmt, ap);
   va_end(ap);
   if (n >= (int)sizeof(line)) n = sizeof(line) - 1;
+  // Mode 'json log 1' : message log au lieu du texte.
+  if (n >= 0 && jsonLog("matter", "notice", line)) return;
   if (n < 0 || Serial.availableForWrite() < n + 2) {
     sStats.logDropped++;
     return;
@@ -353,6 +357,33 @@ static void describeIntents(const halo1::MatterIntents &in, char *buf, size_t n)
 //  Matter -> lampe : une fenetre de coalescence refermee
 // ===========================================================================
 
+// Evenement 'intent' du protocole JSON (mode machine seulement). r nul :
+// fenetre ignoree au demarrage. autoCode : sort du bouton A, nul sans ordre A.
+static void intentJson(const halo1::MatterIntents &in, uint32_t windowMs, const halo1::Resolution *r,
+                       const char *autoCode) {
+  jsonp::Writer *w = jsonEventOpen("intent");
+  if (!w) return;
+  w->obj("recu");
+  if (in.has & halo1::IN_POWER) w->boolean("ep1", in.power);
+  if (in.has & halo1::IN_LEVEL) w->u32("niveau", in.level);
+  if (in.has & halo1::IN_MIREDS) w->u32("mireds", in.mireds);
+  if (in.has & halo1::IN_FRONT) w->boolean("avant", in.front);
+  if (in.has & halo1::IN_BACK) w->boolean("arriere", in.back);
+  if (in.has & halo1::IN_AUTO) w->boolean("a", true);
+  w->end();
+  w->u32("fenetre_ms", windowMs);
+  if (!r) {
+    w->str("ignore", "demarrage");  // retour anticipe : ni champs, ni consigne, ni A
+  } else {
+    w->null("ignore");
+    jsonp::fields(*w, "champs", r->fields);
+    jsonp::state(*w, "consigne", lamp.target());
+    w->u32("version", lamp.version());
+    w->str("a", autoCode);  // nul : null
+  }
+  jsonEventSend();
+}
+
 static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_t now) {
   char what[72];
   describeIntents(in, what, sizeof(what));
@@ -363,15 +394,19 @@ static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_
   // aussi tot ; un ordre la vient de la pile elle-meme. La fenetre est jugee a
   // son premier ordre, pour qu'elle ne passe pas en se refermant apres le delai.
   // Difference signee : un ordre depose pendant Matter.begin() precede sBootMs.
+  // Premier ordre pose apres notre millis() (tache CHIP) : fenetre nulle.
+  const uint32_t windowMs = (int32_t)(now - first) > 0 ? now - first : 0;
   if (sBootGuard && (int32_t)(first - sBootMs) < (int32_t)HALO1_BOOT_IGNORE_MS) {
     sStats.bootIgnored++;
     bridgeLog("[matter] ordres ignores au demarrage :%s", what);
+    intentJson(in, windowMs, nullptr, nullptr);
     return;
   }
   sStats.windows++;
   const halo1::Resolution r = halo1::resolveMatter(lamp.target(), in, lamp.memoryLamps());
   if (r.fields) lamp.request(r.target, r.fields);
   const char *autoText = "";
+  const char *autoCode = nullptr;  // evenement intent : appui, ignore, refuse
 #if HALO1_EXPOSE_AUTO
   // Sans EP4, rien ne depose IN_AUTO (onAuto n'est pas branche).
   if (in.has & halo1::IN_AUTO) {
@@ -382,12 +417,15 @@ static void applyIntents(const halo1::MatterIntents &in, uint32_t first, uint32_
       sAutoPulseAt = now;
       sStats.autoFired++;
       autoText = ", appui A";
+      autoCode = "appui";
     } else {
       sStats.autoRefused++;
       autoText = r.target.power ? ", A ignore (avec un ordre marche/lampe)" : ", A refuse (lampe eteinte)";
+      autoCode = r.target.power ? "ignore" : "refuse";
     }
   }
 #endif
+  intentJson(in, windowMs, &r, autoCode);
   if (lamp.tracing()) {
     char st[48], fl[32];
     Halo1Lamp::describe(lamp.target(), st, sizeof(st));
@@ -1241,6 +1279,31 @@ static void nodeText(char *b, size_t n, uint64_t id) {
 
 static const char *const kEstText[] = {"neuf", "repris par le pont", "repris par la pile"};
 
+// --- Evenements 'thread' et 'abonnement' du protocole JSON (mode machine) ---
+
+static void nodeJson(jsonp::Writer &w, const char *k, uint64_t id) {
+  char b[24];
+  nodeText(b, sizeof(b), id);
+  w.str(k, b);
+}
+
+// Un message par sorte d'evenement et par passage : details du dernier, et
+// totaux qui disent combien il y en a eu.
+template <class Sub, class Res, class F>
+static void subsJson(const char *quoi, const Sub &s, const Res &r, F details) {
+  jsonp::Writer *w = jsonEventOpen("abonnement");
+  if (!w) return;
+  w->str("quoi", quoi);
+  details(*w);
+  w->obj("totaux");
+  w->u32("demandes", s.requested);
+  w->u32("etablis", s.fresh + s.byBridge + s.byStack);
+  w->u32("termines", s.terminated);
+  w->u32("passages", r.runs);
+  w->end();
+  jsonEventSend();
+}
+
 // Evenements rares (quelques-uns par demarrage) : toujours traces. Seule
 // exception : le coup d'oeil de 5 min qui ne trouve rien a faire, trace une
 // fois tant que son resultat ne change pas.
@@ -1266,6 +1329,13 @@ static void tracePoll() {
     for (uint32_t i = from; i < nRoles; i++) {
       const RoleChange &c = roles[i % kRoleHistory];
       bridgeLog("[matter] Thread : %s -> %s a +%s s", roleName(c.from), roleName(c.to), secs(a, sizeof(a), c.ms));
+      if (jsonp::Writer *w = jsonEventOpen("thread")) {
+        w->str("de", roleName(c.from));
+        w->str("vers", roleName(c.to));
+        w->u32("a_ms", c.ms);
+        w->u32("total", i + 1);  // un saut de plus de 1 : roles intermediaires perdus
+        jsonEventSend();
+      }
     }
     sSeenRoles = nRoles;
   }
@@ -1274,21 +1344,47 @@ static void tracePoll() {
     nodeText(node, sizeof(node), subs.reqPeer);
     bridgeLog("[matter] abonnement demande par %s a +%s s : plancher %u s, max %u s -> %u s", node,
               secs(a, sizeof(a), subs.reqAt), subs.reqMin, subs.reqMax, subs.reqApplied);
+    subsJson("demande", subs, res, [&](jsonp::Writer &w) {
+      nodeJson(w, "abonne", subs.reqPeer);
+      w.u32("plancher_s", subs.reqMin);
+      w.u32("max_s", subs.reqMax);
+      w.u32("applique_s", subs.reqApplied);
+    });
   }
   if (subs.fresh + subs.byBridge + subs.byStack != sSeenEstablished) {
     sSeenEstablished = subs.fresh + subs.byBridge + subs.byStack;
     bridgeLog("[matter] abonnement etabli (%s) a +%s s : min %u s, max %u s", kEstText[subs.lastKind],
               secs(a, sizeof(a), subs.lastAt), subs.lastMin, subs.lastMax);
+    static const char *const kEstCode[] = {"neuf", "pont", "pile"};
+    subsJson("etabli", subs, res, [&](jsonp::Writer &w) {
+      w.str("origine", kEstCode[subs.lastKind < 3 ? subs.lastKind : 0]);
+      w.u32("min_s", subs.lastMin);
+      w.u32("max_s", subs.lastMax);
+    });
   }
   if (subs.terminated != sSeenTerminated) {
     sSeenTerminated = subs.terminated;
     bridgeLog("[matter] abonnement termine (%lu en tout)", (unsigned long)subs.terminated);
+    subsJson("termine", subs, res, [](jsonp::Writer &) {});
   }
   if (res.runSeq != sSeenRunSeq) {
     sSeenRunSeq = res.runSeq;
     const char *kind = res.runKind == kResumeManual ? "manuelle" : "auto";
     const uint32_t sig = 1u + (res.runSaved & 0xFF) + ((uint32_t)res.runPeers << 8) +
                          ((uint32_t)res.runServed << 16) + ((uint32_t)res.runBusy << 24);
+    // Passage automatique sans effet, identique au precedent : ni trace, ni message.
+    if (!(res.runVerdict == kRunNothing && res.runKind == kResumeAuto && sig == quiet)) {
+      static const char *const kRunCode[] = {"lance", "rien", "sans_stockage", "iterateur_occupe"};
+      subsJson("reprise", subs, res, [&](jsonp::Writer &w) {
+        w.str("mode", res.runKind == kResumeManual ? "manuelle" : "auto");
+        w.str("verdict", kRunCode[res.runVerdict < 4 ? res.runVerdict : 3]);
+        w.u32("sauves", res.runSaved);
+        w.u32("abonnes", res.runPeers);
+        w.u32("lances", res.runLaunched);
+        w.u32("servis", res.runServed);
+        w.u32("en_cours", res.runBusy);
+      });
+    }
     switch (res.runVerdict) {
       case kRunLaunched:
         bridgeLog("[matter] reprise %s a +%s s : session demandee vers %u abonne(s) sur %u (%lu abonnement(s) "
@@ -1323,6 +1419,19 @@ static void tracePoll() {
       bridgeLog("[matter] reprise : echec 0x%lX avec %s apres %s s%s (sans frais : compteurs de la pile intacts)",
                 (unsigned long)res.doneErr, node, secs(b, sizeof(b), res.doneMs),
                 res.doneErr == CHIP_ERROR_TIMEOUT.AsInteger() ? " (delai : adresse introuvable ou CASE muet)" : "");
+    subsJson("session", subs, res, [&](jsonp::Writer &w) {
+      nodeJson(w, "abonne", res.doneNode);
+      const bool ok = res.doneErr == CHIP_NO_ERROR.AsInteger();
+      w.boolean("ok", ok);
+      if (ok) {
+        w.null("erreur");
+      } else {
+        char e[16];
+        snprintf(e, sizeof(e), "0x%lX", (unsigned long)res.doneErr);
+        w.str("erreur", e);
+      }
+      w.u32("duree_ms", res.doneMs);
+    });
   }
   if (res.peerSeq != sSeenPeerSeq) {
     sSeenPeerSeq = res.peerSeq;
@@ -1340,6 +1449,15 @@ static void tracePoll() {
       case kPeerNoIterator: bridgeLog("[matter] reprise : iterateur du stockage occupe pour %s, a refaire", node); break;
       default: bridgeLog("[matter] reprise : file de la pile pleine, %s pas repris", node); break;
     }
+    static const char *const kPeerCode[] = {"repris", "deja_servi", "rien", "sans_stockage", "iterateur_occupe",
+                                            "file_pleine"};
+    subsJson("reprise_abonne", subs, res, [&](jsonp::Writer &w) {
+      nodeJson(w, "abonne", res.peerNode);
+      w.str("verdict", kPeerCode[res.peerVerdict < 6 ? res.peerVerdict : 5]);
+      w.u32("repris", res.peerResumed);
+      w.u32("sans_readhandler", res.peerUnsettled);
+      w.u32("rates", res.peerFailed);
+    });
   }
 }
 
@@ -1975,3 +2093,317 @@ void matterPrintStatus(Print &out) {
              (unsigned long)sStats.reflects, (unsigned long)sStats.writes, (unsigned long)sStats.writeFails,
              (unsigned long)sStats.lockBusy, (unsigned long)sStats.logDropped);
 }
+
+// ===========================================================================
+//  Protocole JSON (json_mode.cpp, tache loop) : config.matter,
+//  compteurs.matter, reseau.thread, reseau.abonnements
+//
+//  Lectures d'abord (verrous OpenThread et de la pile pris sans attendre,
+//  copies sous sSubMux), ecriture dans la ligne ensuite : jamais de formatage
+//  sous un verrou. Verrou occupe : dernieres valeurs lues, et frais_ms dit
+//  leur age.
+// ===========================================================================
+
+#if MATTER_NET_THREAD
+static const char *const kMedCode[kMatterMedModes] = {"routeur", "med_init", "med_tard"};
+#endif
+
+void matterJsonConfig(jsonp::Writer &w) {
+  w.obj("matter");
+  w.obj("endpoints");
+  w.u32("principal", mainLight.getEndPointId());
+  w.u32("avant", frontLamp.getEndPointId());
+  w.u32("arriere", backLamp.getEndPointId());
+#if HALO1_EXPOSE_AUTO
+  w.u32("auto", autoButton.getEndPointId());
+#endif
+  w.end();
+  w.str("lampes_en", HALO1_SELECTORS_AS_LIGHTS ? "lumieres" : "prises");
+  w.u32("mired_min", halo1::kMiredCold);
+  w.u32("mired_max", halo1::kMiredWarm);
+  w.u32("niveau_plancher", halo1::kMatterLevelFloor);
+#if HALO1_EXPOSE_AUTO
+  w.u32("impulsion_ms", sAutoPulseMs);
+#endif
+#if MATTER_NET_THREAD
+  w.u32("med", sMedMode);
+  w.u32("med_boot", sMedBoot);
+  w.u32("maxint_s", sMaxIntCap);
+  w.boolean("reprise_auto", sResumeAuto);
+#else
+  // Reglages du build Thread : sans objet en Wi-Fi.
+  w.null("med");
+  w.null("med_boot");
+  w.null("maxint_s");
+  w.null("reprise_auto");
+#endif
+  w.end();
+}
+
+uint32_t matterConfigSig() {
+  uint32_t v = 0;
+#if MATTER_NET_THREAD
+  // med 0..2 (2 bits), reprise (1), plafond <= 3600 (12 bits) : sans recouvrement.
+  v = (uint32_t)sMedMode | (uint32_t)sResumeAuto << 2 | (uint32_t)sMaxIntCap << 3;
+#endif
+#if HALO1_EXPOSE_AUTO
+  v |= (uint32_t)sAutoPulseMs << 16;  // <= 15000
+#endif
+  return v;
+}
+
+void matterJsonCounters(jsonp::Writer &w) {
+  w.u32("fenetres", sStats.windows);
+  w.u32("ignorees", sStats.bootIgnored);
+#if HALO1_EXPOSE_AUTO
+  w.u32("a_appuis", sStats.autoFired);
+  w.u32("a_refuses", sStats.autoRefused);
+  w.u32("a_entendus", sStats.autoHeard);
+  w.u32("a_perdus", sStats.autoLost);
+#endif
+  w.u32("reflets", sStats.reflects);
+  w.u32("ecritures", sStats.writes);
+  w.u32("echecs", sStats.writeFails);
+  w.u32("verrou", sStats.lockBusy);
+  w.u32("traces_perdues", sStats.logDropped);
+  w.u32("identify", __atomic_load_n(&sIdentifyCount, __ATOMIC_RELAXED));
+}
+
+// Nombre de fabriques (Apple Home, Google...), lu sous le verrou de la pile.
+static struct {
+  bool known;
+  uint32_t at;
+  uint8_t n;
+} sFabricsJ = {};
+
+// Charge "MT:..." du QR code : parametre data= de l'URL, %XX decodes.
+static void qrPayload(const String &url, char *out, size_t n) {
+  out[0] = 0;
+  const int at = url.indexOf("data=");
+  if (at < 0 || !n) return;
+  size_t k = 0;
+  for (int i = at + 5; i < (int)url.length() && url[i] != '&' && k + 1 < n; i++) {
+    char c = url[i];
+    if (c == '%' && i + 2 < (int)url.length()) {
+      const char h[3] = {url[i + 1], url[i + 2], 0};
+      c = (char)strtoul(h, nullptr, 16);
+      i += 2;
+    }
+    out[k++] = c;
+  }
+  out[k] = 0;
+}
+
+#if MATTER_NET_THREAD
+static struct {
+  bool known;
+  uint32_t at;
+  otDeviceRole role;
+  uint8_t channel;
+  uint16_t pan;
+  int8_t txDbm, parentRssi;
+  bool parentOk;
+  otLinkModeConfig mode;
+  otMleCounters mle;
+  bool srpRunning, srpServerKnown;
+  uint8_t host, svcTotal, svcReg;
+  otIp6Address srpServer;
+  uint16_t srpPort;
+} sOtJ = {};
+
+// Releve OpenThread sans attendre le verrou ; occupe : valeurs precedentes.
+static void otJsonRead(uint32_t now) {
+  otInstance *ot = sMatterStarted ? esp_openthread_get_instance() : nullptr;
+  if (!ot || !otLockTry(0)) return;
+  sOtJ.role = otThreadGetDeviceRole(ot);
+  sOtJ.channel = otLinkGetChannel(ot);
+  sOtJ.pan = otLinkGetPanId(ot);
+  int8_t pw = 0;
+  otPlatRadioGetTransmitPower(ot, &pw);
+  sOtJ.txDbm = pw;
+  int8_t rssi = 0;
+  sOtJ.parentOk = otThreadGetParentAverageRssi(ot, &rssi) == OT_ERROR_NONE;
+  sOtJ.parentRssi = rssi;
+  sOtJ.mode = otThreadGetLinkMode(ot);
+  const otMleCounters *m = otThreadGetMleCounters(ot);
+  if (m) sOtJ.mle = *m;
+  sOtJ.srpRunning = otSrpClientIsRunning(ot);
+  const otSrpClientHostInfo *h = otSrpClientGetHostInfo(ot);
+  sOtJ.host = h ? (uint8_t)h->mState : 0xFF;
+  sOtJ.svcTotal = sOtJ.svcReg = 0;
+  for (const otSrpClientService *s = otSrpClientGetServices(ot); s && sOtJ.svcTotal < 255; s = s->mNext) {
+    sOtJ.svcTotal++;
+    if (srpRegistered((uint8_t)s->mState)) sOtJ.svcReg++;
+  }
+  const otSockAddr *srv = otSrpClientGetServerAddress(ot);
+  sOtJ.srpServerKnown = srv && srv->mPort;  // port 0 : pas de serveur choisi
+  if (sOtJ.srpServerKnown) {
+    sOtJ.srpServer = srv->mAddress;
+    sOtJ.srpPort = srv->mPort;
+  }
+  esp_openthread_lock_release();
+  sOtJ.known = true;
+  sOtJ.at = now;
+}
+
+// "rn" (MED), "rdn" (FTD) : lettres du mode OpenThread, "-" si aucune.
+static void linkModeLetters(const otLinkModeConfig &m, char b[4]) {
+  uint8_t i = 0;
+  if (m.mRxOnWhenIdle) b[i++] = 'r';
+  if (m.mDeviceType) b[i++] = 'd';
+  if (m.mNetworkData) b[i++] = 'n';
+  if (!i) b[i++] = '-';
+  b[i] = 0;
+}
+#endif
+
+void matterJsonNetThread(jsonp::Writer &w, uint32_t now) {
+  if (chip::DeviceLayer::PlatformMgr().TryLockChipStack()) {
+    const uint8_t n = chip::Server::GetInstance().GetFabricTable().FabricCount();
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    sFabricsJ.n = n;
+    sFabricsJ.known = true;
+    sFabricsJ.at = now;
+  }
+#if MATTER_NET_THREAD
+  otJsonRead(now);
+  uint32_t roles;
+  portENTER_CRITICAL(&sSubMux);
+  roles = sRoleChanges;
+  portEXIT_CRITICAL(&sSubMux);
+  const bool known = sOtJ.known;
+  const uint32_t freshAt = sOtJ.at;
+#else
+  const bool known = sFabricsJ.known;
+  const uint32_t freshAt = sFabricsJ.at;
+#endif
+  const bool commissioned = Matter.isDeviceCommissioned();
+  const bool connected = matterIsConnected();
+  // Codes d'appairage : caches par la bibliotheque, sans verrou ; seulement
+  // tant que le noeud n'est pas mis en service.
+  char manual[24] = "", qr[64] = "";
+  if (!commissioned) {
+    snprintf(manual, sizeof(manual), "%s", Matter.getManualPairingCode().c_str());
+    qrPayload(Matter.getOnboardingQRCodeUrl(), qr, sizeof(qr));
+  }
+
+  if (known) w.u32("frais_ms", now - freshAt);
+  else w.null("frais_ms");
+  w.obj("matter");
+  w.boolean("en_service", commissioned);
+  w.boolean("connecte", connected);
+  w.str("reseau", Matter.getSelectedNetwork() == MATTER_NETWORK_THREAD ? "thread" : "wifi");
+  w.boolean("wifi", Matter.isWiFiConnected());
+  if (sFabricsJ.known) w.u32("fabriques", sFabricsJ.n);
+  else w.null("fabriques");
+  w.str("code_manuel", !commissioned && manual[0] ? manual : nullptr);
+  w.str("qr", !commissioned && qr[0] ? qr : nullptr);
+  w.end();
+#if MATTER_NET_THREAD
+  if (!sOtJ.known) {
+    w.null("thread");
+    return;
+  }
+  char mode[4], server[OT_IP6_ADDRESS_STRING_SIZE];
+  linkModeLetters(sOtJ.mode, mode);
+  if (sOtJ.srpServerKnown) otIp6AddressToString(&sOtJ.srpServer, server, sizeof(server));
+  w.obj("thread");
+  w.str("role", otThreadDeviceRoleToString(sOtJ.role));
+  w.u32("canal", sOtJ.channel);
+  if (sOtJ.channel >= 11 && sOtJ.channel <= 26) w.u32("mhz", 2405u + 5u * (sOtJ.channel - 11u));
+  else w.null("mhz");
+  w.hexU32("pan", sOtJ.pan, 4, true);
+  w.i32("tx_dbm", sOtJ.txDbm);
+  if (sOtJ.parentOk) w.i32("parent_rssi", sOtJ.parentRssi);
+  else w.null("parent_rssi");
+  w.str("mode", mode);
+  w.str("type_boot", kMedCode[sMedBoot < kMatterMedModes ? sMedBoot : 0]);
+  w.str("type_suivant", kMedCode[sMedMode < kMatterMedModes ? sMedMode : 0]);
+  if (sNet.readyAt) w.u32("pret_ms", sNet.readyAt);
+  else w.null("pret_ms");
+  w.u32("roles", roles);
+  w.obj("mle");
+  w.u32("attaches", sOtJ.mle.mAttachAttempts);
+  w.u32("detache", sOtJ.mle.mDetachedRole);
+  w.u32("enfant", sOtJ.mle.mChildRole);
+  w.u32("routeur", sOtJ.mle.mRouterRole);
+  w.u32("chef", sOtJ.mle.mLeaderRole);
+  w.u32("parent_change", sOtJ.mle.mParentChanges);
+  w.end();
+  w.obj("srp");
+  w.boolean("client", sOtJ.srpRunning);
+  w.str("hote", sOtJ.host == 0xFF ? nullptr : otSrpClientItemStateToString((otSrpClientItemState)sOtJ.host));
+  w.u32("services", sOtJ.svcTotal);
+  w.u32("enregistres", sOtJ.svcReg);
+  w.str("serveur", sOtJ.srpServerKnown ? server : nullptr);
+  if (sOtJ.srpServerKnown) w.u32("port", sOtJ.srpPort);
+  else w.null("port");
+  w.end();
+  w.end();
+#endif
+}
+
+#if MATTER_NET_THREAD
+// Abonnements sauves : lecture NVS de chacun, verrou de la pile tenu. Au plus
+// toutes les 30 s (et sur 'json etat'), derniere valeur gardee.
+static struct {
+  bool known;
+  uint32_t at, total;
+} sSavedJ = {};
+
+void matterJsonNetSubs(jsonp::Writer &w, uint32_t now, bool refreshSaved) {
+  static constexpr uint32_t kSavedEveryMs = 30000;
+  if (sMatterStarted && (refreshSaved || !sSavedJ.known || now - sSavedJ.at >= kSavedEveryMs) &&
+      chip::DeviceLayer::PlatformMgr().TryLockChipStack()) {
+    auto *im = chip::app::InteractionModelEngine::GetInstance();
+    SubscriptionResumptionStorage *st = im->GetSubscriptionResumptionStorage();
+    uint32_t total = 0;
+    const int n = st ? collectSaved(st, nullptr, 0, total) : -1;
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    if (n >= 0) {
+      sSavedJ.known = true;
+      sSavedJ.total = total;
+      sSavedJ.at = now;
+    }
+  }
+  decltype(sSubs) sb;
+  decltype(sResume) rs;
+  portENTER_CRITICAL(&sSubMux);
+  sb = sSubs;
+  rs = sResume;
+  portEXIT_CRITICAL(&sSubMux);
+  const bool inFlight = resumeInFlight(now);
+
+  if (sCount.known) w.u32("frais_ms", now - sCount.at);
+  else w.null("frais_ms");
+  w.obj("abonnements");
+  if (sCount.known) {
+    w.u32("actifs", sCount.subs);
+    w.u32("lectures", sCount.reads);
+  } else {
+    w.null("actifs");
+    w.null("lectures");
+  }
+  if (sSavedJ.known) w.u32("sauves", sSavedJ.total);
+  else w.null("sauves");
+  w.u32("demandes", sb.requested);
+  w.u32("neufs", sb.fresh);
+  w.u32("repris_pont", sb.byBridge);
+  w.u32("repris_pile", sb.byStack);
+  w.u32("termines", sb.terminated);
+  w.u32("plafond_s", sMaxIntCap);
+  w.u32("plafonnes", sb.capped);
+  w.boolean("reprise_auto", sResumeAuto);
+  w.end();
+  w.obj("reprise");
+  w.u32("passages", rs.runs);
+  w.u32("auto", rs.autoRuns);
+  w.u32("sessions", rs.opened);
+  w.u32("ouvertes", rs.ok);
+  w.u32("echecs", rs.failed);
+  w.u32("sans_nouvelles", rs.lost);
+  w.u32("reprises", rs.resumed);
+  w.boolean("en_cours", inFlight);
+  w.end();
+}
+#endif

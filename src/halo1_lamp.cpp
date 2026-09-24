@@ -22,6 +22,11 @@ static constexpr uint32_t kLostRetryMs = 60000;
 // calme pour la guerison apres surdite ('lampe rx' refuse de meme).
 static_assert(ChipWatch::calmVisible(HALO1_RX_REARM_MS, HALO1_RX_SILENCE_MS),
               "HALO1_RX_REARM_MS <= 200 et HALO1_RX_SILENCE_MS > 2 x HALO1_RX_REARM_MS (halo1_watch.h)");
+// Les evenements (halo1_events.h) numerotent les verdicts comme la radio.
+static_assert((uint8_t)Verdict::Ack == EV_TX_ACK && (uint8_t)Verdict::AckForeign == EV_TX_ACK_FOREIGN &&
+                  (uint8_t)Verdict::MaxRt == EV_TX_MAX_RT && (uint8_t)Verdict::Timeout == EV_TX_TIMEOUT &&
+                  (uint8_t)Verdict::FifoRefused == EV_TX_FIFO,
+              "verdicts : Halo1Radio::Verdict et halo1::EV_TX_*");
 
 // ---------------------------------------------------------------------------
 //  Textes
@@ -74,9 +79,15 @@ void Halo1Lamp::trace(const char *fmt, ...) {
   va_start(ap, fmt);
   const int n = vsnprintf(line, sizeof(line), fmt, ap);
   va_end(ap);
+  if (n < 0) {
+    stats.traceDropped++;
+    return;
+  }
+  // Mode 'json log 1' : message log au lieu du texte (json_mode.cpp).
+  if (hooks_ && hooks_->log && hooks_->log(true, line)) return;
   // Le pilote ne doit jamais attendre le port serie : une trace qui ne tient
   // pas dans le tampon d'emission est perdue et comptee.
-  if (n < 0 || Serial.availableForWrite() < n + 2) {
+  if (Serial.availableForWrite() < n + 2) {
     stats.traceDropped++;
     return;
   }
@@ -84,6 +95,7 @@ void Halo1Lamp::trace(const char *fmt, ...) {
 }
 
 void Halo1Lamp::notice(const char *msg) {
+  if (hooks_ && hooks_->log && hooks_->log(false, msg)) return;
   if (Serial.availableForWrite() < (int)strlen(msg) + 2) {
     stats.traceDropped++;
     return;
@@ -119,7 +131,7 @@ void Halo1Lamp::tick() {
     // L3 : relance ratee (module muet) ou sans effet (configuration toujours
     // rejetee). Pilote inactif, nouvel essai de relance toutes les 60 s.
     if (lost()) {
-      if (busy()) giveUp();  // une consigne arrivee pendant la perte ne partirait jamais
+      if (busy()) giveUp(GiveUpCause::Module);  // une consigne arrivee pendant la perte ne partirait jamais
       if (restart_ && (uint32_t)(now - restartAt_) >= kLostRetryMs) restartModule(now, Relaunch::None);
     }
     return;
@@ -127,7 +139,12 @@ void Halo1Lamp::tick() {
   radio.service(now);
   if (relaunched_ && radio.stats.fullConfigs != relaunchConfigs_) {
     relaunched_ = false;  // configuration verifiee : la relance a gueri la puce
-    if (stuck_) notice("[lampe] BM5602 retrouve : configuration verifiee");
+    if (stuck_) {
+      notice("[lampe] BM5602 retrouve : configuration verifiee");
+      ModuleEvent e{};
+      e.state = ModuleState::ConfigVerified;
+      moduleEvent(e);
+    }
     stuck_ = false;
   }
   if (radio.restartWanted()) {  // L2 : 3 verifications ratees de suite
@@ -198,7 +215,7 @@ void Halo1Lamp::tick() {
         if (got) {
           const AirFrame f = decodeAir(raw, radio.air());
           watch_.rxFrame(f.crcOk, now);  // deluge de CRC faux : symptome de puce
-          onAir(f, now);
+          onAir(f, raw, now);
         }
       }
     } else {
@@ -247,36 +264,66 @@ void Halo1Lamp::restartModule(uint32_t now, Relaunch cause) {
     if (!stuck_) {  // une annonce par panne, pas une par essai
       char msg[144];
       uint8_t c[3];
-      if (radio.readConfig(c))
+      ModuleEvent e{};
+      e.state = ModuleState::ConfigRejected;
+      e.regsKnown = radio.readConfig(c);
+      if (e.regsKnown) {
+        e.rfch = c[0];
+        e.dm1 = c[1];
+        e.rt1 = c[2];
         snprintf(msg, sizeof(msg),
                  "[lampe] BM5602 : configuration rejetee apres relance (RFCH %02X DM1 %02X RT1 %02X, attendu 05 82 "
                  "73) : nouvel essai toutes les 60 s",
                  c[0], c[1], c[2]);
-      else
+      } else {
         snprintf(msg, sizeof(msg), "[lampe] BM5602 : configuration rejetee apres relance : nouvel essai toutes les 60 s");
+      }
       notice(msg);
+      moduleEvent(e);
     }
     stuck_ = true;
-    if (busy()) giveUp();
+    if (busy()) giveUp(GiveUpCause::Module);
     return;
   }
+  RelaunchEvent ev{};
+  ev.cause = cause;
   if (cause == Relaunch::None) {
     watch_.forget(now);
     watch_.held(now);  // pas de relance sur symptome juste apres cet essai
   } else {
+    // Ce qui a fait relancer, lu avant relaunched() qui efface les preuves.
+    const unsigned rank = (unsigned)watch_.unrecovered() + 1u;  // celle-ci comprise
+    ev.rank = (uint8_t)(rank > 255 ? 255 : rank);
+    ev.timeoutRun = watch_.timeoutRun();
+    ev.flood = watch_.lastFlood();
+    ev.deaf = watch_.lastDeaf();
+    ev.verifyFails = radio.stats.verifyFail;
     announceRelaunch(cause);  // avant les ~300 ms (jusqu'a ~0,5 s) de halo.begin()
     watch_.relaunched(cause, now);
   }
+  const uint32_t t0 = millis();
   const bool ok = restart_ && restart_();
+  ev.durMs = millis() - t0;
   radio.restartDone();
+  ev.ok = ok;
+  ev.crystal = ev.calib = -1;
   if (ok) {
     stats.restarts++;
-    if (lost_) notice("[lampe] BM5602 retrouve");
+    if (lost_) {
+      notice("[lampe] BM5602 retrouve");
+      ModuleEvent e{};
+      e.state = ModuleState::Found;
+      moduleEvent(e);
+    }
     lost_ = false;
     // stuck_ reste leve jusqu'a une configuration verifiee (tick).
     relaunched_ = true;
     relaunchConfigs_ = radio.stats.fullConfigs;
     const BC5602 *c = radio.chip();
+    if (c) {
+      ev.crystal = c->crystalReady() ? 1 : 0;
+      ev.calib = c->calibrated() ? 1 : 0;
+    }
     if (cause != Relaunch::None && c) {
       // BC5602::begin() reussit des que la version se lit, quartz pret ou non :
       // ce qui a vraiment ete refait se lit ici.
@@ -287,12 +334,20 @@ void Halo1Lamp::restartModule(uint32_t now, Relaunch cause) {
     } else {
       trace("[lampe] RADIO module relance");
     }
-    return;
+  } else {
+    if (!lost_) {
+      notice("[lampe] BM5602 perdu : nouvel essai de relance toutes les 60 s");
+      ModuleEvent e{};
+      e.state = ModuleState::Lost;
+      moduleEvent(e);
+    }
+    lost_ = true;
+    stuck_ = relaunched_ = false;  // module muet : sa configuration ne se juge plus
+    if (busy()) giveUp(GiveUpCause::Module);
   }
-  if (!lost_) notice("[lampe] BM5602 perdu : nouvel essai de relance toutes les 60 s");
-  lost_ = true;
-  stuck_ = relaunched_ = false;  // module muet : sa configuration ne se juge plus
-  if (busy()) giveUp();
+  ev.total = watch_.total();
+  ev.failed = watch_.failed();
+  if (hooks_ && hooks_->relaunch) hooks_->relaunch(ev);
 }
 
 void Halo1Lamp::announceRelaunch(Relaunch cause) {
@@ -336,17 +391,25 @@ void Halo1Lamp::noteFault() {
   if (failed == faultSeen_) return;
   faultSeen_ = failed;
   char msg[176];
-  if (failed)
+  ModuleEvent e{};
+  if (failed) {
     snprintf(msg, sizeof(msg),
              "[lampe] BM5602 EN PANNE : %u relances automatiques de suite sans guerison, le symptome revient (%s) : "
              "un essai toutes les %lu min",
              (unsigned)watch_.unrecovered(), relaunchText(watch_.symptom()),
              (unsigned long)(ChipWatch::kBackoffMs / 60000));
-  else
+    e.state = ModuleState::Fault;
+    e.unrecovered = watch_.unrecovered();
+    e.symptom = watch_.symptom();
+    e.retryS = ChipWatch::kBackoffMs / 1000;
+  } else {
     snprintf(msg, sizeof(msg),
              "[lampe] BM5602 retabli : accuse, trame au CRC juste hors deluge, ou ecoute revenue en RX apres une "
              "relance pour surdite");
+    e.state = ModuleState::Recovered;
+  }
   notice(msg);
+  moduleEvent(e);
 }
 
 void Halo1Lamp::traceRadio() {
@@ -450,6 +513,12 @@ bool Halo1Lamp::anyActive() const {
 }
 
 bool Halo1Lamp::busy() const { return anyActive() || phase_ == Phase::Backoff; }
+
+bool Halo1Lamp::targetBusy() const {
+  // Une reprise ne concerne jamais la tranche brute (complete() la clot sans fail()).
+  return slots_[SLOT_BRIGHT].active || slots_[SLOT_TEMP].active || slots_[SLOT_AUTO].active ||
+         phase_ == Phase::Backoff;
+}
 
 void Halo1Lamp::replan(uint32_t now, bool credit, bool arm) {
   // Deux passes au plus : une tranche abandonnee apres un accuse met a jour
@@ -562,6 +631,13 @@ void Halo1Lamp::onVerdict(uint8_t id, const Halo1Radio::TxReport &r, uint32_t no
                                                                      : TxSeen::Refused);
   trace("[lampe] TX %02X %02X #%u/%u %s %u us RT2 %02X", s.pay.flags, s.pay.value, s.attempts, s.repeats,
         verdictText(r.v), r.us, r.rt2);
+  // Apres le verdict (garde d'antenne rendue), avant la fin de la tranche et
+  // donc avant la livraison qu'elle declenche.
+  if (hooks_ && hooks_->tx) {
+    const TxEvent e{txCount_ - 1, id,    s.pay, s.attempts, s.repeats, s.acks,
+                    (uint8_t)r.v, r.us, r.rt2, r.irq1,     r.status};
+    hooks_->tx(e);
+  }
   const uint8_t need = s.repeats < tuning.minAcks ? s.repeats : tuning.minAcks;
   const uint8_t most = tuning.maxAttempts > s.repeats ? tuning.maxAttempts : s.repeats;
   bool done;
@@ -575,7 +651,7 @@ void Halo1Lamp::onVerdict(uint8_t id, const Halo1Radio::TxReport &r, uint32_t no
     f.len = 2;
     f.pay[0] = r.fPay[0];
     f.pay[1] = r.fPay[1];
-    onAir(f, now);
+    onAir(f, nullptr, now);
   }
 }
 
@@ -613,7 +689,10 @@ void Halo1Lamp::complete(uint8_t id, uint32_t now) {
     dirty_ &= (uint8_t)~coveredBy(p, target_);
   }
   replan(now);
-  if (!anyActive()) delivered_++;  // derniere trame de la consigne : LED d'etat
+  if (!anyActive()) {  // derniere trame de la consigne : LED d'etat, livraison
+    delivered_++;
+    lastDelivered_ = (int8_t)id;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -637,7 +716,7 @@ void Halo1Lamp::fail(uint8_t id, uint32_t now) {
   }
   failures_++;
   if (failures_ > tuning.planRetries) {
-    giveUp();
+    giveUp(GiveUpCause::Unreachable);
     return;
   }
   // Tranche rearmee (meme charge, meme numero A), reprise apres 1 s puis 2 s ;
@@ -650,9 +729,10 @@ void Halo1Lamp::fail(uint8_t id, uint32_t now) {
         failures_, (unsigned long)((uint32_t)tuning.retryMs * failures_));
 }
 
-void Halo1Lamp::giveUp() {
+void Halo1Lamp::giveUp(GiveUpCause cause) {
   // Matter revient a l'etat cru : mieux vaut un etat juste qu'une consigne
   // que la lampe n'a jamais recue.
+  giveUpCause_ = cause;
   for (Slot &s : slots_) s.active = false;
   if (target_ != believed_) version_++;
   target_ = believed_;
@@ -670,11 +750,13 @@ void Halo1Lamp::giveUp() {
 //  Suivi de la telecommande (D.6)
 // ---------------------------------------------------------------------------
 
-void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
+void Halo1Lamp::onAir(const AirFrame &f, const uint8_t *raw, uint32_t now) {
   stats.rxFrames++;
   const Payload p{f.pay[0], f.pay[1]};
   char st[48];
-  switch (classify(f)) {
+  const Kind kind = classify(f);
+  bool copy = false;  // A : copie d'un meme appui
+  switch (kind) {
     case Kind::CrcBad:
       stats.rxCrcBad++;
       break;
@@ -708,6 +790,7 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
       // 3 copies par appui : comptees une fois (AutoPressFilter).
       const bool press = remoteAuto_.feed(p.value, now);
       if (press) remoteAutoPresses_++;  // reflete dans Matter par le pont (EP4, s'il est expose)
+      copy = !press;
       noteAuto(p.value, now);
       trace("[lampe] RX tele PID %u %02X %02X -> A numero %u%s", f.pid, p.flags, p.value, p.value,
             press ? "" : " (copie)");
@@ -721,6 +804,16 @@ void Halo1Lamp::onAir(const AirFrame &f, uint32_t now) {
       describe(believed_, st, sizeof(st));
       trace("[lampe] RX tele PID %u %02X %02X -> %s", f.pid, p.flags, p.value, st);
       break;
+  }
+  // Apres le traitement : l'etat periodique suivant montre son effet.
+  if (hooks_ && hooks_->rx) {
+    RxEvent e{};
+    e.listen = raw != nullptr;
+    if (raw) memcpy(e.raw, raw, sizeof(e.raw));
+    e.f = f;
+    e.kind = kind;
+    e.copy = copy;
+    hooks_->rx(e);
   }
 }
 
@@ -1002,6 +1095,7 @@ void Halo1Lamp::printStats(Print &out) const {
 }
 
 void Halo1Lamp::clearStats() {
+  raz_++;  // coupure des courbes (compteurs.*.raz du protocole JSON)
   stats = Stats{};
   radio.stats = Halo1Radio::Stats{};
   watch_.clearCounts();  // compteurs et historique ; ni l'attente ni l'etat EN PANNE

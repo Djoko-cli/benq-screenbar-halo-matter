@@ -10,6 +10,19 @@ void cliBegin();
 // Famille 'lampe ...' : pilote Halo 1 (cli_lampe.cpp).
 void cmdLampe(char *arg);
 
+// Commandes d'etat avec id (app compagnon, docs/PROTOCOLE-JSON.md 6.2) : on,
+// off, avant, arriere, mode, lum, niveau, temp, mired, auto, sync. Memes regles
+// que la commande humaine, mais ni attente du repos ni bilan : la consigne est
+// posee, la reponse part tout de suite, la livraison suivra.
+struct LampeAsync {
+  bool ok = false;
+  const char *code = "usage";  // ok, accepte, differe, usage, refuse, radio_absente, radio_perdue
+  const char *msg = nullptr;   // explication, nul : aucune
+  char buf[64] = {};           // msg compose (niveau, mired)
+};
+bool lampeIsAsync(const char *arg);  // arg : ce qui suit 'lampe'
+void cmdLampeAsync(char *arg, LampeAsync &r);
+
 // Identification du module CC2500 et de son etage d'entree.
 void ccIdentify(Print &out);
 void ccDiagnose(Print &out);

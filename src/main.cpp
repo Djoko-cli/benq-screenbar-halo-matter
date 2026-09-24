@@ -29,6 +29,7 @@
 #include "config.h"
 #include "halo.h"
 #include "halo1_lamp.h"
+#include "json_mode.h"
 #include "status_led.h"
 #ifndef DIAG_ONLY
 #include "matter_bridge.h"
@@ -122,6 +123,9 @@ void setup() {
 #endif
   Serial.begin(115200);
   delay(400);
+  // Identifiant de ce demarrage (protocole JSON, hello.boot) : avant toute
+  // radio de l'ESP32, donc avant matterBridgeBegin().
+  jsonBegin();
 
   statusLedBegin();  // WS2812 au noir, IO15 en entree (bogue B9)
   pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
@@ -169,6 +173,7 @@ void setup() {
   // Le pilote reprend l'etat sauve et se met en ecoute passive (produit) ou en
   // veille (diagnostic) ; halo.begin() lui sert de relance du module.
   lamp.begin(halo.radio, HALO1_LISTEN_DEFAULT, []() { return halo.begin(); });
+  jsonAttach();  // evenements du pilote et de la LED vers le mode machine
   {
     char st[48];
     Halo1Lamp::describe(lamp.target(), st, sizeof(st));
@@ -204,6 +209,9 @@ void loop() {
   matterBridgePoll();
 #endif
   cliPoll();
+  // Apres toute consigne (tick, Matter, CLI) et avant la LED : la livraison
+  // precede l'eclat vert ou rouge (docs/PROTOCOLE-JSON.md, 12.2).
+  jsonPoll();
   statusLedPoll();
   decommissionButton();
   // Cede la main a IDLE et aux taches moins prioritaires : tick() tourne ainsi

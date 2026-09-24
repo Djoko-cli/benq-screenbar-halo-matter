@@ -13,6 +13,7 @@
 #include "halo.h"
 #include "halo1_lamp.h"
 #include "halo1_proto.h"  // adresses d'appairage, airOrder
+#include "json_mode.h"
 #include "status_led.h"
 #include "swd.h"
 
@@ -93,6 +94,8 @@ static void cmdHelp() {
   Serial.println("  lampe on|off|sync     allumer, eteindre, tout renvoyer (memes regles que Matter)");
   Serial.println("  lampe lum|temp|mode   luminosite 4C..FE, temperature 0..100, avant|arriere|deux");
   Serial.println("  led [test|stop]       LED d'etat : motif en cours ; test = chaque motif a tour de role");
+  Serial.println("  json [1|0|etat|hello|ping]  mode machine de l'app compagnon (lignes JSON) ; 'json' : session");
+  Serial.println("  json periode|compteurs|reseau <ms>, json trames|log 0|1   reglages de la session machine");
   Serial.println("  matter                etat Matter, code d'appairage, identite et versions du noeud");
 #ifndef DIAG_ONLY
 #if HALO1_EXPOSE_AUTO
@@ -354,15 +357,18 @@ static void cmdWifi(char *arg) {
 // du quartz : le pilote Halo 1 reconfigure alors la puce au prochain usage.
 static bool radioFree(const char *cmd) {
   static const char *const kFree[] = {"lampe", "help", "?", "matter", "chiplog", "cause",
-                                      "wifi", "led", "decommission", "reboot"};
+                                      "wifi", "led", "decommission", "reboot", "json"};
   for (const char *k : kFree)
     if (!strcmp(cmd, k)) return true;
   return false;
 }
 
-static void handleLine(char *line) {
+// Aiguillage d'une commande, prefixe id= deja retire (runLine) : 'json' est
+// dans kFree, ni settleRadio() ni invalidateRadio() pour les lignes de l'app.
+// false : commande inconnue.
+static bool handleLine(char *line) {
   while (*line == ' ') line++;
-  if (!*line) return;
+  if (!*line) return true;
   char *arg = splitWord(line);
   // Un outil de banc ne doit pas trouver la puce au milieu d'un reset du
   // pilote : elle y est en SPI 3 fils et ne repond pas aux lectures.
@@ -379,6 +385,7 @@ static void handleLine(char *line) {
 #endif
   } else if (!strcmp(line, "lampe")) cmdLampe(arg);
   else if (!strcmp(line, "led")) statusLedCommand(arg);
+  else if (!strcmp(line, "json")) jsonCommand(arg, JsonCmd{false, 0, "", millis()});
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "matter")) cmdMatter(arg);
 #endif
@@ -1013,12 +1020,102 @@ static void handleLine(char *line) {
   // et une rafale interrompue reprend (PID a 0, trames absolues). Une commande
   // inconnue n'a rien touche : ni la puce ni les indices du chien de garde.
   if (touchesRadio && known) lamp.invalidateRadio();
+  return known;
+}
+
+// ---------------------------------------------------------------------------
+//  Lignes recues (docs/PROTOCOLE-JSON.md, sections 2.6 et 6)
+// ---------------------------------------------------------------------------
+
+// Premier mot de s egal a w (sans couper la ligne).
+static bool firstWordIs(const char *s, const char *w) {
+  const size_t n = strlen(w);
+  return !strncmp(s, w, n) && (s[n] == ' ' || !s[n]);
+}
+
+// Ce qui suit le premier mot, espaces sautes.
+static char *afterWord(char *s) {
+  while (*s && *s != ' ') s++;
+  while (*s == ' ') s++;
+  return s;
+}
+
+// Une ligne de l'hote : prefixe id=<n> retire AVANT l'aiguillage (et donc
+// avant radioFree), refus sans execution (trop longue, cadence), puis :
+//  - sans id : comme toujours (texte, commandes lampe bloquantes avec bilan) ;
+//  - avec id : famille json (reponse seule), commandes lampe d'etat
+//    asynchrones (reponse tout de suite, livraison ensuite), sinon commande
+//    historique entre reponse debut et reponse fin.
+static void runLine(char *line, bool tooLong) {
+  const uint32_t t0 = millis();
+  uint32_t id = 0;
+  char *cmd = line;
+  const bool hasId = jsonp::parseIdPrefix(line, &id, &cmd);
+  while (*cmd == ' ') cmd++;
+  if (!hasId && !*cmd && !tooLong) return;  // ligne vide (Ctrl-U compris) : rien
+  char shown[jsonp::kCmdTextMax + 1];
+  jsonp::copyCmd(shown, cmd);  // avant que l'aiguillage ne coupe la ligne en mots
+  const JsonCmd c{hasId, id, shown, t0};
+  if (tooLong) {
+    jsonRefuse(c, "trop_long", "ligne de plus de 127 octets : rien n'est execute");
+    return;
+  }
+  if ((hasId || jsonMachine()) && !jsonCadenceOk(t0)) {
+    jsonRefuse(c, "cadence", "plus de 20 lignes par seconde : rien n'est execute");
+    return;
+  }
+  if (!hasId) {
+    handleLine(cmd);
+    jsonAfterCommand();
+    return;
+  }
+  jsonp::Reply r;
+  r.id = id;
+  r.cmd = shown;
+  if (!*cmd) {
+    r.ok = false;
+    r.code = "inconnue";
+    r.msg = "commande vide";
+    jsonReply(r);
+    return;
+  }
+  if (firstWordIs(cmd, "json")) {
+    jsonCommand(afterWord(cmd), c);
+  } else if (firstWordIs(cmd, "lampe") && lampeIsAsync(afterWord(cmd))) {
+    jsonDeliveryFlush();  // une consigne finie avant celle-ci part sans cet id
+    LampeAsync la;
+    cmdLampeAsync(afterWord(cmd), la);
+    r.ok = la.ok;
+    r.code = la.code;
+    r.msg = la.msg;
+    r.durMs = millis() - t0;
+    if (la.ok) {
+      const bool accepted = !strcmp(la.code, "accepte");
+      r.suite = accepted ? jsonp::Reply::SuiteDelivery : jsonp::Reply::SuiteNothing;
+      r.hasTarget = true;
+      r.target = lamp.target();
+      r.dirty = lamp.dirty();
+      r.version = lamp.version();
+      if (accepted) jsonPendingId(id);
+    }
+    jsonReply(r);
+  } else {
+    r.fin = false;
+    r.code = "en_cours";
+    jsonReply(r);  // la boucle va peut-etre bloquer dans la commande
+    const bool known = handleLine(cmd);
+    r.fin = true;
+    r.ok = known;
+    r.code = known ? "execute" : "inconnue";
+    r.durMs = millis() - t0;
+    jsonReply(r);
+  }
+  jsonAfterCommand();
 }
 
 // ---------------------------------------------------------------------------
 
-static char buf[128];
-static uint8_t len = 0;
+static jsonp::LineAssembler sLine;  // 127 caracteres au plus, prefixe id= compris
 
 // Broches du CC2500, modifiables a chaud : on ignore ce que la deuxieme carte
 // expose, et un reflash pour changer un numero de broche coute une manipulation
@@ -3002,29 +3099,40 @@ void cliBegin() {
   Serial.print("> ");
 }
 
+// Mode humain : echo, saut de ligne, commande, flush, invite, comme toujours.
+// Mode machine : ni echo, ni saut de ligne, ni invite, ni Serial.flush() (qui
+// attendrait jusqu'a 1 s un hote muet, puis viderait tout le tampon
+// d'emission, lignes machine comprises) ; octets hors 0x20..0x7E ignores.
+// Ctrl-U (0x15) vide la ligne en cours dans les deux modes.
 void cliPoll() {
   while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\r') continue;
-    if (c == '\n') {
-      Serial.println();
-      buf[len] = 0;
-      handleLine(buf);
-      Serial.flush();  // l'USB CDC du C6 perd des octets si on enchaine trop vite
-      len = 0;
-      Serial.print("> ");
-      continue;
-    }
-    if (c == 8 || c == 127) {  // retour arriere
-      if (len) {
-        len--;
-        Serial.print("\b \b");
+    const uint8_t c = (uint8_t)Serial.read();
+    jsonNoteRx();
+    const bool machine = jsonMachine();
+    switch (sLine.feed(c, machine)) {
+      case jsonp::LineAssembler::Ev::Echo:
+        if (!machine) Serial.print((char)c);
+        break;
+      case jsonp::LineAssembler::Ev::Erase:
+        if (!machine) Serial.print("\b \b");
+        break;
+      case jsonp::LineAssembler::Ev::Clear:
+        if (!machine)
+          for (uint8_t i = 0; i < sLine.cleared(); i++) Serial.print("\b \b");
+        break;
+      case jsonp::LineAssembler::Ev::Line: {
+        if (!machine) Serial.println();
+        const bool tooLong = sLine.tooLong();
+        runLine(sLine.text(), tooLong);
+        sLine.reset();
+        // 'json 1' vient de couper l'invite ; 'json 0' l'a deja reaffichee.
+        if (!machine && !jsonMachine()) {
+          Serial.flush();  // l'USB CDC du C6 perd des octets si on enchaine trop vite
+          Serial.print("> ");
+        }
+        break;
       }
-      continue;
-    }
-    if (len < sizeof(buf) - 1) {
-      buf[len++] = c;
-      Serial.print(c);
+      case jsonp::LineAssembler::Ev::None: break;
     }
   }
 }

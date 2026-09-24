@@ -10,6 +10,7 @@
 #include <Arduino.h>
 
 #include "config.h"
+#include "halo1_events.h"
 #include "halo1_map.h"
 #include "halo1_radio.h"
 #include "halo1_watch.h"
@@ -20,6 +21,10 @@ class Halo1Lamp {
  public:
   using RestartFn = bool (*)();  // relance complete du module (halo.begin())
   void begin(BC5602 &chip, bool listen, RestartFn restart);  // NVS -> cru = consigne ; N'EMET RIEN
+  // Crochets d'evenement (halo1_events.h) : trames entendues, paquets emis,
+  // relances et etats du module, annonces et traces. nullptr : aucun. Le
+  // pilote ne connait pas leur usage (protocole JSON, json_mode.cpp).
+  void setHooks(const halo1::LampHooks *h) { hooks_ = h; }
   // <= ~35 ms au pire (un paquet, + 26 ms de garde Thread), typiquement < 1 ms ;
   // hors relance L2 (halo.begin() : ~300 ms, jusqu'a ~0,5 s si le quartz ou la
   // calibration ne repondent pas ; sur symptome, une par minute au plus).
@@ -52,6 +57,9 @@ class Halo1Lamp {
   uint8_t memoryLamps() const { return selMem_.memory(target_); }
   uint32_t version() const { return version_; }  // +1 a chaque changement de consigne
   bool busy() const;                             // tranche active ou attente de reprise
+  // Comme busy(), sans la tranche brute du banc ('lampe brut') : une consigne
+  // est en cours (observateur de livraison, protocole JSON).
+  bool targetBusy() const;
   Halo1Link link() const { return link_; }
   uint8_t lastAuto() const { return lastAuto_; }
   // Appuis sur A entendus de la telecommande depuis le demarrage, jamais remis a
@@ -78,8 +86,36 @@ class Halo1Lamp {
   const halo1::ChipWatch &watch() const { return watch_; }
   bool moduleFault() const { return lost() || watch_.failed(); }
 
+  // Tranches, numerotees comme les evenements (halo1_events.h).
+  enum : uint8_t {
+    SLOT_BRIGHT = halo1::EV_SLOT_BRIGHT,
+    SLOT_TEMP = halo1::EV_SLOT_TEMP,
+    SLOT_AUTO = halo1::EV_SLOT_AUTO,
+    SLOT_RAW = halo1::EV_SLOT_RAW,
+    SLOT_N = halo1::EV_SLOT_N
+  };
+  enum class Phase : uint8_t { Idle, Burst, Backoff };  // repos, rafale, attente de reprise
+  struct Slot { bool active; halo1::Payload pay; uint8_t attempts, acks, repeats; };
+
+  // --- lecture detaillee (etat periodique du protocole JSON) ---
+  Phase phase() const { return phase_; }
+  // Phase Backoff : ms avant la reprise (0 si echue) ; sans objet sinon.
+  uint32_t retryInMs(uint32_t now) const {
+    const int32_t d = (int32_t)(retryAt_ - now);
+    return d > 0 ? (uint32_t)d : 0;
+  }
+  uint8_t failures() const { return failures_; }  // tours rates de la consigne en cours
+  const Slot &slot(uint8_t id) const { return slots_[id < SLOT_N ? id : SLOT_RAW]; }
+  bool acked() const { return acked_; }            // au moins un accuse depuis le demarrage
+  uint32_t lastAckAt() const { return lastAckAt_; }
+  bool persistPending() const { return persistDirty_; }  // etat cru pas encore ecrit en NVS
+  uint32_t pendingSince() const { return pendingSince_; } // premiere demande en attente, 0 : aucune
+  // Tranche dont la fin a clos la derniere consigne livree (SLOT_*), -1 : aucune.
+  int8_t lastDelivered() const { return lastDelivered_; }
+  halo1::GiveUpCause lastGiveUp() const { return giveUpCause_; }  // cause du dernier abandon
+  uint32_t statsResets() const { return raz_; }   // 'lampe stats raz' depuis le demarrage
+
   // Journal des derniers paquets emis, pour le bilan des commandes 'lampe'.
-  enum : uint8_t { SLOT_BRIGHT, SLOT_TEMP, SLOT_AUTO, SLOT_RAW, SLOT_N };
   struct TxLog {
     halo1::Payload pay;
     uint8_t slot;
@@ -125,8 +161,6 @@ class Halo1Lamp {
   Halo1Radio radio;
 
  private:
-  enum class Phase : uint8_t { Idle, Burst, Backoff };
-  struct Slot { bool active; halo1::Payload pay; uint8_t attempts, acks, repeats; };
   static constexpr uint8_t kLogN = 32;
   bool anyActive() const;
   void markPending(uint32_t now);
@@ -141,13 +175,15 @@ class Halo1Lamp {
   void onVerdict(uint8_t id, const Halo1Radio::TxReport &r, uint32_t now);
   void complete(uint8_t id, uint32_t now);
   void fail(uint8_t id, uint32_t now);
-  void giveUp();
+  void giveUp(halo1::GiveUpCause cause);
   // cause : Verify (L2 sur verification), TxTimeout, RxNoise ou RxDeaf (L2 sur
   // symptome), None (nouvel essai L3, hors comptes).
   void restartModule(uint32_t now, halo1::Relaunch cause);
   void announceRelaunch(halo1::Relaunch cause);
   void noteFault();  // annonce le passage EN PANNE et le retour
-  void onAir(const halo1::AirFrame &f, uint32_t now);
+  // raw : les 8 octets lus en ecoute passive ; nullptr pour une trame recue a
+  // la place d'un accuse.
+  void onAir(const halo1::AirFrame &f, const uint8_t *raw, uint32_t now);
   void onRemotePayload(halo1::Payload p, uint32_t now, bool arm = true);
   void noteAuto(uint8_t value, uint32_t now);
   void applyBelieved(halo1::Payload p, uint32_t now, bool confirm);
@@ -159,6 +195,9 @@ class Halo1Lamp {
   void traceRadio();
   // rien si !trace_ ; perdu (traceDropped) plutot que d'attendre le port serie
   void trace(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+  void moduleEvent(const halo1::ModuleEvent &e) {
+    if (hooks_ && hooks_->module) hooks_->module(e);
+  }
   // Affiche meme sans trace, mais jamais bloquant : perdu (traceDropped) si le
   // tampon serie est plein. 'lampe' garde la derniere relance.
   void notice(const char *msg);
@@ -192,5 +231,9 @@ class Halo1Lamp {
   uint32_t seenRearms_ = 0, seenOffRx_ = 0;  // rearmements deja passes a la surveillance
   halo1::ChipWatch watch_;
   bool faultSeen_ = false;  // watch_.failed() deja annonce
+  const halo1::LampHooks *hooks_ = nullptr;
+  int8_t lastDelivered_ = -1;
+  halo1::GiveUpCause giveUpCause_ = halo1::GiveUpCause::None;
+  uint32_t raz_ = 0;
 };
 extern Halo1Lamp lamp;

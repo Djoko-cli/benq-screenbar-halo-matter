@@ -531,6 +531,126 @@ static void cmdAdresse(char *p) {
 }
 
 // ---------------------------------------------------------------------------
+//  Commandes d'etat asynchrones (lignes de l'app avec id)
+// ---------------------------------------------------------------------------
+
+bool lampeIsAsync(const char *arg) {
+  static const char *const kAsync[] = {"on",     "off",  "avant", "arriere", "mode", "lum",
+                                       "niveau", "temp", "mired", "auto",    "sync"};
+  while (*arg == ' ') arg++;
+  size_t n = 0;
+  while (arg[n] && arg[n] != ' ') n++;
+  for (const char *k : kAsync)
+    if (strlen(k) == n && !strncmp(arg, k, n)) return true;
+  return false;
+}
+
+// Regles de runIntent, sans attente : consigne resolue comme un ordre Matter.
+static uint8_t intentTarget(uint8_t bit, bool on, State &s) {
+  MatterIntents in;
+  in.has = bit;
+  in.power = in.front = in.back = on;
+  const Resolution r = resolveMatter(lamp.target(), in, lamp.memoryLamps());
+  s = r.target;
+  return r.fields;
+}
+
+void cmdLampeAsync(char *arg, LampeAsync &r) {
+  char *p = arg;
+  const char *sub = nextWord(p);
+  long v;
+  bool on;
+  State s = lamp.target();
+  uint8_t fields = 0;
+  enum { kRequest, kAuto, kSync } what = kRequest;
+  r.ok = false;
+  r.code = "usage";
+  r.msg = nullptr;
+  if (!strcmp(sub, "on") || !strcmp(sub, "off")) {
+    fields = intentTarget(IN_POWER, !strcmp(sub, "on"), s);
+  } else if (!strcmp(sub, "avant") || !strcmp(sub, "arriere")) {
+    if (!parseOnOff(nextWord(p), on)) {
+      r.msg = !strcmp(sub, "avant") ? "avant : on|off" : "arriere : on|off";
+      return;
+    }
+    fields = intentTarget(!strcmp(sub, "avant") ? IN_FRONT : IN_BACK, on, s);
+  } else if (!strcmp(sub, "mode")) {
+    const char *m = nextWord(p);
+    const uint8_t lamps = !strcmp(m, "avant") ? F_FRONT : !strcmp(m, "arriere") ? F_BACK
+                          : !strcmp(m, "deux")  ? F_LAMPS : 0;
+    if (!lamps) {
+      r.msg = "mode : avant|arriere|deux";
+      return;
+    }
+    s.power = true;
+    s.lamps = lamps;
+    fields = FLD_FLAGS;
+  } else if (!strcmp(sub, "lum")) {
+    if (!parseLong(nextWord(p), v, 16) || v < kBrightMin || v > kBrightMax) {
+      r.msg = "lum : 4C..FE, en hexa";
+      return;
+    }
+    s.bright = (uint8_t)v;
+    fields = FLD_BRIGHT;
+  } else if (!strcmp(sub, "niveau")) {
+    if (!parseLong(nextWord(p), v, 10) || v < 1 || v > 254) {
+      r.msg = "niveau : 1..254";
+      return;
+    }
+    s.bright = rawFromLevel((uint8_t)v);
+    fields = FLD_BRIGHT;
+    snprintf(r.buf, sizeof(r.buf), "niveau %ld -> lum %02X (gamma %.2f)", v, s.bright, (double)mapGamma());
+    r.msg = r.buf;
+  } else if (!strcmp(sub, "temp")) {
+    if (!parseLong(nextWord(p), v, 10) || v < 0 || v > kTempMax) {
+      r.msg = "temp : 0..100, en decimal";
+      return;
+    }
+    s.temp = (uint8_t)v;
+    fields = FLD_TEMP;
+  } else if (!strcmp(sub, "mired")) {
+    if (!parseLong(nextWord(p), v, 10) || v < kMiredCold || v > kMiredWarm) {
+      r.msg = "mired : 153..370";
+      return;
+    }
+    s.temp = tempFromMired((uint16_t)v);
+    fields = FLD_TEMP;
+    snprintf(r.buf, sizeof(r.buf), "mired %ld -> temp %u/100", v, s.temp);
+    r.msg = r.buf;
+  } else if (!strcmp(sub, "auto")) {
+    what = kAuto;
+  } else if (!strcmp(sub, "sync")) {
+    what = kSync;
+  } else {
+    r.msg = "lampe on|off|avant|arriere|mode|lum|niveau|temp|mired|auto|sync";
+    return;
+  }
+  // Comme radioReady(), sans texte : rien n'est demande.
+  if (lamp.lost() || !lamp.radio.present()) {
+    const bool lost = lamp.lost();
+    r.code = lost ? "radio_perdue" : "radio_absente";
+    r.msg = lost ? "BM5602 perdu : rien n'est emis (nouvel essai de relance toutes les 60 s)"
+                 : "BM5602 absent : rien n'est emis ('rfinit', puis 'lampe')";
+    return;
+  }
+  if (what == kAuto) {
+    if (!lamp.pressAuto()) {
+      r.code = "refuse";
+      r.msg = "lampe eteinte : A n'est pas emis";
+      return;
+    }
+  } else if (what == kSync) {
+    lamp.reassert();
+  } else {
+    lamp.request(s, fields);  // sans champ (rien a changer) : aucune demande
+  }
+  r.ok = true;
+  // Occupe : une livraison suivra. Sinon, un reglage peut rester differe (lampe
+  // eteinte : la luminosite partira a l'allumage), sans livraison pour lui.
+  r.code = lamp.busy() ? "accepte" : lamp.dirty() ? "differe" : "ok";
+}
+
+// ---------------------------------------------------------------------------
 //  Aiguillage
 // ---------------------------------------------------------------------------
 

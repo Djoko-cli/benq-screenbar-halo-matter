@@ -65,6 +65,10 @@ bool renderMono(Pattern p, uint32_t t);
 // Roue des couleurs a l'intensite kMax : hue 0..767 (rouge, vert, bleu).
 Rgb wheel(uint16_t hue);
 const char *patternName(Pattern p);
+// Code du motif pour le protocole JSON (docs/PROTOCOLE-JSON.md, 7.9) :
+// identification, injoignable, panne_radio, livree, non_appaire, hors_reseau,
+// operationnel.
+const char *patternCode(Pattern p);
 
 // Sequence de banc ('led test') : chaque motif a tour de role.
 struct TestStep {
@@ -137,3 +141,10 @@ void statusLedBegin();
 void statusLedPoll();
 // Commande 'led [test|stop]'.
 void statusLedCommand(const char *arg);
+// Motif affiche au dernier statusLedPoll() et test en cours ; false en build
+// diagnostic (aucun voyant).
+bool statusLedState(statusled::Pattern *p, bool *testing);
+// Appele par statusLedPoll() quand le motif choisi change (evenement 'led' du
+// protocole JSON). nullptr : aucun. Jamais appele en build diagnostic.
+using StatusLedObserver = void (*)(statusled::Pattern now, statusled::Pattern before, bool testing);
+void statusLedSetObserver(StatusLedObserver fn);

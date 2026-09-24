@@ -3,6 +3,10 @@
 
 #include "config.h"  // HALO1_EXPOSE_AUTO
 
+namespace jsonp {
+class Writer;
+}
+
 // Cree les endpoints Matter de la lampe Halo 1 puis demarre la pile. A appeler
 // depuis setup() (la tache loop), apres lamp.begin() : les endpoints partent de
 // la consigne du pilote.
@@ -69,4 +73,24 @@ constexpr uint16_t kMatterMaxIntMaxS = 3600;
 constexpr uint16_t kMatterMaxIntDefaultS = 20;
 uint16_t matterMaxIntervalCap();
 bool matterSetMaxIntervalCap(uint32_t s, bool *saved);
+#endif
+
+// --- Protocole JSON (json_mode.cpp, tache loop) -------------------------------
+// Chaque fonction lit ce qu'il lui faut (verrous OpenThread et de la pile sans
+// attente, copies sous sSubMux), rend les verrous, puis ecrit dans la ligne
+// ouverte : jamais de formatage sous un verrou.
+
+// config.matter : objet "matter" (endpoints, lampes, bornes, reglages Thread).
+void matterJsonConfig(jsonp::Writer &w);
+// Empreinte des reglages ci-dessus : config renvoyee quand elle change.
+uint32_t matterConfigSig();
+// Champs du bloc compteurs.matter (apres "bloc").
+void matterJsonCounters(jsonp::Writer &w);
+// Champs du bloc reseau.thread : frais_ms, objet matter, objet thread (build
+// Thread seulement ; null si OpenThread n'a jamais pu etre lu).
+void matterJsonNetThread(jsonp::Writer &w, uint32_t now);
+#if MATTER_NET_THREAD
+// Champs du bloc reseau.abonnements. refreshSaved : relire les abonnements
+// sauves (NVS, verrou de la pile) meme avant les 30 s ('json etat').
+void matterJsonNetSubs(jsonp::Writer &w, uint32_t now, bool refreshSaved);
 #endif
