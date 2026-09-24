@@ -985,6 +985,195 @@ static void testDeliveryWatch() {
   }
 }
 
+// Transport reseau (section 10) : liste blanche, cache des reponses, cle.
+static void testRemote() {
+  struct Case {
+    const char *cmd;
+    bool ok;
+  };
+  static const Case kCases[] = {
+      {"json 1", true},
+      {"json 1 bail 30", true},
+      {"json 1 bail 10", true},
+      {"json 1 bail 120", true},
+      {"json 1 bail 0", false},
+      {"json 1 bail 9", false},
+      {"json 1 bail 121", false},
+      {"json 1 bail x", true},  // usage, dit par l'aiguillage
+      // Zeros de tete : lus comme strtoul les lit (revue du 24/09).
+      {"json 1 bail 0000000000", false},
+      {"json 1 bail 0000000600", false},
+      {"json 1 bail 00000000030", true},
+      {"json 1 bail 99999999999", false},
+      {"json periode 0000000200", false},
+      {"json compteurs 0000000200", false},
+      {"json reseau 00000001000", false},
+      {"json periode 00000002000", true},
+      {"json 0", true},
+      {"json etat", true},
+      {"json hello", true},
+      {"json ping", true},
+      {"json periode 2000", true},
+      {"json periode 1999", false},
+      {"json periode 0", false},
+      {"json compteurs 0", true},
+      {"json compteurs 4999", false},
+      {"json compteurs 5000", true},
+      {"json reseau 0", true},
+      {"json reseau 9999", false},
+      {"json reseau 10000", true},
+      {"json trames 1", true},
+      {"json log 0", true},
+      {"json", false},
+      {"json cle", false},
+      {"json cle efface", false},
+      {"json cle nouvelle 00", false},
+      {"lampe on", true},
+      {"lampe  niveau 200", true},
+      {"lampe mode deux", true},
+      {"lampe auto", true},
+      {"lampe sync", true},
+      {"lampe", false},
+      {"lampe brut C5 A5", false},
+      {"lampe stats raz", false},
+      {"lampe oublie", false},
+      {"led test", true},
+      {"led stop", true},
+      {"led", false},
+      {"led test 2", false},
+      {"reboot", false},
+      {"decommission", false},
+      {"matter med 0", false},
+      {"txack 63FDF04F 5 C5A5", false},
+      {"chiplog", false},
+      {"", false},
+      {"   ", false},
+  };
+  for (const Case &c : kCases) {
+    const char *why = remoteRefusal(c.cmd);
+    CHECK((why == nullptr) == c.ok, "remoteRefusal('%s') : %s", c.cmd, why ? why : "permise");
+    CHECK(!why || strlen(why) <= kMsgMax, "msg trop long : %s", why);
+  }
+
+  // Un evenement du pont formate une fois, renumerote pour chaque session.
+  gW.begin("thread", 0, 4242);
+  gW.str("role", "child");
+  bool fin = gW.finish();
+  CHECK(fin && gW.setN(123456), "setN");
+  CHECK(std::string((const char *)gW.data(), gW.size()) ==
+            framed("{\"v\":1,\"t\":\"thread\",\"n\":123456,\"ms\":4242,\"role\":\"child\"}"),
+        "setN : n remplace, le reste intact");
+  CHECK(gW.setN(7) && std::string((const char *)gW.data(), gW.size()) ==
+                          framed("{\"v\":1,\"t\":\"thread\",\"n\":7,\"ms\":4242,\"role\":\"child\"}"),
+        "setN : plus court");
+  gW.begin("thread", 0, 1);
+  CHECK(!gW.setN(3), "setN : ligne pas fermee");
+
+  // reponse.cmd ne renvoie jamais l'alea de 'json cle nouvelle'.
+  char shown[kCmdTextMax + 1];
+  copyCmd(shown, "json cle nouvelle 000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+  maskCmd(shown);
+  CHECK(!strcmp(shown, "json cle nouvelle"), "maskCmd : %s", shown);
+  copyCmd(shown, "json cle efface");
+  maskCmd(shown);
+  CHECK(!strcmp(shown, "json cle efface"), "maskCmd : rien a masquer");
+
+  // Cache des reponses : un id repete recoit la meme reponse ; ni msg ni cle.
+  ReplyCache cache;
+  CHECK(!cache.find(1), "cache vide");
+  Reply r;
+  r.id = 5;
+  r.cmd = "lampe niveau 200";
+  r.code = "accepte";
+  r.msg = "niveau 200 -> lum BA (gamma 2.00)";
+  r.suite = Reply::SuiteDelivery;
+  r.hasTarget = true;
+  r.target = mk(true, F_LAMPS, rawFromLevel(200), 53);
+  r.version = 13;
+  cache.put(r);
+  const Reply *got = cache.find(5);
+  CHECK(got && got->suite == Reply::SuiteDelivery && got->version == 13 && !got->msg && !strcmp(got->cmd, r.cmd) &&
+            got->cmd != r.cmd,
+        "reponse gardee, msg retire, cmd copiee");
+  Reply debut = r;
+  debut.id = 6;
+  debut.fin = false;
+  cache.put(debut);
+  CHECK(!cache.find(6), "etape debut jamais gardee");
+  for (uint32_t id = 10; id < 10 + ReplyCache::kN; id++) {
+    r.id = id;
+    cache.put(r);
+  }
+  CHECK(!cache.find(5) && cache.find(10) && cache.find(10 + ReplyCache::kN - 1), "8 dernieres seulement");
+  r.id = 12;
+  r.code = "ok";
+  cache.put(r);
+  CHECK(cache.find(12) && !strcmp(cache.find(12)->code, "ok"), "meme id : la plus recente");
+  cache.clear();
+  CHECK(!cache.find(12), "cache vide apres clear");
+
+  // Reponses de 'json cle' : cle (une fois) et empreinte.
+  Reply k;
+  k.id = 3;
+  k.cmd = "json cle nouvelle";  // l'alea de l'app n'est jamais renvoye (json_mode.cpp)
+  k.durMs = 4;
+  k.key = "20D6D83D97ED44F2BBF8CE56389BD475CBE2B625CE6CE24768B6B4C1C625012F";
+  k.hasKid = true;
+  k.kid = "630DCD29";
+  gCaptureOn = true;
+  reply(gW, 40, 5000, k);
+  expectLine(gW,
+             "{\"v\":1,\"t\":\"reponse\",\"n\":40,\"ms\":5000,\"id\":3,\"etape\":\"fin\",\"cmd\":"
+             "\"json cle nouvelle\",\"ok\":true,\"code\":\"ok\",\"duree_ms\":4,"
+             "\"cle\":\"20D6D83D97ED44F2BBF8CE56389BD475CBE2B625CE6CE24768B6B4C1C625012F\",\"empreinte\":\"630DCD29\"}",
+             "reponse json cle nouvelle");
+  k = Reply();
+  k.id = 4;
+  k.cmd = "json cle";
+  k.hasKid = true;  // sans cle : empreinte null
+  reply(gW, 41, 5001, k);
+  expectLine(gW,
+             "{\"v\":1,\"t\":\"reponse\",\"n\":41,\"ms\":5001,\"id\":4,\"etape\":\"fin\",\"cmd\":\"json cle\","
+             "\"ok\":true,\"code\":\"ok\",\"duree_ms\":0,\"empreinte\":null}",
+             "reponse json cle sans cle");
+  gCaptureOn = false;
+
+  // Livraison : chaque origine ne voit que ses id ; ids perdus par origine.
+  {
+    WatchRun wr;
+    wr.w.reset(0, 0);
+    wr.s.busy = wr.s.targetBusy = true;
+    wr.s.pendingSince = 1000;
+    wr.w.pendingId(1, 1000, kUsb);
+    wr.w.pendingId(2, 1000, 1);
+    wr.w.pendingId(3, 1000, 2);
+    for (uint32_t id = 10; id < 16; id++) wr.w.pendingId(id, 1000, 1);  // 9 id : le plus ancien (1, USB) sort
+    CHECK(!wr.poll(1001), "rafale");
+    wr.s = LampSample();
+    wr.s.delivered = 1;
+    CHECK(wr.poll(1200), "livraison");
+    uint8_t usb = 0, one = 0, two = 0;
+    for (uint8_t i = 0; i < wr.d.nIds; i++) {
+      if (wr.d.origins[i] == kUsb) usb++;
+      if (wr.d.origins[i] == 1) one++;
+      if (wr.d.origins[i] == 2) two++;
+    }
+    CHECK(wr.d.nIds == kIdsMax && usb == 0 && one == 7 && two == 1, "origines : usb %u, 1 : %u, 2 : %u", usb, one, two);
+    CHECK(wr.d.idsLostBy[kUsb] == 1 && wr.d.idsLostBy[1] == 0 && wr.d.idsLostBy[2] == 0 && wr.d.idsLost == 1,
+          "ids perdus par origine");
+    // Session partie : ses id sortent sans compter comme perdus.
+    wr.s.busy = wr.s.targetBusy = true;
+    wr.w.pendingId(20, 2000, 1);
+    wr.w.pendingId(21, 2000, 2);
+    wr.w.dropOrigin(1);
+    CHECK(wr.w.pending() == 1, "dropOrigin");
+    wr.s = LampSample();
+    wr.s.delivered = 2;
+    CHECK(wr.poll(2200) && wr.d.nIds == 1 && wr.d.ids[0] == 21 && wr.d.origins[0] == 2 && wr.d.idsLostBy[1] == 0,
+          "livraison suivante : l'id de la session restante");
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc > 1) gCapture = fopen(argv[1], "wb");
   mapInit(2.0f);
@@ -1005,6 +1194,7 @@ int main(int argc, char **argv) {
   testQueueDrain();
   testLease();
   testDeliveryWatch();
+  testRemote();
   if (gCapture) fclose(gCapture);
   printf("%d verification(s) JSON, %d echec(s)\n", gChecks, gFails);
   return gFails ? 1 : 0;

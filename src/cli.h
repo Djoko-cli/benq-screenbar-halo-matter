@@ -47,3 +47,9 @@ void ccFrontEnd(Print &out, uint32_t dwellMs);
 void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats);
 extern uint8_t ccPins[8];
 void cliPoll();
+
+// Ligne de commande recue par le transport reseau (net_udp.cpp), deja
+// authentifiee : origine 1..jsonp::kOrigins-1. Memes regles que l'USB avec un
+// id, plus celles du reseau (docs/PROTOCOLE-JSON.md 10.5) : id obligatoire,
+// id repete servi depuis le cache des reponses, liste blanche ('interdite').
+void cliRunRemote(uint8_t origin, char *line, bool tooLong);

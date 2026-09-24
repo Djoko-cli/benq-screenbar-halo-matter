@@ -25,8 +25,10 @@ namespace jsonp {
 
 constexpr uint8_t kVersion = 1;         // v : version majeure
 // hello.rev : revision mineure (ajouts). 1 : motifs led desappairage et
-// redemarrage, log src bouton (bouton BOOT).
-constexpr uint8_t kRev = 1;
+// redemarrage, log src bouton (bouton BOOT). 2 : transport reseau (section
+// 10 : caps udp et cle, session.transport udp, bloc reseau ip, reponse cle et
+// empreinte, code interdite).
+constexpr uint8_t kRev = 2;
 constexpr size_t kLineMax = 1024;       // RS et LF compris
 constexpr size_t kBudget = 896;         // pire cas vise par message (marge de 128 pour les ajouts)
 constexpr size_t kCmdMax = 127;         // ligne de l'hote, prefixe id= compris
@@ -38,6 +40,9 @@ constexpr uint8_t kRS = 0x1E;
 constexpr uint8_t kCtrlU = 0x15;        // vide la ligne en cours de saisie
 constexpr uint32_t kIdMax = 999999999;  // id=<1..999999999>
 constexpr uint8_t kIdsMax = 8;          // livraison.ids
+// Origines (transports) : 0 = USB, 1..kOrigins-1 = sessions reseau etablies (section 10).
+constexpr uint8_t kOrigins = 3;
+constexpr uint8_t kUsb = 0;
 
 // ---------------------------------------------------------------------------
 //  Ecrivain d'une ligne machine
@@ -63,6 +68,9 @@ class Writer {
   // Ferme la ligne (} LF). false : plus de kLineMax octets, ou objets mal
   // fermes (bogue) ; la ligne ne doit pas etre emise.
   bool finish();
+  // Ligne fermee (finish) : n remplace par celui d'un autre transport (meme
+  // evenement pour chaque session). false : la ligne depasserait kLineMax.
+  bool setN(uint32_t n);
   const uint8_t *data() const { return buf_; }
   size_t size() const { return len_; }
   bool overflow() const { return over_; }
@@ -128,8 +136,30 @@ struct Reply {
   uint32_t version = 0;
   bool hasLease = false;        // bail_s, up_s (json 1, json ping)
   uint32_t leaseS = 0, upS = 0;
+  const char *key = nullptr;    // cle : 64 hexa, une seule fois ('json cle nouvelle', USB)
+  bool hasKid = false;          // empreinte ('json cle ...') : 8 hexa, ou null sans cle
+  const char *kid = nullptr;
 };
 void reply(Writer &w, uint32_t n, uint32_t ms, const Reply &r);
+
+// Dernieres reponses fin d'une session reseau (section 10.2) : un id repete
+// (l'app renvoie une commande restee sans reponse) recoit la meme reponse,
+// sans nouvelle execution. Ni msg, ni cle, ni empreinte ne sont gardes.
+class ReplyCache {
+ public:
+  static constexpr uint8_t kN = 8;
+  void clear();
+  void put(const Reply &r);              // etape fin avec id ; remplace la plus ancienne
+  const Reply *find(uint32_t id) const;  // r.cmd pointe dans le cache
+ private:
+  struct Entry {
+    bool used = false;
+    Reply r;
+    char cmd[kCmdTextMax + 1] = {};
+  };
+  Entry e_[kN];
+  uint8_t next_ = 0;
+};
 
 // Message livraison (section 7.3).
 enum class Issue : uint8_t { Delivered, GaveUp, Cancelled };  // livree, abandon, annulee
@@ -143,6 +173,10 @@ struct Delivery {
   const uint32_t *ids = nullptr;
   uint8_t nIds = 0;
   uint32_t idsLost = 0;
+  // Origine de chaque id (ids[i] : origins[i]) et ids perdus par origine
+  // (kOrigins) : l'emission ne donne a chaque transport que les siens.
+  const uint8_t *origins = nullptr;
+  const uint32_t *idsLostBy = nullptr;
   bool hasWait = false;         // attente_ms connue (periode occupee vue)
   uint32_t waitMs = 0;
   uint32_t delivered = 0, giveUps = 0;
@@ -153,6 +187,12 @@ void delivery(Writer &w, uint32_t n, uint32_t ms, const Delivery &d);
 //  Lignes de l'hote
 // ---------------------------------------------------------------------------
 
+// Commande permise sur le transport reseau (section 10.5) ? nullptr : oui ;
+// sinon le msg de la reponse 'interdite'. cmd : la commande sans le prefixe
+// id=. Seules les bornes propres au reseau sont verifiees ici (bail 10..120,
+// periodes minimales) ; le reste des arguments l'est par l'aiguillage (usage).
+const char *remoteRefusal(const char *cmd);
+
 // Prefixe "id=<n> " (n decimal 1..999999999, sans zero de tete superflu
 // exige) en tete de ligne, espaces de tete ignores. true : *id rempli et
 // *rest pointe sur la commande (espaces sautes). false : pas de prefixe
@@ -160,6 +200,9 @@ void delivery(Writer &w, uint32_t n, uint32_t ms, const Delivery &d);
 bool parseIdPrefix(char *line, uint32_t *id, char **rest);
 // Copie la commande pour reponse.cmd : kCmdTextMax caracteres au plus.
 void copyCmd(char out[kCmdTextMax + 1], const char *cmd);
+// reponse.cmd ne renvoie jamais l'alea de l'app : 'json cle nouvelle <64
+// hexa>' devient 'json cle nouvelle'.
+void maskCmd(char *shown);
 
 // Assemblage des octets recus en lignes (cliPoll). Mode machine : octets hors
 // 0x20..0x7E ignores, sauf LF, CR, Ctrl-U et retour arriere, pour qu'aucun RS
@@ -193,6 +236,7 @@ class LineAssembler {
 class RateCap {
  public:
   explicit RateCap(uint16_t perSecond) : limit_(perSecond) {}
+  void setLimit(uint16_t perSecond) { limit_ = perSecond; }
   bool available(uint32_t now);  // place dans la fenetre en cours
   void take() { count_++; }
   void skip() { skipped_++; }
@@ -228,7 +272,7 @@ constexpr uint32_t kLateMs = 500;  // ligne periodique perdue apres ce retard
 
 enum class Item : uint8_t {
   HelloBase, HelloId, Config, EtatLampe, EtatTranches, EtatSante, CptPilote, CptRadio, CptMatter,
-  NetThread, NetSubs, Heartbeat, Reply
+  NetThread, NetSubs, Heartbeat, Reply, NetIp
 };
 struct Queued {
   Item item;
@@ -249,10 +293,11 @@ class Queue {
   void pop();
   uint8_t size() const { return n_; }
   bool has(Item item) const;
-  // Retire de la tete les lignes en retard de plus de kLateMs et rend leur
+  // Retire de la tete les lignes en retard de plus de lateMs et rend leur
   // nombre (n consomme, json_perdus). Une reponse n'est jamais perdue pour
   // retard : elle arrete le balayage, les lignes derriere elle attendent.
-  uint8_t dropLate(uint32_t now);
+  // Transport reseau : retard plus long (le debit Thread vide la file).
+  uint8_t dropLate(uint32_t now, uint32_t lateMs = kLateMs);
   // La tete peut-elle partir avec 'room' octets libres dans le tampon
   // d'emission ? Ligne periodique : 2 x kLineMax (elle, puis la place d'un
   // evenement). Reponse : kLineMax (elle tient, quelle qu'elle soit).
@@ -300,8 +345,12 @@ class DeliveryWatch {
   // id d'une commande lampe acceptee (busy() vrai a cet instant) : la
   // periode occupee compte comme vue, une livraison suivra toujours, meme si
   // la periode finit avant le tour suivant sans compteur change (annulee).
-  // 8 id au plus, les plus anciens sortent (ids_perdus).
-  void pendingId(uint32_t id, uint32_t pendingSince);
+  // 8 id au plus, tous transports confondus, les plus anciens sortent
+  // (ids_perdus de leur origine).
+  void pendingId(uint32_t id, uint32_t pendingSince, uint8_t origin = kUsb);
+  // Une origine s'en va (session reseau oubliee ou remplacee) : ses id sortent
+  // sans compter comme perdus.
+  void dropOrigin(uint8_t origin);
   // Un tour. true : livraison a emettre maintenant ; *d rempli pour issue,
   // ids (pointe sur la liste interne, valable jusqu'au prochain pendingId),
   // ids_perdus, attente_ms, livrees, abandons ; le reste (version, consigne,
@@ -313,8 +362,10 @@ class DeliveryWatch {
   bool wasBusy_ = false, sawTarget_ = false;
   uint32_t since_ = 0, seenDelivered_ = 0, seenGiveUps_ = 0;
   uint32_t ids_[kIdsMax] = {};
+  uint8_t org_[kIdsMax] = {};
   uint8_t nIds_ = 0;
   uint32_t idsLost_ = 0;
+  uint32_t lostBy_[kOrigins] = {}, lostOut_[kOrigins] = {};
 };
 
 }  // namespace jsonp

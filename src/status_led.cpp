@@ -363,6 +363,17 @@ bool statusLedState(Pattern *p, bool *testing) {
 #endif
 }
 
+bool statusLedTest(bool start) {
+#ifndef DIAG_ONLY
+  if (start) sLed.startTest(millis());
+  else sLed.stopTest();
+  return true;
+#else
+  (void)start;
+  return false;
+#endif
+}
+
 void statusLedCommand(const char *arg) {
 #ifdef DIAG_ONLY
   (void)arg;

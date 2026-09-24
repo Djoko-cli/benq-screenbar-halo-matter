@@ -6,10 +6,10 @@ d'abord l'app macOS native SwiftUI (`apps/macos/`, liaison USB), plus tard
 l'app iOS par le reseau (Thread -> routeur de bordure Apple -> LAN). Le meme
 protocole sert aux deux : seuls le transport et l'authentification changent.
 
-Etat : SPECIFICATION, 24/09/2026. Rien n'est implemente. Premiere version du
-firmware qui l'implementera : a fixer (0.4.0 propose, `FW_VERSION` vaut
-aujourd'hui 0.3.0). Les champs dont la source est privee ou n'existe pas encore
-sont marques **(a ajouter)** : il faudra un accesseur ou une mesure nouvelle.
+Etat : IMPLEMENTE dans le firmware 0.4.0 (transport USB valide au banc le
+24/09 ; transport reseau, section 10, valide au banc le 25/09 : R1 et une
+partie de R2, voir 10). Les marques **(a ajouter)** datent de la
+specification : les champs concernes existent desormais.
 Chaque champ cite sa source dans le code (`fichier : symbole`), pour que
 l'implementation n'invente rien.
 
@@ -23,7 +23,7 @@ l'implementation n'invente rien.
 | Reponses | Toute ligne portant un `id` recoit un message `reponse` (etape `fin`, precedee d'une etape `debut` pour les commandes historiques). Les commandes d'etat de la lampe portant un `id` deviennent asynchrones : `reponse` tout de suite, `livraison` ensuite. |
 | Etat periodique | `etat` (1 Hz), `compteurs` (1 Hz), `reseau` (0,2 Hz), chacun en plusieurs blocs d'une ligne. Les evenements (`rx`, `tx`, ...) sont des indices ; la verite est l'instantane periodique. |
 | Compatibilite | Version majeure `v` dans chaque ligne ; ajouts sans changer `v` ; l'app ignore champs, types et valeurs inconnus. |
-| Reseau (plus tard) | Memes messages en datagrammes UDP sur l'IPv6 Thread, service DNS-SD `_halo-pont._udp`, cle partagee + HMAC-SHA256 ; liste blanche de commandes a distance. |
+| Reseau (0.4.0, build Thread) | Memes messages en datagrammes UDP sur l'IPv6 Thread (port 5480, nom d'hote SRP du noeud), cle partagee + HMAC-SHA256 (enveloppe H1), liste blanche de commandes a distance (section 10). |
 
 ## 1. Vocabulaire et principes
 
@@ -121,9 +121,12 @@ et dans un terminal : la ligne y reste lisible.
   reste ensuite au moins 1024 octets libres (la place d'un evenement). Sinon
   reportee au tour suivant ; perdue (comptee) apres 500 ms de retard. Les
   instantanes complets (`json 1`, `json etat`, `json hello`) passent par cette
-  file : ~4,6 Ko au pire pour `etat`, `compteurs` et `reseau`, ~6,3 Ko avec
-  `hello` et `config`, plus que les 4096 octets du tampon de `HWCDC` ; ecrits
-  d'un seul trait, des lignes seraient perdues a chaque `json 1`.
+  file : ~4,6 Ko au pire pour `etat`, `compteurs` et `reseau` (~5,4 Ko avec
+  le bloc `ip` du build Thread), ~6,3 Ko avec `hello` et `config` (~7,1 Ko),
+  plus que les 4096 octets du tampon de `HWCDC` ; ecrits d'un seul trait, des
+  lignes seraient perdues a chaque `json 1`. Chaque transport a sa file (une
+  ligne par tour et par transport) ; sur le reseau, la place d'un evenement
+  est un datagramme libre dans la file d'emission, et le retard admis 6 s.
 - Evenements : ecrits tout de suite s'ils tiennent, sinon perdus (comptes).
 - Le texte que le protocole emet lui-meme (fin de bail, invite apres `json 0`)
   prend le meme chemin non bloquant (3.5, 3.8).
@@ -305,7 +308,7 @@ envoie "id=1 json 1\n" ----------------------------> mode machine : echo et invi
                   <--------------------------------- config
                   <--------------------------------- etat (lampe, tranches, sante)
                   <--------------------------------- compteurs (pilote, radio, matter)
-                  <--------------------------------- reseau (thread, abonnements)
+                  <--------------------------------- reseau (thread, abonnements, ip)
                   <--------------------------------- reponse id=1 fin ok
 ... puis etat + compteurs chaque seconde, reseau toutes les 5 s, evenements
 envoie "id=k json ping\n" apres 10 s sans autre commande
@@ -343,7 +346,7 @@ empechee pour un deluge qui met plus de 10 s a atteindre son seuil.
 | `json` | etat de la session, en texte humain | |
 | `json 1 [bail <s>]` | passe en mode machine sur ce transport : echo et invite coupes, reglages de session remis aux valeurs par defaut, puis `hello`, `config` et l'instantane complet par la file des periodiques (~6,3 Ko au pire), la `reponse` `fin` apres la derniere ligne. Idempotent : renvoyer `json 1` resynchronise. | bail 0 (aucun) ou 10..600 s, defaut 30 |
 | `json 0` | retour au mode humain : message `fin`, puis l'invite `> ` | |
-| `json etat` | instantane complet : `etat` (3 blocs), `compteurs` (3 blocs), `reseau` (2 blocs), places dans la file des periodiques (une ligne par tour de `loop()`, 1024 octets libres apres, 2.3) ; la `reponse` `fin` part apres la derniere ligne. Pire cas cumule ~4,6 Ko, plus que le tampon de 4096 octets de `HWCDC` : jamais d'un seul trait. Marche aussi en mode humain (une fois). | |
+| `json etat` | instantane complet : `etat` (3 blocs), `compteurs` (3 blocs), `reseau` (2 blocs, 3 en build Thread), places dans la file des periodiques (une ligne par tour de `loop()`, 1024 octets libres apres, 2.3) ; la `reponse` `fin` part apres la derniere ligne. Pire cas cumule ~4,6 Ko (~5,4 Ko en build Thread), plus que le tampon de 4096 octets de `HWCDC` : jamais d'un seul trait. Marche aussi en mode humain (une fois). | |
 | `json hello` | `hello` (2 blocs) et `config`, par la meme file. Marche aussi en mode humain. | |
 | `json ping` | renouvelle le bail ; la `reponse` porte `bail_s` et `up_s` | |
 | `json periode <ms>` | periode des `etat` | 0 (coupe) ou 200..60000, defaut 1000 |
@@ -351,7 +354,7 @@ empechee pour un deluge qui met plus de 10 s a atteindre son seuil.
 | `json reseau <ms>` | periode des `reseau` | 0 ou 1000..60000, defaut 5000 |
 | `json trames 0\|1` | evenements `rx` et `tx` | defaut 1 |
 | `json log 0\|1` | annonces et traces du firmware en messages `log` au lieu de texte | defaut 0 |
-| `json cle [nouvelle <64 hexa>\|efface]` | cle du transport reseau (section 10.4), USB seulement | |
+| `json cle [nouvelle <64 hexa>\|efface]` | cle du transport reseau (section 10.4), USB seulement ; `nouvelle` exige un `id` (la cle part dans la reponse) | build Thread ; ailleurs `refuse` |
 
 Reglages par transport : l'USB et chaque abonne reseau ont les leurs.
 
@@ -475,7 +478,7 @@ cas (957 octets) depassait le budget de 896 (2.2).
 
 | Champ | Type | Sens | Source |
 |---|---|---|---|
-| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) | `jsonp::kRev` (`json_out.h`) |
+| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) ; 2 = transport reseau (section 10 : caps `udp` et `cle`, `session.transport` `udp`, bloc `reseau` `ip`, `reponse` `cle` et `empreinte`, code `interdite`) | `jsonp::kRev` (`json_out.h`) |
 | `fw` | chaine | version complete du firmware, ex. `0.4.0-1a2b3c4` | `FW_VERSION_FULL` (`fw_version.h`) |
 | `fw_desc` | chaine | version du descripteur d'application, celle que Matter publie ; doit egaler `fw` | `esp_app_get_description()->version` |
 | `date`, `heure` | chaines | compilation | `esp_app_get_description()->date`, `->time` |
@@ -606,7 +609,7 @@ en sortent.
 | `sys.heap`, `heap_min`, `heap_bloc` | octets | tas libre, minimum historique, plus grand bloc | `esp_get_free_heap_size()`, `esp_get_minimum_free_heap_size()`, `heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)` |
 | `sys.pile_boucle` | octets | pile de la tache loop jamais utilisee | `uxTaskGetStackHighWaterMark(NULL)` |
 | `sys.boucle_max_ms` | entier | plus long tour de `loop()` depuis le bloc precedent | mesure (a ajouter) |
-| `sys.json_perdus`, `json_trop_longs`, `rejets` | entiers | lignes machine perdues (tampon plein), trop longues (bogue), lignes de l'hote refusees (`trop_long`, `cadence`) | compteurs (a ajouter) |
+| `sys.json_perdus`, `json_trop_longs`, `rejets` | entiers | par transport (la session qui recoit la ligne) : lignes machine perdues (tampon d'emission ou file des datagrammes pleins, retard), trop longues (bogue), lignes de l'hote refusees (`trop_long`, `cadence`, `interdite`, et a distance une ligne sans `id`) | compteurs de la session (`json_mode.cpp : Sink`) |
 
 `matterIsConnected()` sur Thread ne prend jamais le verrou OpenThread en
 attente (`netPoll` : `otLockTry(0)`, une fois par seconde) : sans risque pour
@@ -657,7 +660,8 @@ demarrage, **a ajouter**) signale la coupure.
 ### 5.5 `reseau`
 
 Periode `reseau_ms` (5000). Build Thread seulement (build Wi-Fi : bloc
-`thread` sans l'objet `thread` ; diag : jamais). Deux blocs. Les lectures
+`thread` sans l'objet `thread` ; diag : jamais). Trois blocs (`ip` depuis la
+revision 2). Les lectures
 OpenThread se font sous `otLockTry(0)` (jamais d'attente) et celles de la pile
 sous `TryLockChipStack()` : verrou pris ailleurs, la carte renvoie les
 dernieres valeurs lues et `frais_ms` dit leur age.
@@ -694,6 +698,23 @@ dernieres valeurs lues et `frais_ms` dit leur age.
 | `reprise.passages`, `auto`, `sessions`, `ouvertes`, `echecs`, `sans_nouvelles`, `reprises` | `sResume.runs`, `autoRuns`, `opened`, `ok`, `failed`, `lost`, `resumed` |
 | `reprise.en_cours` | `resumeInFlight(millis())` |
 
+**Bloc `ip`** (build Thread, revision 2 ; pire cas ~770) - `net_udp.cpp :
+netUdpJson`, releve OpenThread sous `otLockTry(0)` au plus toutes les 5 s,
+cle ou pas (l'app lit nom et adresses par l'USB avant de regler une cle) :
+
+| Champ | Source |
+|---|---|
+| `frais_ms` | age du releve (null : jamais lu) |
+| `srp.nom` | nom d'hote SRP du noeud (`otSrpClientGetHostInfo()->mName`, celui que Matter enregistre), a resoudre en `<nom>.local` (10.3) ; null inconnu |
+| `adresses` | au plus 4 objets : `adr` (texte IPv6), `type` (`omr` : SLAAC hors maillage, joignable du LAN ; `ml_eid` : maillage seulement ; `autre`), `pref` (preferee) ; ni RLOC, ni ALOC, ni lien local (`otIp6GetUnicastAddresses`) |
+| `udp.port` | 5480 |
+| `udp.ouvert` | socket ouvert (une cle existe) |
+| `udp.empreinte` | empreinte de la cle (10.4), null sans cle : l'app verifie qu'elle a la bonne |
+| `udp.sessions`, `udp.provisoire` | sessions H1 etablies (0..2), poignee de main en cours |
+| `udp.rx`, `udp.rejets`, `udp.rx_perdus`, `udp.defis` | messages acceptes ; datagrammes refuses en silence (forme, cle, sid, MAC, rejeu, limite, SALUT sans place pour son `DEFI`) ; perdus avant lecture (trop grands, file de reception pleine, jetes a la fermeture du socket) ; `DEFI` emis |
+| `udp.tx`, `udp.tx_perdus`, `udp.tx_erreurs` | datagrammes remis a OpenThread ; perdus apres leur mise en file (4 s sans depart, refus d'OpenThread, file videe par un changement de cle, session partie) ; parmi eux, ceux qu'OpenThread a refuses (une fois par datagramme). Une ligne qui ne trouve pas de place dans la file est comptee dans le `json_perdus` de sa session. |
+| `udp.tampons_libres`, `udp.tampons_min` | tampons de messages OpenThread libres au releve, minimum vu avant un envoi (null : inconnu) |
+
 ### 5.6 `hb` et `fin`
 
 `hb` : battement quand les `etat` sont coupes ou lents (3.6). Champs `boot`,
@@ -714,7 +735,8 @@ id=17 lampe niveau 200
 ```
 
 `n` : entier decimal 1..999999999, croissant par connexion, repart a 1 apres
-999999999. Le prefixe est retire avant l'aiguillage (`handleLine`) ; aucune
+999999999. Sur le reseau, une connexion est une session H1 : les `id` y
+croissent, et une reconnexion refait une poignee de main (10.2). Le prefixe est retire avant l'aiguillage (`handleLine`) ; aucune
 commande ne commence par `id=`.
 
 Pourquoi pas des commandes JSON :
@@ -776,6 +798,8 @@ couvre toutes les commandes acceptees depuis la precedente.
 | `suite` | `livraison` ou `aucune` (lampe asynchrone) | |
 | `consigne`, `a_livrer`, `version` | (lampe asynchrone) | consigne apres la commande |
 | `bail_s`, `up_s` | (`json ping`, `json 1`) | |
+| `cle` | 64 hexa (`json cle nouvelle`, USB, une seule fois) | cle du transport reseau (10.4) : l'app la masque partout |
+| `empreinte` | 8 hexa ou null (`json cle ...`) | empreinte de la cle, null sans cle |
 
 Codes :
 
@@ -793,6 +817,7 @@ Codes :
 | `trop_long` | non | ligne de plus de 127 octets : rien d'execute |
 | `cadence` | non | plus de 20 lignes par seconde sur ce transport : rien d'execute |
 | `interdite` | non | interdite sur ce transport (10.5) |
+| `deja_traite` | non | reseau : `id` deja traite, reponse plus disponible (ou autre commande sous cet `id`) ; rien n'est reexecute (10.2) |
 
 ### 6.4 Commandes utilisees par l'app
 
@@ -837,10 +862,11 @@ med|maxint|reprise auto`, `json cle nouvelle|efface`. Apres `reboot` ou
 - **Une commande en vol a la fois** : l'app attend la `reponse` `fin` d'une
   ligne avant d'envoyer la suivante (file d'attente cote app), `json ping`
   compris.
-- Sans `reponse` sous 3 s (et sans `debut`) : la commande est marquee "sans
+- USB : sans `reponse` sous 3 s (et sans `debut`) : la commande est marquee "sans
   reponse", l'app demande `json etat` et passe a la suivante ; **pas de
   reemission automatique** (`lampe auto` n'est pas idempotent : un appui de
-  plus change le mode).
+  plus change le mode). Reseau : renvoi avec le meme `id`, que la carte
+  reconnait sans reexecuter (10.2).
 - Apres `reponse debut` : pas de verdict de silence (3.6) jusqu'a la `fin`,
   sans liste codee en dur. La plus longue commande actuelle est `txack`
   (200 x 5000 ms, hors canal 5, ~17 min) ; `ecoute`, `prxack`, `sniffspi`,
@@ -861,8 +887,9 @@ med|maxint|reprise auto`, `json cle nouvelle|efface`. Apres `reboot` ou
 
 Emis au moment ou le firmware les constate, dans la tache loop. Ce sont des
 indices : les totaux exacts sont dans `compteurs`. Plafonds de debit par type
-(au-dela, l'evenement n'est pas produit, ne consomme pas de `n`, et le
-suivant du meme type porte `sautes`, le nombre omis) :
+et par session (au-dela, l'evenement n'est pas produit pour cette session, ne
+consomme pas son `n`, et son suivant du meme type porte `sautes`, le nombre
+omis ; plafonds plus bas pour une session reseau, 10.5) :
 
 | Type | Plafond | Conditions |
 |---|---|---|
@@ -1116,94 +1143,185 @@ plus longue y serait perdue a chaque fois. Avant d'y annoncer le protocole :
 puis, a 115200 bauds (~11,5 Ko/s), garder les defauts et couper `trames` hors
 besoin.
 
-## 10. Transport futur : iOS par le reseau
+## 10. Transport reseau : UDP sur Thread
 
-Pas en v1 de l'app macOS ; specifie ici pour que les messages n'aient pas a
-changer.
+Implemente en 0.4.0 (build `esp32c6thread`, `src/net_udp.*`, `src/h1_proto.*`),
+24/09/2026. Chemin eprouve le meme jour depuis le Mac (docs/ETUDE-THREAD-COMPAGNON.md,
+section 0) : ping et UDP vers un port quelconque passent les routeurs de bordure
+Apple. Client de banc : `tools/halo_udp.py` (cle par l'USB, session, commandes).
+
+Banc du 25/09 (carte produit, Mac en Ethernet et Wi-Fi, route statique) :
+- R1 : cle reglee par l'USB, session ouverte, `json 1` (12 lignes et la
+  reponse), `lampe niveau 200` et `lampe mired 300` livrees en ~250 ms, 65
+  lignes en 30 s sans perte ni rejet ; tampons OpenThread libres : 42 au
+  moins sur 65 ;
+- port 5480 : DELAI (tenu par OpenThread, plus de "port injoignable") ;
+- R2, en partie : `reboot`, `lampe brut`, `json 1 bail 0000000000`, `json
+  periode 0000000200` refuses a distance (`interdite`).
 
 ### 10.1 Chemin
 
-iPhone (Wi-Fi) -> LAN -> routeur de bordure Apple (HomePod, Apple TV) ->
-Thread -> noeud (MED, recepteur toujours actif). Le noeud a une adresse OMR
-(prefixe hors maillage annonce par le routeur de bordure), joignable depuis
-le LAN. Aucune dependance a Matter pour ce canal : c'est un service IPv6 de
-plus sur le noeud, a cote de Matter (sockets lwIP sur l'interface Thread). A
-verifier : la pile CHIP d'esp_matter passe-t-elle deja par lwIP
-(`esp_openthread_netif_glue`), ou faut-il creer l'interface ?
+Mac ou iPhone (LAN) -> routeur de bordure (HomePod, Apple TV) -> Thread -> noeud
+(MED, recepteur toujours actif). Le noeud est joint par son adresse OMR
+(prefixe hors maillage, `/64` SLAAC), annoncee sur le LAN par les routeurs de
+bordure (RIO). Aucune dependance a Matter pour ce canal.
+
+- Le client doit avoir la route RIO vers le prefixe OMR. **Bug du noyau de
+  macOS** (xnu, constate les 24 et 25/09, `route -n monitor` : suppression par
+  le noyau, pid 0, route `CONDEMNED`) : quand un routeur de bordure parait un
+  instant injoignable, le noyau supprime les routes qui passent par lui
+  (`nd6_free` -> `rt6_flush`) sans mettre a jour sa liste des routes
+  annoncees (commentaire du code : « XXX TDB Handle lists in route information
+  option as well »), qui la croit toujours installee : la route n'est plus
+  jamais remise. Tenue 37 min le 24/09 ; le 25/09, reinstallee via le Wi-Fi
+  puis supprimee dans la meme seconde. Debrancher l'interface ne suffit donc
+  pas toujours. Une route STATIQUE tient (`rt6_flush` ne touche jamais une
+  route statique) : `sudo route -n add -inet6 -prefixlen 64 <OMR>:: <lien
+  local d'un routeur de bordure>%<interface>`. Choisir soi-meme le routeur
+  de sortie (`IPV6_NEXTHOP`) exige d'etre root : une app ne peut pas
+  contourner seule. App macOS : un assistant systeme (privilegie, installe une
+  fois) maintient la route ; l'app traite EHOSTUNREACH en l'expliquant.
+- Le prefixe OMR peut venir d'un routeur de bordure tiers et changer (constate
+  le 24/09) : le client resout un nom, jamais une adresse figee (10.3).
 
 ### 10.2 Datagrammes UDP
 
-- Un message = un datagramme. Charge : l'enveloppe de securite (10.4)
-  suivie du JSON (carte -> app) ou de la ligne de commande (app -> carte),
-  sans RS ni LF.
-- Taille : 1024 octets de message + 64 d'enveloppe au plus < 1232 octets
-  (charge UDP maximale sans fragmentation IPv6 sur un MTU de 1280). La fragmentation
-  6LoWPAN reste sous le capot de Thread.
-- Port par defaut 52540, le SRV de DNS-SD fait foi.
-- Emission sans jamais bloquer la tache loop : `sendto` prend le verrou du
-  coeur lwIP (`CONFIG_LWIP_TCPIP_CORE_LOCKING=y`) puis, vers l'interface
-  Thread, le second mutex du verrou OpenThread (commentaire d'`otLockTry`,
-  `matter_bridge.cpp`), que tiennent tour a tour la tache tcpip, la pile
-  OpenThread et la garde d'antenne (jusqu'a ~26 ms par paquet lampe). La
-  tache loop pose le datagramme dans une file (2 a 4 places, perdu et compte
-  si pleine) ; une petite tache fait `sendto`. Jamais d'emission reseau sous
-  un verrou OpenThread ou de la pile (interblocage avec tcpip). Reception en
-  `MSG_DONTWAIT`. Un datagramme de ~1 Ko prend ~10 des 65 tampons OpenThread
-  (`CONFIG_OPENTHREAD_NUM_MESSAGE_BUFFERS`) partages avec Matter : une seule
-  emission en vol.
+- Port fixe **5480** (`kHaloUdpPort`), sous la plage ephemere d'OpenThread
+  (49152..65535). Le socket est celui d'OpenThread (`otUdpOpen`, `otUdpBind`
+  sur `OT_NETIF_THREAD_INTERNAL`) : un port tenu par OpenThread n'est plus remis
+  a lwIP. Ouvert seulement tant qu'une cle existe : sans cle, lwIP repond "port
+  injoignable" comme a tout port ferme.
+- Un message = un datagramme : en-tete H1 (10.4) puis l'objet JSON seul (sans
+  RS ni LF) de la carte, ou la ligne de commande de l'app. Une ligne de la
+  carte fait au plus 1022 octets de JSON + 56 d'en-tete : 1078 < 1232 (pas de
+  fragmentation IPv6 sur un MTU de 1280 ; 6LoWPAN fragmente sous Thread).
+  L'app envoie au plus 127 octets de commande ; la carte jette tout datagramme
+  recu de plus de 256 octets.
+- Reception : rappel d'OpenThread (tache OT), qui copie le datagramme dans une
+  file de 4 places, rien d'autre (ni verrou CHIP ni Serial) ; tout le reste se
+  fait dans la tache loop.
+- Emission : file de 6 datagrammes (partagee par les sessions), remis a
+  OpenThread depuis la tache loop sous verrou OpenThread pris SANS attente
+  (`otLockTry(0)`), au plus 2 par tour ; pas remis en 4 s : perdu (compte).
+  - Debit plafonne a **3000 octets/s** en moyenne (credit de 2400 octets) :
+    chaque datagramme fait des trames 802.15.4 a quelques cm du BM5602, et
+    partage le canal avec Matter. Le profil distant (10.6) en consomme ~0,8
+    Ko/s ; un instantane de `json 1` (~6 Ko) part en ~1,5 s.
+  - Un datagramme ne part que s'il reste 24 tampons OpenThread libres apres lui
+    (65 en tout, partages avec Matter ; une ligne de 1 Ko en prend une
+    douzaine), en **priorite basse** : devant un manque de tampons, OpenThread
+    evince les notres, jamais ceux de Matter.
+  - Source : l'adresse que l'app a visee, si elle est encore au noeud (une
+    socket UDP connectee ne garde que celle-la).
+  - Une reponse qui ne trouve pas de place dans la file des datagrammes attend
+    dans la file de sa session (comme une reponse differee) : jamais perdue
+    pour cela.
 - Pourquoi UDP et pas TCP : les messages sont deja des unites ; l'etat est
   periodique et les commandes portent un `id` (une perte se rattrape) ; pas
-  d'etat de connexion ni de tampons TCP par client dans une RAM deja partagee
-  avec Matter. Pertes : la carte garde les 8 dernieres `reponse` par session
-  et renvoie la meme a un `id` repete, sans reexecuter.
+  d'etat de connexion ni de tampons TCP dans une RAM partagee avec Matter.
+- Pertes : les `id` **croissent strictement** dans une session H1 (une
+  reconnexion refait une poignee de main, et l'app en refait une avant de
+  revenir a 1 apres 999999999) ; seule une commande restee sans reponse est
+  renvoyee avec le meme `id` (apres 2 s, 2 fois au plus, avec un `ctr` neuf :
+  c'est la regle 6.5 du reseau, ou une perte est ordinaire). La carte
+  garde les 8 dernieres `reponse` (etape `fin`) de chaque session et regle
+  chaque ligne par son `id` AVANT tout le reste, cadence comprise
+  (`jsonRemoteAdmit`) :
+  - meme `id`, meme commande (jugee sur les 40 caracteres de `cmd`), reponse
+    en cache : la meme `reponse` repart (sans son `msg`), **rien n'est
+    reexecute** (`lampe auto` n'est pas idempotent) ;
+  - reponse differee de cet `id` encore en file (instantane de `json 1`,
+    `json etat`) : rien, elle partira ;
+  - `id` inferieur ou egal au plus haut `id` deja vu (traite mais plus en
+    cache, autre commande sous cet `id`, ou `id` qui recule) : `reponse`
+    `deja_traite` (non gardee), rien d'execute ; l'app rafraichit son etat
+    (`json etat`) ;
+  - sinon l'`id` est neuf : la ligne suit son cours.
+- La file des periodiques admet 6 s de retard sur le reseau (500 ms sur
+  l'USB) : un instantane de `json 1` (~6 Ko) part en ~1,5 s, deux instantanes
+  simultanes (Mac et iPhone apres un redemarrage) en ~4 s ; les sessions
+  reseau passent a tour de role.
+- Sur une session reseau, un evenement frequent (`rx`, `tx`, `log`) n'est
+  produit que s'il reste deux datagrammes libres dans la file d'emission (la
+  place d'une ligne periodique ou d'une reponse apres lui) ; sinon perdu
+  (`json_perdus`, trou de `n`). Les reponses gardent leur ordre : une reponse
+  immediate attend derriere une reponse differee de la meme session.
+- Une seule commande en vol a la fois (6.5), sur le reseau aussi : un `id`
+  plus ancien que le plus haut deja vu est refuse (`deja_traite`), meme s'il
+  arrive seulement en retard.
+- Le `DEFI` d'une poignee de main passe en tete de la file d'emission, hors
+  plafond de debit ; les datagrammes deja scelles d'une session remplacee ou
+  oubliee sont retires de la file.
 
 ### 10.3 Decouverte
 
-Service DNS-SD `_halo-pont._udp`, enregistre par le client SRP d'OpenThread
-sur l'hote SRP deja enregistre par Matter
-(`CONFIG_OPENTHREAD_SRP_CLIENT_MAX_SERVICES=5` dans le sdkconfig du core : de
-la place, Matter en utilise 1 ou 2) ; le
-routeur de bordure le publie en mDNS sur le LAN. Instance : `Halo-<6 derniers
-chiffres de la MAC>`. TXT : `v=1`, `sn=HALO1-...`, `fw=0.4.0-...`.
-A verifier : cohabitation avec la gestion SRP de la pile CHIP (elle peut
-effacer hote et services, par exemple a la remise a zero).
+Base de la v1 : le **nom d'hote SRP** du noeud (`<16 hexa>.local`, celui que
+Matter enregistre aupres des routeurs de bordure, qui le publient en mDNS sur
+le LAN) et le port 5480. La carte donne le nom par l'USB (`reseau`, bloc `ip`,
+`srp.nom`) ; l'app le garde avec la cle et le resout a chaque connexion
+(`getaddrinfo`, `NWConnection` sur `<nom>.local:5480`). L'adresse suit ainsi
+les changements d'OMR.
 
-App iOS : `NWBrowser` sur `_halo-pont._udp` ; `Info.plist` avec
-`NSBonjourServices` (`_halo-pont._udp`) et `NSLocalNetworkUsageDescription`.
+Le nom change a une nouvelle mise en service (et peut-etre a un changement de
+reseau Thread) : l'app le relit a chaque branchement USB. Service DNS-SD
+`_halo-pont._udp` : pas en v1 (cohabitation risquee avec le client SRP de
+CHIP ; voir l'etude). Repli : l'instance `_matter._tcp` du pont
+(`<CompressedFabricId>-<NodeId>`), dont la resolution donne le meme hote.
+
+App iOS : `NSLocalNetworkUsageDescription` (resoudre un nom `.local` demande
+l'autorisation reseau local) ; `NSBonjourServices` seulement pour une navigation.
 
 ### 10.4 Authentification
 
-Cle partagee (PSK) de 32 octets, tiree par la carte de son aleatoire
-(`esp_fill_random`, radio active : aleatoire materiel) melange a celui de
-l'app, gardee en NVS (`halo1/cle`). Elle ne passe **jamais** par le reseau.
+Cle partagee (PSK) de 32 octets, gardee en NVS (`halo1/cle`). Elle ne passe
+**jamais** par le reseau.
 
-- `id=<n> json cle nouvelle <64 hexa>` (USB, mode machine, avec `id`) : l'app
-  fournit 32 octets de `SecRandomCopyBytes`, la carte les melange aux siens
-  (`cle = HMAC-SHA256(alea_app, esp_fill_random(32))`), ecrit la cle en NVS et
-  la rend une seule fois (`cle`, 64 hexa). L'app masque `cle` dans sa console
-  et son journal. Ne jamais taper cette commande dans `pio device monitor` :
-  `log2file` (`platformio.ini`) enregistre la session dans
-  `platformio-device-monitor-*.log`, a la racine, non ignores par
-  `.gitignore`. Toutes les sessions reseau tombent.
-- `json cle` : empreinte (`empreinte` : 8 premiers hexa de SHA-256(cle)) ;
-  `json cle efface` : plus de transport reseau.
-- L'app macOS range la cle dans le trousseau, element synchronise
-  (iCloud) partage avec l'app iOS (meme groupe d'acces) ; a defaut, un QR code
-  affiche par l'app macOS.
+- `id=<n> json cle nouvelle <64 hexa>` (USB seulement, avec `id`) : l'app
+  fournit 32 octets de `SecRandomCopyBytes` (hexa MAJUSCULE), la carte calcule
+  `cle = HMAC-SHA256(cle = alea_app, message = alea_carte)` (`esp_fill_random`,
+  32 octets, radio active : aleatoire materiel), l'ecrit en NVS et la rend une
+  seule fois dans la `reponse` (`cle`, 64 hexa, avec `empreinte`). Le champ
+  `cmd` de cette reponse vaut `json cle nouvelle` (l'alea n'est jamais
+  renvoye). Sans `id` (terminal) : refusee en texte, la cle ne s'affiche
+  jamais (`log2file` enregistre les sessions de `pio device monitor` a la racine
+  du depot). Toutes les sessions reseau tombent. L'app masque `cle` dans sa
+  console et son journal.
+  La cle n'est creee que si la reponse peut partir tout de suite (tampon
+  d'emission USB assez libre) : sinon `refuse`, rien ne change. Si la
+  reponse se perd quand meme, `json cle` montre une empreinte inconnue de
+  l'app : elle refait `json cle nouvelle`. Cle ecrite en NVS mais pas chargee
+  (echec du calcul de l'empreinte, en pratique jamais) : reponse `ok` avec la
+  cle et le `msg` "transport reseau coupe jusqu'au redemarrage".
+- `id=<n> json cle` : `empreinte` (8 premiers hexa de SHA-256(cle)), `null`
+  sans cle. `json cle efface` : plus de cle, plus de transport reseau.
+- La remise a zero Matter (`decommission`, bouton BOOT tenu 8 s) efface aussi
+  la cle, comme le depart du dernier controleur (accessoire retire d'Apple
+  Home : la mise en service se rouvre) : un nouveau proprietaire ne laisse
+  pas l'acces a l'ancien. L'app refait alors `json cle nouvelle` par l'USB.
+- L'app macOS range la cle dans le trousseau (element synchronise iCloud,
+  partage avec l'app iOS) ; a defaut, un QR code affiche par l'app macOS.
 - NVS non chiffree : qui a la carte en main a de toute facon tout (CLI USB).
 
-Session (poignee de main, texte ASCII) :
+Textes canoniques (le MAC porte sur eux) : hexadecimal en **MAJUSCULES**
+seulement, `ctr` en decimal sans zero de tete (1..4294967295) ; toute autre
+forme est refusee. Champs separes par une espace.
+
+Poignee de main :
 
 ```
-app  -> carte : H1 SALUT <kid> <na>
+app  -> carte : H1 SALUT <kid> <na> <mac_salut>
 carte -> app  : H1 DEFI <sid> <nc> <mac_defi>
 ```
 
-`kid` : empreinte de la cle ; `na`, `nc` : 16 octets aleatoires (32 hexa) de
-l'app et de la carte ; `sid` : 8 hexa aleatoires ; `mac_defi` =
-HMAC-SHA256(PSK, `"H1|DEFI|" kid "|" na "|" nc "|" sid`) tronque a 16 octets
-(la carte prouve qu'elle a la cle). Cle de session Ks = HMAC-SHA256(PSK,
-`"H1|SESSION|" na "|" nc "|" sid`).
+`kid` : empreinte de la cle (8 hexa) ; `na`, `nc` : 16 octets aleatoires (32
+hexa) de l'app et de la carte, `na` neuf a chaque essai ; `mac_salut` =
+HMAC-SHA256(PSK, `"H1|SALUT|" kid "|" na`), 16 premiers octets (seul qui a la
+cle fait depenser un `DEFI` a la carte) ; `sid` : 8 hexa aleatoires (non
+nuls) ; `mac_defi` = HMAC-SHA256(PSK, `"H1|DEFI|" kid "|" na "|" nc "|" sid`),
+16 premiers octets en 32 hexa (la carte prouve qu'elle a la cle ; l'app le
+verifie, et ignore un `DEFI` qui ne correspond pas a son dernier `na`). Cle de
+session Ks = HMAC-SHA256(PSK, `"H1|SESSION|" na "|" nc "|" sid`). Le SALUT (83
+octets) est plus long que le DEFI (82) : aucune amplification.
 
 Messages ensuite :
 
@@ -1211,38 +1329,74 @@ Messages ensuite :
 H1 <sid> <ctr> <mac> <charge>
 ```
 
-Champs separes par une espace ; `charge` = tout ce qui suit la quatrieme,
-octet pour octet (la ligne de commande, ou le JSON). `ctr` : decimal, par
-sens, a partir de 1, strictement croissant (fenetre glissante de 32 contre le
-desordre) ; `mac` = 16 premiers octets, en 32 hexa majuscules, de
-HMAC-SHA256(Ks, `sens "|" sid "|" ctr "|" charge`), `sens` = `A` (app ->
-carte) ou `C` (carte -> app), pour qu'un message ne puisse pas etre renvoye a
-son auteur. Toute comparaison de MAC se fait en temps constant. Le premier
-message de l'app (en general `id=1 json 1`) prouve qu'elle a la cle. Session
-oubliee apres 10 min sans message valide. Une poignee de main n'ouvre qu'une
-session provisoire (1 place) ; elle ne devient une des 2 sessions etablies,
-en remplacant la plus ancienne, qu'au premier message de l'app au MAC juste :
-sinon des `SALUT` du LAN evinceraient l'app. 2 `DEFI` par seconde au plus EN
-TOUT (pas par source, pas d'amplification). Adresse et port de l'app : ceux
-du dernier message au MAC juste (adresses temporaires de l'iPhone). L'app
-applique la meme fenetre de 32 aux `ctr` de la carte.
+`charge` = tout ce qui suit la quatrieme espace, octet pour octet (la ligne de
+commande, ou le JSON). `ctr` : par sens, a partir de 1, strictement croissant
+(fenetre glissante de 32 contre le desordre, jugee APRES le MAC : un `ctr`
+forge ne pousse jamais la fenetre). `mac` = 16 premiers octets, en 32 hexa,
+de HMAC-SHA256(Ks, `sens "|" sid "|" ctr "|" charge`), `sens` = `A` (app ->
+carte) ou `C` (carte -> app) : un message ne peut pas etre renvoye a son
+auteur. Comparaisons de MAC en temps constant.
 
-A verifier (R1) : un prefixe OMR global (delegation DHCPv6-PD) rendrait le
-noeud joignable d'Internet. Un filtre sur l'adresse source (ULA fc00::/7
-seulement) couperait en revanche un iPhone qui n'a qu'une adresse globale sur
-le LAN (selection d'adresse source, RFC 6724) ; le HMAC protege de toute
-facon, seul le cout des `DEFI` est expose, d'ou leur limite globale.
+Sessions :
+- un SALUT n'est servi que si son `kid` est le bon, son MAC juste, son `na`
+  pas parmi les 16 derniers acceptes (un SALUT rejoue est ignore), s'il reste
+  du credit de `DEFI` et une place pour le `DEFI` dans la file d'emission ;
+  l'aleatoire de la carte (`nc`, `sid`) n'est tire qu'ensuite ;
+- une poignee de main n'ouvre qu'une session **provisoire** (1 place, la
+  suivante la remplace, oubliee apres 30 s) ; elle devient une des **2
+  sessions etablies** au premier message de l'app au MAC juste (en general
+  `id=1 json 1`), dans une place libre, sinon a la place de la moins
+  recemment active **si elle est muette depuis 30 s** ; sinon le message est
+  ignore (verdict `complet`, rien ne change : l'app le renverra) : trois
+  clients pour deux places ne se chassent pas en boucle, et des `SALUT` du
+  LAN, sans la cle, ne touchent a rien ;
+- **2 `DEFI` par seconde au plus, EN TOUT** (pas par source : adresses
+  usurpables) ;
+- adresse et port de l'app : ceux du plus recent message au MAC juste (`ctr`
+  le plus haut ; adresses temporaires de l'iPhone) : un message plus ancien,
+  retarde ou rejoue d'ailleurs, ne detourne pas les reponses ;
+- session oubliee apres 10 min sans message valide ; nouvelle cle ou cle
+  effacee : toutes tombent ;
+- tout datagramme refuse (forme, cle inconnue, MAC faux, rejeu, sid inconnu,
+  limite des DEFI, places occupees) l'est en silence (compte : `reseau` bloc
+  `ip`, `udp.rejets`).
+- Risques residuels :
+  - qui a capture assez de SALUT valides (plus de 16) peut les rejouer a 2 par
+    seconde et retarder l'ouverture de NOUVELLES sessions ; les sessions
+    etablies n'en souffrent pas ;
+  - un dernier message de l'app perdu en route (jamais recu par la carte) et
+    capture peut etre livre plus tard, pendant la vie de la session (10 min) :
+    il s'execute, et les reponses vont a son expediteur jusqu'au message
+    suivant de l'app. Tout message plus recent de l'app l'annule : l'app
+    termine ses sessions par `json 0`.
+
+Vecteurs (calcules en Python, `hmac`/`hashlib` ; les memes dans
+`tools/host_tests/test_h1.cpp` ; `tools/halo_udp.py` fait les memes calculs) :
+
+```
+PSK  000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F
+kid  630DCD29
+na   A0A1A2A3A4A5A6A7A8A9AAABACADAEAF      nc  505152535455565758595A5B5C5D5E5F      sid 1234ABCD
+SALUT  H1 SALUT 630DCD29 A0A1A2A3A4A5A6A7A8A9AAABACADAEAF 52D853E3FFE9E9CCEFFA98BB5304B32D
+DEFI   H1 DEFI 1234ABCD 505152535455565758595A5B5C5D5E5F BFF13F71B42243E6017D2807F8E6171F
+Ks   20D6D83D97ED44F2BBF8CE56389BD475CBE2B625CE6CE24768B6B4C1C625012F
+A 1  H1 1234ABCD 1 FD97A0C9E604524B49C763452D0310CE id=1 json 1
+C 1  H1 1234ABCD 1 347A2E6A129BC822ECFF39BEC910451C {"v":1,"t":"hb","n":7,"ms":1234}
+```
 
 Integrite et authenticite, **pas de confidentialite** en v1 : l'etat de la
-lampe est lisible sur le LAN. Pour chiffrer plus tard : enveloppe `H2` en
-AEAD (AES-CCM, materiel du C6 via mbedTLS). Ecartes : DTLS-PSK (tampons et
-poignee de main trop lourds a cote de Matter), un cluster Matter proprietaire
-(l'app iOS devrait etre un controleur Matter a part entiere, et un cluster ne
-porte pas un flux de trames).
+lampe est lisible sur le LAN. Pour chiffrer plus tard : enveloppe `H2` en AEAD
+(AES-CCM, materiel du C6 via mbedTLS). Ecartes : DTLS-PSK (tampons et poignee
+de main trop lourds a cote de Matter), un cluster Matter proprietaire.
+
+A verifier (R1) : un prefixe OMR global (delegation DHCPv6-PD) rendrait le
+noeud joignable d'Internet ; le HMAC protege, seul le cout des `DEFI` est
+expose, d'ou leur limite globale.
 
 ### 10.5 Commandes a distance : liste blanche
 
-Autorisees (toujours avec `id`) :
+Toute ligne recue par le reseau porte un `id` (sinon : ignoree, comptee dans
+`rejets`). Autorisees (`jsonp::remoteRefusal`, `json_out.cpp`) :
 - `json 1 [bail <10..120>]` (jamais `bail 0` a distance : la carte emettrait
   sur Thread pour un iPhone parti jusqu'a l'oubli de la session, 10 min),
   `json 0`, `json etat`, `json hello`, `json ping`,
@@ -1251,31 +1405,41 @@ Autorisees (toujours avec `id`) :
   60 s), `json log 0|1` ;
 - `lampe on|off`, `lampe avant|arriere on|off`, `lampe mode ...`, `lampe
   lum|niveau|temp|mired ...`, `lampe auto`, `lampe sync` (asynchrones) ;
-- `led test|stop`.
+- `led test|stop` : a distance, sans le texte humain (qui bloquerait la
+  boucle si l'hote USB ne lit plus) ; `reponse` `fin` `ok` seulement.
 
-Tout le reste : `reponse` `interdite`, rien d'execute. En particulier :
-`reboot`, `decommission`, `erase`, `wifi`, `addr`, `chan`, `debit`, `amble`,
-`aw`, `xo`, `holtek`, `regcfg`, `calib`, `rfinit`, `regs`, tous les outils de
-banc radio (`txack`, `ecoute`, `prxack`, `amont`, `rafale`, `spectre`, `cc*`,
-`swd`, `sniffspi`...), `lampe brut|croire|rafale|ecart|rx|
-leger|garde|gamma|trace|ecoute|attends|rampe|stats|regs|decode|autotest|
-adresse|oublie|sauve`, `matter ...`, `chiplog`, `json cle ...`. Le
-flash (il n'y a pas de partition OTA : `huge_app`) reste USB seulement, comme
-toute evolution OTA future. Les commandes historiques ecrivent sur `Serial` :
-leur texte ne partirait pas sur le reseau ; une console distante demanderait
-de les faire ecrire dans un `Print` fourni (hors v1).
+Tout le reste : `reponse` `interdite` (avec `msg`), rien d'execute. En
+particulier : `json` seul, `json cle ...`, `reboot`, `decommission`, `erase`,
+`wifi`, `matter ...`, `chiplog`, tous les outils de banc radio, `lampe
+brut|croire|rafale|...|oublie|sauve`. Le flash reste USB seulement (pas de
+partition OTA : `huge_app`).
 
-`reseau.thread.matter.code_manuel` et `qr` valent toujours null a distance.
+Bornes propres au reseau (`json 1 bail`, periodes) : verifiees par la liste
+blanche ET par la commande elle-meme (un nombre se lit partout comme
+`strtoul` le lit : `bail 0000000000` vaut 0 et reste refuse). Evenements d'une
+session reseau plafonnes plus bas que sur l'USB : `rx` 10 par seconde (dont 5
+`crc_faux`), `tx` 10, `log` 10.
+
+`reseau.thread.matter.code_manuel` et `qr` valent toujours null a distance
+(qui les lirait pourrait ajouter le pont a son propre controleur).
 
 ### 10.6 Profil distant
 
 `json 1` recu par le reseau regle : `periode_ms` 2000, `compteurs_ms` 0,
-`reseau_ms` 30000, `trames` 0, `log` 0. Raison : chaque `etat` (~1,2 Ko en
-trois datagrammes) fait une douzaine de trames 802.15.4, emises a quelques centimetres du BM5602. La
-garde d'antenne (`Halo1AirGuard`) empeche une trame Thread neuve pendant un
-paquet lampe, mais le terrain du 23/09 a montre des MAX_RT en rafale apres
-chaque commande Apple Home : mesurer `compteurs.pilote.tx.max_rt` avec et sans
-client distant avant d'augmenter les cadences (test R3).
+`reseau_ms` 30000, `trames` 0, `log` 0 (`hello.base.session.transport` :
+`udp`). Raison : chaque `etat` (~1,2 Ko en trois datagrammes) fait une
+douzaine de trames 802.15.4, emises a quelques centimetres du BM5602. La garde
+d'antenne (`Halo1AirGuard`) empeche une trame Thread neuve pendant un paquet
+lampe, mais le terrain du 23/09 a montre des MAX_RT en rafale apres chaque
+commande Apple Home : mesurer `compteurs.pilote.tx.max_rt` avec et sans client
+distant avant d'augmenter les cadences (test R3).
+
+Chaque transport a sa session : l'USB et chaque session reseau ont leurs
+reglages, leur `n`, leur file, leurs pertes (`etat.sante.sys`). Les evenements
+partent vers chaque session en mode machine ; une `reponse`, vers l'origine
+de sa commande seulement ; une `livraison`, vers chaque session en mode
+machine (et vers une session hors mode machine qui attendait un de ses `id`),
+avec les seuls `id` de cette session et ses seuls `ids_perdus`.
 
 ## 11. A implementer et a verifier au banc
 
@@ -1316,7 +1480,14 @@ Tests au banc :
 | U8 | ligne de 140 octets : `trop_long`, rien d'execute |
 | U9 | `json ping` toutes les 10 s et commandes `lampe` avec `id` pendant 10 min : `compteurs.radio.radio.configs` n'augmente pas a chaque ligne (`json` et `id=` hors `invalidateRadio`, 3.4) |
 | U10 | lampe debranchee, `id=3 lampe niveau 200`, puis la molette de la telecommande pendant la reprise (1 s apres le premier tour) : `livraison` `annulee` avec `ids:[3]` (7.3) |
-| R1-R3 | (reseau) decouverte `_halo-pont._udp` depuis un iPhone ; rejet d'un message rejoue ou d'une mauvaise cle ; `max_rt` avec et sans client distant |
+| R1 | (reseau) `tools/halo_udp.py cle <port>` puis `session <nom SRP>.local` depuis le Mac : DEFI verifie, `hello` avec `transport` `udp`, `etat` toutes les 2 s ; `refus <OMR> 5480` : DELAI (port tenu par OpenThread, plus de REFUS de lwIP) |
+| R2 | datagramme rejoue, MAC faux, SALUT rejoue ou au MAC faux, mauvaise cle, `id` absent : rien ne se passe, `udp.rejets` monte ; `reboot` a distance : `interdite` ; meme `id` renvoye (le client le fait apres 2 s sans reponse) : meme `reponse`, rien de reexecute (`lampe auto` deux fois = un seul appui) ; `id` plus ancien : `deja_traite` ; `json 1 bail 0000000000` : `interdite` ; `decommission` : la cle est effacee |
+| R3 | `max_rt` (`compteurs.pilote.tx.max_rt`) sur 10 min de commandes de la molette, avec et sans session distante (profil 10.6) |
+| R4 | debrancher le routeur de bordure qui porte la route du Mac : reprise, et duree |
+| R5 | redemarrage du pont ; changement d'OMR : nouvelle resolution du nom, session rouverte |
+| R6 | Mac branche sur deux interfaces : la route tient-elle ? |
+| R7 | app signee, autorisation reseau local refusee : message clair |
+| R8 | 1000 commandes par le reseau : pertes, RTT, `reponse` rejouee sans reexecution ; `json_perdus` et `udp.tx_perdus` ; USB en parallele sans trou de `n` |
 
 ## 12. Exemples
 
@@ -1336,8 +1507,8 @@ id=1 json 1
 Carte -> app :
 
 ```
-<RS>{"v":1,"t":"hello","n":0,"ms":83512,"bloc":"base","rev":0,"fw":"0.4.0-1a2b3c4","fw_desc":"0.4.0-1a2b3c4","date":"Sep 24 2026","heure":"14:02:11","env":"esp32c6thread","build":"produit","reseau_build":"thread","puce":"esp32c6","idf":"v5.5.5","arduino":"3.3.12","boot":"3FA2C901","reset":"logiciel","reset_n":3,"up_s":83,"session":{"transport":"usb","periode_ms":1000,"compteurs_ms":1000,"reseau_ms":5000,"bail_s":30,"trames":true,"log":false},"limites":{"ligne_max":1024,"cmd_max":127}}
-<RS>{"v":1,"t":"hello","n":1,"ms":83513,"bloc":"identite","boot":"3FA2C901","mac":"F0F5BD012345","id":{"fabricant":"Djoko-CLI","produit":"Pont ScreenBar Halo","serie":"HALO1-F0F5BD012345","nom":"Halo","hw":1,"hw_txt":"ESP32-C6 SuperMini + BM5602"},"caps":["matter","thread","garde","led","lampe_async","trames","log"]}
+<RS>{"v":1,"t":"hello","n":0,"ms":83512,"bloc":"base","rev":2,"fw":"0.4.0-1a2b3c4","fw_desc":"0.4.0-1a2b3c4","date":"Sep 24 2026","heure":"14:02:11","env":"esp32c6thread","build":"produit","reseau_build":"thread","puce":"esp32c6","idf":"v5.5.5","arduino":"3.3.12","boot":"3FA2C901","reset":"logiciel","reset_n":3,"up_s":83,"session":{"transport":"usb","periode_ms":1000,"compteurs_ms":1000,"reseau_ms":5000,"bail_s":30,"trames":true,"log":false},"limites":{"ligne_max":1024,"cmd_max":127}}
+<RS>{"v":1,"t":"hello","n":1,"ms":83513,"bloc":"identite","boot":"3FA2C901","mac":"F0F5BD012345","id":{"fabricant":"Djoko-CLI","produit":"Pont ScreenBar Halo","serie":"HALO1-F0F5BD012345","nom":"Halo","hw":1,"hw_txt":"ESP32-C6 SuperMini + BM5602"},"caps":["matter","thread","garde","led","lampe_async","trames","log","udp","cle"]}
 <RS>{"v":1,"t":"config","n":2,"ms":83514,"lampe":{"adresse":"4FF0FD63","air":"63FDF04F","canal":5,"debit_kbps":125},"reglages":{"paquets":3,"accuses_min":2,"paquets_max":5,"ecart_ms":100,"reprise_ms":1000,"reprises":2,"rearm_ms":100,"silence_ms":500,"rearm_fort":false,"leger":false,"garde":true,"gamma_c":200},"seuils":{"delais_suite":3,"deluge_trames":100,"deluge_pct":90,"fenetre_ms":10000,"sourd_hors_rx":1000,"sans_guerison":3,"ecart_ms":60000,"repli_ms":600000},"matter":{"endpoints":{"principal":1,"avant":2,"arriere":3},"lampes_en":"lumieres","mired_min":153,"mired_max":370,"niveau_plancher":4,"med":1,"med_boot":1,"maxint_s":20,"reprise_auto":true}}
 <RS>{"v":1,"t":"etat","n":3,"ms":83515,"bloc":"lampe","boot":"3FA2C901","up_s":83,"consigne":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"cru":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"a_livrer":[],"confirme":["marche","lum","temp"],"version":12,"phase":"repos","reprise_ms":null,"echecs":0,"lien":"ok","accuse_ms":41210,"dernier_a":0,"a_entendus":0,"memoire":"deux","livrees":4,"abandons":0,"sauve_attente":false,"ecoute":true,"trace":false}
 <RS>{"v":1,"t":"etat","n":4,"ms":83516,"bloc":"tranches","boot":"3FA2C901","up_s":83,"tranches":[]}
@@ -1453,4 +1624,20 @@ Apres `id=11 json log 1` puis `id=12 json periode 0` et `id=13 json compteurs
 <RS>{"v":1,"t":"fin","n":662,"ms":231400,"cause":"bail"}
 json : mode machine coupe (hote muet depuis 30 s)
 >
+```
+
+### 12.8 Transport reseau
+
+Session H1 ouverte depuis le Mac (10.4) ; charges des datagrammes de la carte
+(sans RS dans le datagramme ; `<RS>` ici pour les verifier comme les autres
+exemples). `id=1 json 1` recu par le reseau : profil distant (10.6). Puis une
+commande hors liste blanche, et la meme commande `lampe auto` renvoyee (reponse
+perdue) : servie depuis le cache, rien de reexecute.
+
+```
+<RS>{"v":1,"t":"reseau","n":12,"ms":903120,"bloc":"ip","frais_ms":1840,"srp":{"nom":"561F9A6463953778"},"adresses":[{"adr":"fd77:9e:f4bb:0:6c06:6762:45d6:a3f0","type":"omr","pref":true},{"adr":"fd9a:3c2e:1b7:d4e1:8f02:6c4d:19a3:5b70","type":"ml_eid","pref":true}],"udp":{"port":5480,"ouvert":true,"empreinte":"630DCD29","sessions":1,"provisoire":false,"rx":1,"rejets":0,"rx_perdus":0,"defis":1,"tx":9,"tx_perdus":0,"tx_erreurs":0,"tampons_libres":51,"tampons_min":38}}
+<RS>{"v":1,"t":"reponse","n":13,"ms":903161,"id":1,"etape":"fin","cmd":"json 1","ok":true,"code":"ok","duree_ms":41,"bail_s":30,"up_s":903}
+<RS>{"v":1,"t":"reponse","n":20,"ms":909020,"id":2,"etape":"fin","cmd":"reboot","ok":false,"code":"interdite","msg":"interdite a distance (10.5) : USB seulement","duree_ms":0}
+<RS>{"v":1,"t":"reponse","n":21,"ms":911400,"id":3,"etape":"fin","cmd":"lampe auto","ok":true,"code":"accepte","duree_ms":1,"suite":"livraison","consigne":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"a_livrer":[],"version":14}
+<RS>{"v":1,"t":"reponse","n":24,"ms":913420,"id":3,"etape":"fin","cmd":"lampe auto","ok":true,"code":"accepte","duree_ms":1,"suite":"livraison","consigne":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"a_livrer":[],"version":14}
 ```

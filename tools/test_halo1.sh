@@ -3,7 +3,8 @@
 # surveillance du BM5602 (src/halo1_watch.*), de la logique de la LED d'etat
 # (src/status_led.*, sans ARDUINO), du bouton BOOT (src/boot_button.*, sans
 # ARDUINO) et des briques du protocole JSON
-# (src/json_out.*), sans carte. Les messages JSON produits par les tests sont
+# (src/json_out.*) et de l'enveloppe H1 du transport reseau (src/h1_proto.*,
+# crypto de CommonCrypto), sans carte. Les messages JSON produits par les tests sont
 # ensuite verifies par tools/json_check.py, comme les exemples de
 # docs/PROTOCOLE-JSON.md.
 # A lancer depuis n'importe ou : sh tools/test_halo1.sh
@@ -12,7 +13,7 @@ cd "$(dirname "$0")/.."
 OUT="${TMPDIR:-/tmp}"
 # Une commande par ligne : sous 'set -e', un echec a gauche d'un '&&' ne
 # ferait pas sortir le script (une compilation ratee passerait inapercue).
-rm -f "$OUT/test_halo1" "$OUT/test_json" "$OUT/test_json_lignes.txt"
+rm -f "$OUT/test_halo1" "$OUT/test_json" "$OUT/test_h1" "$OUT/test_json_lignes.txt"
 clang++ -std=c++17 -Wall -Wextra -Werror -Isrc \
   src/halo1_proto.cpp src/halo1_map.cpp src/halo1_watch.cpp src/status_led.cpp src/boot_button.cpp \
   tools/host_tests/test_halo1.cpp \
@@ -22,5 +23,9 @@ clang++ -std=c++17 -Wall -Wextra -Werror -Isrc \
   src/halo1_proto.cpp src/halo1_map.cpp src/halo1_watch.cpp src/json_out.cpp tools/host_tests/test_json.cpp \
   -o "$OUT/test_json"
 "$OUT/test_json" "$OUT/test_json_lignes.txt"
+clang++ -std=c++17 -Wall -Wextra -Werror -Isrc \
+  src/h1_proto.cpp tools/host_tests/test_h1.cpp \
+  -o "$OUT/test_h1"
+"$OUT/test_h1"
 python3 tools/json_check.py -q --strict --independantes "$OUT/test_json_lignes.txt"
 python3 tools/json_check.py -q --strict --exemples docs/PROTOCOLE-JSON.md

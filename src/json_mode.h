@@ -1,21 +1,27 @@
 #pragma once
 // ===========================================================================
 //  Mode machine : protocole JSON du pont avec l'app compagnon
-//  (docs/PROTOCOLE-JSON.md, v1, transport USB)
+//  (docs/PROTOCOLE-JSON.md, v1 ; transports USB et, en build Thread, UDP)
 //
 //  Session ('json 1', bail renouvele par 'json ping', 'json 0'), lignes
 //  periodiques (etat, compteurs, reseau, battement) par la file des
 //  periodiques, evenements du pilote, du pont Matter et de la LED, reponses
 //  aux lignes portant un id, observateur de livraison.
 //
+//  Une session par transport (origine, jsonp::kUsb puis une par session
+//  reseau etablie, net_udp.cpp) : ses reglages, son n, sa file, ses pertes.
+//  Les evenements partent vers chaque session en mode machine, formates pour
+//  elle ; une reponse, vers l'origine de sa commande seulement.
+//
 //  Regles tenues ici (section 2.3) :
 //  - un seul producteur, la tache loop ; un seul tampon de formatage, jamais
 //    deux lignes en cours (une demande imbriquee est refusee et comptee) ;
 //  - jamais d'attente : une ligne qui ne tient pas dans le tampon d'emission
 //    de HWCDC est perdue et comptee (json_perdus), jamais ecrite a moitie ;
-//  - lignes periodiques : une par tour de loop(), et seulement s'il reste
-//    ensuite 1024 octets libres (place d'un evenement) ; perdues apres 500 ms
-//    de retard ;
+//  - lignes periodiques : une par tour de loop() et par transport, et
+//    seulement s'il reste ensuite la place d'un evenement (1024 octets sur
+//    l'USB, un datagramme sur le reseau) ; perdues apres 500 ms de retard
+//    (3 s sur le reseau) ;
 //  - reponses differees (apres un instantane, ou fin d'une commande
 //    historique dont le texte a rempli le tampon) : par la meme file, jamais
 //    perdues pour retard, parties des que 1024 octets sont libres ;
@@ -39,7 +45,29 @@ void jsonPoll();
 
 uint32_t jsonBootId();
 bool jsonMachine();  // mode machine en cours sur l'USB
-void jsonNoteRx();   // un octet recu de l'hote (bail)
+void jsonNoteRx();   // un octet recu de l'hote USB (bail)
+
+// --- Transport reseau (net_udp.cpp, cli.cpp) -------------------------------
+
+// Origine de la commande en cours : jsonp::kUsb hors cliRunRemote().
+void jsonSetOrigin(uint8_t origin);
+uint8_t jsonOrigin();
+// Session reseau neuve dans cet emplacement (origine), ou partie (oubliee,
+// remplacee, cle changee) : son etat de session repart de zero, sans rien
+// emettre ; ses id en attente de livraison sortent.
+void jsonRemoteReset(uint8_t origin);
+void jsonNoteRemoteRx(uint8_t origin);  // message au MAC juste recu (bail)
+// Origine reseau, ligne avec id, avant tout le reste (cadence comprise), shown
+// etant la commande telle que la reponse la montre (reponse.cmd) :
+//  - meme id, meme commande, reponse en cache : elle repart, rien n'est execute ;
+//  - reponse differee de cet id encore en file : rien (elle partira) ;
+//  - id deja traite (hors cache, ou autre commande) : reponse deja_traite ;
+//  - sinon l'id est neuf (le plus haut id de la session avance) : false, a traiter.
+// Les id croissent dans une session H1 ; seule une commande sans reponse est
+// renvoyee avec le meme id.
+bool jsonRemoteAdmit(uint32_t id, const char *shown);
+// Ligne refusee sans reponse possible (reseau, sans id) : comptee (rejets).
+void jsonCountRejected();
 
 // --- CLI (cli.cpp) ----------------------------------------------------------
 
@@ -52,7 +80,7 @@ struct JsonCmd {
 // Famille 'json ...' ; avec id, la reponse part d'ici (immediate, ou apres les
 // lignes d'un instantane).
 void jsonCommand(char *arg, const JsonCmd &c);
-// Au plus 20 lignes par seconde (mode machine, ou ligne avec id).
+// Au plus 20 lignes par seconde et par transport (mode machine, ou ligne avec id).
 bool jsonCadenceOk(uint32_t now);
 // Ligne refusee sans execution (code trop_long ou cadence) : reponse avec id,
 // texte en mode humain sans id ; comptee (sante.sys.rejets).

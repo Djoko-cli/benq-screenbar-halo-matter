@@ -1048,21 +1048,38 @@ static char *afterWord(char *s) {
 //    historique entre reponse debut et reponse fin.
 static void runLine(char *line, bool tooLong) {
   const uint32_t t0 = millis();
+  const bool remote = jsonOrigin() != jsonp::kUsb;
   uint32_t id = 0;
   char *cmd = line;
   const bool hasId = jsonp::parseIdPrefix(line, &id, &cmd);
   while (*cmd == ' ') cmd++;
+  if (remote && !hasId) {
+    jsonCountRejected();  // a distance, toujours un id : sans lui, aucune reponse possible (10.5)
+    return;
+  }
   if (!hasId && !*cmd && !tooLong) return;  // ligne vide (Ctrl-U compris) : rien
   char shown[jsonp::kCmdTextMax + 1];
   jsonp::copyCmd(shown, cmd);  // avant que l'aiguillage ne coupe la ligne en mots
+  jsonp::maskCmd(shown);       // jamais l'alea de 'json cle nouvelle' dans la reponse
   const JsonCmd c{hasId, id, shown, t0};
+  // A distance, d'abord l'id : une commande renvoyee (reponse perdue) recoit la
+  // meme reponse sans nouvelle execution ('lampe auto' n'est pas idempotent),
+  // avant tout refus de cadence qui ecraserait sa reponse.
+  if (remote && jsonRemoteAdmit(id, shown)) return;
   if (tooLong) {
     jsonRefuse(c, "trop_long", "ligne de plus de 127 octets : rien n'est execute");
     return;
   }
-  if ((hasId || jsonMachine()) && !jsonCadenceOk(t0)) {
+  if ((hasId || jsonMachine() || remote) && !jsonCadenceOk(t0)) {
     jsonRefuse(c, "cadence", "plus de 20 lignes par seconde : rien n'est execute");
     return;
+  }
+  if (remote) {
+    if (const char *why = jsonp::remoteRefusal(cmd)) {
+      jsonRefuse(c, "interdite", why);
+      jsonAfterCommand();
+      return;
+    }
   }
   if (!hasId) {
     handleLine(cmd);
@@ -1081,6 +1098,15 @@ static void runLine(char *line, bool tooLong) {
   }
   if (firstWordIs(cmd, "json")) {
     jsonCommand(afterWord(cmd), c);
+  } else if (remote && firstWordIs(cmd, "led")) {
+    // 'led test|stop' a distance (seules permises) : sans le texte humain, qui
+    // bloquerait la boucle si l'hote USB ne lit plus.
+    const bool ok = statusLedTest(firstWordIs(afterWord(cmd), "test"));
+    r.ok = ok;
+    r.code = ok ? "ok" : "refuse";
+    r.msg = ok ? nullptr : "aucun voyant dans ce build";
+    r.durMs = millis() - t0;
+    jsonReply(r);
   } else if (firstWordIs(cmd, "lampe") && lampeIsAsync(afterWord(cmd))) {
     jsonDeliveryFlush();  // une consigne finie avant celle-ci part sans cet id
     LampeAsync la;
@@ -1114,6 +1140,15 @@ static void runLine(char *line, bool tooLong) {
 }
 
 // ---------------------------------------------------------------------------
+
+void cliRunRemote(uint8_t origin, char *line, bool tooLong) {
+  // Jamais l'USB par ce chemin (il echappe a la liste blanche).
+  if (origin == jsonp::kUsb || origin >= jsonp::kOrigins) return;
+  const uint8_t prev = jsonOrigin();
+  jsonSetOrigin(origin);
+  if (jsonOrigin() == origin) runLine(line, tooLong);
+  jsonSetOrigin(prev);
+}
 
 static jsonp::LineAssembler sLine;  // 127 caracteres au plus, prefixe id= compris
 

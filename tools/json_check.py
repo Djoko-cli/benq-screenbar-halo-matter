@@ -132,7 +132,8 @@ RESET = Enum(
 )
 MED = Enum("routeur", "med_init", "med_tard")
 OK_CODES = {"ok", "accepte", "differe", "en_cours", "execute"}
-KO_CODES = {"usage", "refuse", "radio_absente", "radio_perdue", "inconnue", "trop_long", "cadence", "interdite"}
+KO_CODES = {"usage", "refuse", "radio_absente", "radio_perdue", "inconnue", "trop_long", "cadence", "interdite",
+            "deja_traite"}
 
 
 def counters(*names):
@@ -393,6 +394,34 @@ SCHEMAS = {
             ),
         }
     ),
+    ("reseau", "ip"): Obj(
+        {
+            "frais_ms": Null(U32),
+            "srp": Obj({"nom": Null(Str(63))}),
+            "adresses": Arr(
+                Obj({"adr": Str(45), "type": Enum("omr", "ml_eid", "autre"), "pref": BOOL}),
+                4,
+            ),
+            "udp": Obj(
+                {
+                    "port": Int(1, 65535),
+                    "ouvert": BOOL,
+                    "empreinte": Null(Str(8, r"^[0-9A-F]{8}$")),
+                    "sessions": Int(0, 2),
+                    "provisoire": BOOL,
+                    "rx": U32,
+                    "rejets": U32,
+                    "rx_perdus": U32,
+                    "defis": U32,
+                    "tx": U32,
+                    "tx_perdus": U32,
+                    "tx_erreurs": U32,
+                    "tampons_libres": Null(U32),
+                    "tampons_min": Null(U32),
+                }
+            ),
+        }
+    ),
     ("reseau", "abonnements"): Obj(
         {
             "frais_ms": Null(U32),
@@ -442,6 +471,9 @@ SCHEMAS = {
             "version": Opt(U32),
             "bail_s": Opt(U32),
             "up_s": Opt(U32),
+            # 'json cle' (USB, rev 2) : cle rendue une seule fois, empreinte (null sans cle).
+            "cle": Opt(Hex(32)),
+            "empreinte": Opt(Null(Str(8, r"^[0-9A-F]{8}$"))),
         }
     ),
     ("rx", None): Obj(

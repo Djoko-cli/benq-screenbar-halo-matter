@@ -35,6 +35,7 @@
 #ifndef DIAG_ONLY
 #include "matter_bridge.h"
 #include "net.h"
+#include "net_udp.h"
 #endif
 
 bool chipLogging = false;
@@ -167,6 +168,11 @@ void setup() {
   netBegin();
   matterBridgeBegin();
   setChipLogging(false);  // l'init de la pile peut avoir repose son propre filtre
+#if MATTER_NET_THREAD
+  // Transport reseau de l'app (UDP sur Thread) : cle lue en NVS ; le socket
+  // s'ouvre au premier tour de loop() ou OpenThread est libre.
+  netUdpBegin();
+#endif
 #else
   Serial.println();
   Serial.println("*** BUILD DIAGNOSTIC : Matter, Wi-Fi et BLE desactives.");
@@ -191,7 +197,12 @@ void loop() {
   matterBridgePoll();
 #endif
   cliPoll();
-  // Apres toute consigne (tick, Matter, CLI) et avant la LED : la livraison
+#if MATTER_NET_THREAD
+  // Commandes de l'app par le reseau, comme celles de l'USB ; emission des
+  // datagrammes mis en file au tour precedent.
+  netUdpPoll();
+#endif
+  // Apres toute consigne (tick, Matter, CLI, reseau) et avant la LED : la livraison
   // precede l'eclat vert ou rouge (docs/PROTOCOLE-JSON.md, 12.2).
   jsonPoll();
   // Avant la LED, qui montre sa phase ; peut redemarrer la carte (seulement

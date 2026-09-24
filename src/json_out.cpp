@@ -157,6 +157,32 @@ bool Writer::finish() {
   return !over_ && !bad_;
 }
 
+bool Writer::setN(uint32_t n) {
+  if (over_ || bad_ || depth_) return false;
+  // RS {"v":1,"t":"<type>","n":<chiffres>,... : le type est un litteral du
+  // firmware, sans '"' ; le premier ,"n": est donc le bon.
+  static const char kKey[] = ",\"n\":";
+  const size_t kl = sizeof(kKey) - 1;
+  size_t p = 0;
+  while (p + kl <= len_ && memcmp(buf_ + p, kKey, kl)) p++;
+  if (p + kl > len_) return false;
+  p += kl;
+  size_t q = p;
+  while (q < len_ && buf_[q] >= '0' && buf_[q] <= '9') q++;
+  char d[10];
+  size_t dn = 0;
+  do {
+    d[dn++] = (char)('0' + n % 10);
+    n /= 10;
+  } while (n);
+  const size_t newLen = len_ - (q - p) + dn;
+  if (q == p || newLen > kLineMax) return false;
+  memmove(buf_ + p + dn, buf_ + q, len_ - q);
+  for (size_t i = 0; i < dn; i++) buf_[p + i] = (uint8_t)d[dn - 1 - i];
+  len_ = newLen;
+  return true;
+}
+
 // ===========================================================================
 //  Textes
 // ===========================================================================
@@ -392,6 +418,39 @@ void reply(Writer &w, uint32_t n, uint32_t ms, const Reply &r) {
     w.u32("bail_s", r.leaseS);
     w.u32("up_s", r.upS);
   }
+  if (r.key) w.str("cle", r.key, 64);
+  if (r.hasKid) w.str("empreinte", r.kid, 8);
+}
+
+void ReplyCache::clear() {
+  // Sur place : un objet temporaire coute pres d'un Ko de pile a la tache loop.
+  for (Entry &e : e_) e.used = false;
+  next_ = 0;
+}
+
+void ReplyCache::put(const Reply &r) {
+  if (!r.fin || !r.id) return;
+  // Une seule entree par id : la plus recente (un id repete ne s'execute pas,
+  // mais une reponse differee peut suivre une reponse immediate du meme id).
+  for (Entry &e : e_)
+    if (e.used && e.r.id == r.id) e.used = false;
+  Entry &e = e_[next_];
+  next_ = (uint8_t)((next_ + 1) % kN);
+  e.used = true;
+  e.r = r;
+  copyCmd(e.cmd, r.cmd ? r.cmd : "");
+  e.r.cmd = e.cmd;
+  e.r.msg = nullptr;
+  e.r.key = nullptr;
+  e.r.hasKid = false;
+  e.r.kid = nullptr;
+}
+
+const Reply *ReplyCache::find(uint32_t id) const {
+  if (!id) return nullptr;
+  for (const Entry &e : e_)
+    if (e.used && e.r.id == id) return &e.r;
+  return nullptr;
 }
 
 void delivery(Writer &w, uint32_t n, uint32_t ms, const Delivery &d) {
@@ -422,6 +481,82 @@ void delivery(Writer &w, uint32_t n, uint32_t ms, const Delivery &d) {
 // ===========================================================================
 //  Lignes de l'hote
 // ===========================================================================
+
+// Mot i (0, 1, ...) de s, separe par des espaces ; nullptr s'il manque.
+static const char *word(const char *s, uint8_t i, size_t *len) {
+  *len = 0;
+  for (;;) {
+    while (*s == ' ') s++;
+    if (!*s) return nullptr;
+    const char *w = s;
+    while (*s && *s != ' ') s++;
+    if (!i--) {
+      *len = (size_t)(s - w);
+      return w;
+    }
+  }
+}
+
+static bool wordIs(const char *w, size_t n, const char *k) { return w && strlen(k) == n && !strncmp(w, k, n); }
+
+// Entier decimal, lu comme le lit l'aiguillage (strtoul : zeros de tete
+// compris, au-dela de 4294967295 sature) ; false si le mot n'en est pas un
+// (l'aiguillage dira usage). Sans cela, 'bail 0000000000' passerait la liste
+// blanche puis vaudrait 0.
+static bool wordNum(const char *w, size_t n, uint32_t *v) {
+  if (!w || !n) return false;
+  uint64_t x = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (w[i] < '0' || w[i] > '9') return false;
+    x = x * 10 + (uint64_t)(w[i] - '0');
+    if (x > 0xFFFFFFFFull) x = 0xFFFFFFFFull + 1;  // sature, sans debordement
+  }
+  *v = x > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)x;
+  return true;
+}
+
+void maskCmd(char *shown) {
+  size_t n0, n1, n2;
+  const char *w0 = word(shown, 0, &n0), *w1 = word(shown, 1, &n1), *w2 = word(shown, 2, &n2);
+  if (wordIs(w0, n0, "json") && wordIs(w1, n1, "cle") && wordIs(w2, n2, "nouvelle")) strcpy(shown, "json cle nouvelle");
+}
+
+const char *remoteRefusal(const char *cmd) {
+  static const char kDenied[] = "interdite a distance (10.5) : USB seulement";
+  size_t n0, n1, n2, n3, n4;
+  const char *w0 = word(cmd, 0, &n0), *w1 = word(cmd, 1, &n1), *w2 = word(cmd, 2, &n2);
+  const char *w3 = word(cmd, 3, &n3), *w4 = word(cmd, 4, &n4);
+  uint32_t v = 0;
+  if (wordIs(w0, n0, "json")) {
+    if (wordIs(w1, n1, "1")) {
+      // Jamais 'bail 0' a distance : la carte emettrait sur Thread pour un
+      // iPhone parti jusqu'a l'oubli de la session (10 min).
+      if (wordIs(w2, n2, "bail") && wordNum(w3, n3, &v) && !w4 && (v < 10 || v > 120))
+        return "json 1 : bail de 10 a 120 s a distance";
+      return nullptr;
+    }
+    if (wordIs(w1, n1, "0") || wordIs(w1, n1, "etat") || wordIs(w1, n1, "hello") || wordIs(w1, n1, "ping") ||
+        wordIs(w1, n1, "trames") || wordIs(w1, n1, "log"))
+      return nullptr;
+    if (wordIs(w1, n1, "periode"))
+      return wordNum(w2, n2, &v) && v < 2000 ? "json periode : 2000..60000 ms a distance" : nullptr;
+    if (wordIs(w1, n1, "compteurs"))
+      return wordNum(w2, n2, &v) && v && v < 5000 ? "json compteurs : 0 ou 5000..60000 ms a distance" : nullptr;
+    if (wordIs(w1, n1, "reseau"))
+      return wordNum(w2, n2, &v) && v && v < 10000 ? "json reseau : 0 ou 10000..60000 ms a distance" : nullptr;
+    return kDenied;  // 'json' seul (texte humain), 'json cle ...'
+  }
+  if (wordIs(w0, n0, "lampe")) {
+    // Les commandes lampe asynchrones (cli_lampe.cpp : lampeIsAsync).
+    static const char *const kAsync[] = {"on", "off", "avant", "arriere", "mode", "lum",
+                                         "niveau", "temp", "mired", "auto", "sync"};
+    for (const char *k : kAsync)
+      if (wordIs(w1, n1, k)) return nullptr;
+    return kDenied;
+  }
+  if (wordIs(w0, n0, "led") && (wordIs(w1, n1, "test") || wordIs(w1, n1, "stop")) && !w2) return nullptr;
+  return kDenied;
+}
 
 bool parseIdPrefix(char *line, uint32_t *id, char **rest) {
   *rest = line;
@@ -537,11 +672,11 @@ void Queue::pop() {
   n_--;
 }
 
-uint8_t Queue::dropLate(uint32_t now) {
+uint8_t Queue::dropLate(uint32_t now, uint32_t lateMs) {
   uint8_t dropped = 0;
   while (n_) {
     const Queued &q = q_[head_];
-    if (q.item == Item::Reply || now - q.at <= kLateMs) break;
+    if (q.item == Item::Reply || now - q.at <= lateMs) break;
     pop();
     dropped++;
   }
@@ -588,15 +723,32 @@ void DeliveryWatch::reset(uint32_t delivered, uint32_t giveUps) {
   seenGiveUps_ = giveUps;
 }
 
-void DeliveryWatch::pendingId(uint32_t id, uint32_t pendingSince) {
+void DeliveryWatch::pendingId(uint32_t id, uint32_t pendingSince, uint8_t origin) {
+  if (origin >= kOrigins) origin = kUsb;
   if (nIds_ == kIdsMax) {
+    lostBy_[org_[0]]++;
     memmove(ids_, ids_ + 1, sizeof(ids_[0]) * (kIdsMax - 1));
+    memmove(org_, org_ + 1, sizeof(org_[0]) * (kIdsMax - 1));
     nIds_--;
     idsLost_++;
   }
-  ids_[nIds_++] = id;
+  ids_[nIds_] = id;
+  org_[nIds_] = origin;
+  nIds_++;
   wasBusy_ = sawTarget_ = true;
   if (pendingSince) since_ = pendingSince;
+}
+
+void DeliveryWatch::dropOrigin(uint8_t origin) {
+  uint8_t k = 0;
+  for (uint8_t i = 0; i < nIds_; i++) {
+    if (org_[i] == origin) continue;
+    ids_[k] = ids_[i];
+    org_[k] = org_[i];
+    k++;
+  }
+  nIds_ = k;
+  if (origin < kOrigins) lostBy_[origin] = 0;
 }
 
 bool DeliveryWatch::poll(const LampSample &s, uint32_t now, bool machine, Delivery *d) {
@@ -608,11 +760,15 @@ bool DeliveryWatch::poll(const LampSample &s, uint32_t now, bool machine, Delive
       d->ids = ids_;
       d->nIds = nIds_;
       d->idsLost = idsLost_;
+      d->origins = org_;
+      memcpy(lostOut_, lostBy_, sizeof(lostOut_));
+      memset(lostBy_, 0, sizeof(lostBy_));
+      d->idsLostBy = lostOut_;
       d->hasWait = wasBusy_ && since_;  // periode pas vue : commande bloquante
       d->waitMs = d->hasWait ? now - since_ : 0;
       d->delivered = s.delivered;
       d->giveUps = s.giveUps;
-      nIds_ = 0;  // ids_ reste lisible jusqu'au prochain pendingId
+      nIds_ = 0;  // ids_ et org_ restent lisibles jusqu'au prochain pendingId, lostOut_ jusqu'au prochain poll
       idsLost_ = 0;
       emit = true;
     }

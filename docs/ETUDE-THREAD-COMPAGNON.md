@@ -2,7 +2,30 @@
 
 **Etude de faisabilite : joindre le pont Halo par Thread a travers les bornes Apple**
 
-# 1. Verdict : GO, si l'experience de la section 2 passe
+# 0. Resultats de l'etape A (24/09, 19 h 30 - 20 h) : GO
+
+Mac sur l'Ethernet USB seul (Wi-Fi coupe), Tailscale actif.
+
+**A1. Route du Mac**
+- Avec une seule interface, toujours "not in table". Le noyau connait `fd77:9e:f4bb::/64` par 6 routeurs (5 bornes Apple + l'Aqara) et en marque un installe (`fe80::42a:d4d9:3614:70d3%en18`), absent de la table. Une seule interface ne suffit donc pas : la marque perimee survit.
+- Debrancher puis rebrancher l'adaptateur USB lui-meme (detachement de l'interface, `nd6_purge` vide la liste RTI) : route revenue en quelques secondes, `fd77:9e:f4bb::/64 fe80::42a:d4d9:3614:70d3%en18 UGc`.
+- L'auteur de la suppression initiale reste inconnu. Une surveillance filtree de `route -n monitor` tourne (scratchpad `routes.log`) pour relever son pid a la prochaine perte.
+
+**A2. Ping** : 5/5, RTT 21 a 27 ms, hlim 254 (un saut par la borne). `561F9A6463953778.local` se resout bien en `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`, avec 2 fabrics (`309BEA1CCA0C1569`, `20A842B5C3C38A0D`). La confirmation par coupure du pont reste a faire.
+
+**A3. UDP** : 5/5 REFUS sur le port 40000. Temoin : le port Matter 5540 (ouvert) donne DELAI, comme attendu pour un datagramme invalide. Un port non annonce traverse donc les bornes Apple : **GO pour une v1 sans service SRP** (1re ligne du tableau de decision). Le risque 2 est leve.
+
+**Nouveau : l'OMR bouge deja.** A 19 h 33, l'Aqara annoncait `omr=fd77:9e:f4bb::/64` et une RIO basse pour ce prefixe. A 19 h 55, il annonce `omr=fd0d:eec8:5ef:1::/64` et une RIO moyenne pour celui-ci seulement. Les bornes Apple et tous les noeuds restent sur `fd77`. L'Aqara semble avoir quitte la partition Apple. Si `fd77` etait bien son prefixe, les bornes Apple publieront le leur et l'adresse du pont changera : c'est le cas R5 en conditions reelles, et la surveillance le verra.
+
+**Phase 1 (firmware) ecrite le 24/09 au soir, validee au banc le 25/09 (R1 ; R2 en partie) : docs/PROTOCOLE-JSON.md 10.**
+- Relue par 4 agents (concurrence OpenThread, securite H1, non-regression USB, robustesse), puis contre-verifiee par 2 agents ; un bug majeur trouve et corrige (reponses jetees comme perimees).
+- Route du Mac : la cause est un bug du noyau de macOS (suppression par le noyau quand un routeur de bordure parait injoignable, jamais remise) ; seule une route statique tient. Suite : un assistant systeme pour l'app macOS (docs/PROTOCOLE-JSON.md 10.1).
+- `src/h1_proto.*` (pur, 78 verifications sur l'hote avec des vecteurs Python), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (socket OpenThread, files RX/TX, cle NVS), `json_mode.cpp` a une session par transport (USB + 2 reseau), liste blanche `jsonp::remoteRefusal`, cache des 8 dernieres reponses par session.
+- Ecarts assumes par rapport a cette etude : port **5480** ; une ligne = un datagramme (1078 octets au plus, 6LoWPAN fragmente), pas de decoupage a 512 (a revoir apres R3) ; decouverte par le nom SRP (`reseau` bloc `ip`, `srp.nom`), pas de service `_halo-pont._udp` en v1 ; `json cle nouvelle` exige un `id` mais pas le mode machine.
+- Client de banc : `tools/halo_udp.py` (cle par l'USB, session, commandes, test `refus`).
+- Reste : phase 2 (app macOS, source "Reseau"), phase 3 (iOS).
+
+# 1. Verdict : GO, si l'experience de la section 2 passe (passee le 24/09, voir section 0)
 
 Rien n'empeche le chemin Mac ou iPhone -> LAN -> borne Thread Apple -> noeud. Le firmware a deja les briques necessaires : UDP OpenThread, client SRP, HMAC avec SHA materiel. Deux points ne sont pas prouves, et un troisieme bloque ce Mac aujourd'hui. Aucun code avant l'experience.
 
@@ -19,8 +42,9 @@ Rien n'empeche le chemin Mac ou iPhone -> LAN -> borne Thread Apple -> noeud. Le
    - Le noyau est dans un etat incoherent : 2 routes RTI marquees installees, aucune dans la table.
    - XNU ne la reinstallera pas seul, meme en attendant.
    - Cause probable, non prouvee : Wi-Fi et Ethernet USB branches sur le meme lien.
-   - Consequence pour l'app macOS : elle doit detecter EHOSTUNREACH/ENETDOWN et l'expliquer a l'utilisateur.
-2. **Filtrage par port dans la borne (inconnu, decisif).**
+   - 24/09 soir : avec une seule interface, la marque perimee restait. Le double branchement n'est donc pas la cause directe de l'etat bloque. Le detachement de l'interface (adaptateur USB debranche) le repare.
+   - Consequence pour l'app macOS : elle doit detecter EHOSTUNREACH/ENETDOWN et l'expliquer a l'utilisateur (remede : debrancher l'adaptateur, couper puis rallumer le Wi-Fi, ou redemarrer).
+2. **Filtrage par port dans la borne : leve le 24/09 (A3 = 5/5 REFUS).**
    - Les Best Practices du Thread Group (section 4.1) autorisent une borne a ne laisser entrer que le trafic que les noeuds ont demande.
    - Toutes les preuves publiques visent des ports enregistres en SRP (Matter 5540, `_hap._udp`).
    - Si la borne filtre, le service SRP maison devient obligatoire.
@@ -31,7 +55,7 @@ Rien n'empeche le chemin Mac ou iPhone -> LAN -> borne Thread Apple -> noeud. Le
    - CHIP efface tout a chaque demarrage.
    - Le service SRP maison reste donc une option, jamais la base.
 5. **Radio.** Chaque datagramme part en trames 802.15.4 a quelques cm du BM5602, et le lien parent est faible (parent_rssi -80). MAX_RT a mesurer (R3). Datagrammes de 512 octets au plus.
-6. **Prefixe OMR non fige.** Le prefixe actif `fd77:9e:f4bb::/64` est celui de l'Aqara Hub M100 (cle `omr=`), pas d'une borne Apple. Il peut changer. Toujours resoudre un nom, ne jamais figer l'adresse.
+6. **Prefixe OMR non fige.** Le prefixe actif `fd77:9e:f4bb::/64` est celui de l'Aqara Hub M100 (cle `omr=`), pas d'une borne Apple. Il peut changer. Toujours resoudre un nom, ne jamais figer l'adresse. Confirme le 24/09 a 19 h 55 : l'Aqara annonce desormais `fd0d:eec8:5ef:1::/64`, et les bornes Apple gardent `fd77`.
 7. **Flash.** Il reste 143 248 octets libres (4,6 %). La v1 est estimee entre 10 et 20 Ko (non mesure).
 8. **Cote Apple.**
    - La confidentialite du reseau local impose une signature Apple Development.
