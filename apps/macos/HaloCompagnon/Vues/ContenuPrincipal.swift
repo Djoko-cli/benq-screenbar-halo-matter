@@ -102,6 +102,9 @@ struct ContenuPrincipal: View {
                 VoyantLed(motif: pont.etat.motifLed, depuis: pont.etat.motifLedDepuis, taille: 14)
                 Pastille(texte: pont.phase.libelle, couleur: pont.phase.couleur)
             }
+            // De l'air dans la capsule de la barre d'outils : sans cela le
+            // voyant touche le bord gauche (retour de Majid, 24/09).
+            .padding(.horizontal, 8)
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
