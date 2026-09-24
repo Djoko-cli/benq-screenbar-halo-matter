@@ -148,6 +148,10 @@ Event Machine::released(uint32_t now) {
 
 #ifdef ARDUINO
 #include <Arduino.h>
+#include <driver/gpio.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
+#include <esp_timer.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -165,9 +169,17 @@ using namespace bootbtn;
 // au moins), avant le reset : la WS2812 garde sa couleur a travers un reset.
 static_assert(kRebootDelayMs >= statusled::kRebootFlashMs + 50, "reset avant la fin de l'eclat blanc");
 
-static constexpr uint32_t kGuardMaxMs = 1000;  // derniere garde : au-dela, action abandonnee
+static constexpr uint32_t kGuardMaxMs = 1000;        // derniere garde : au-dela, action abandonnee
+static constexpr uint32_t kShutdownHighMs = 50;      // garde de esp_restart() : broche haute de suite
+static constexpr uint32_t kUnpairRestartMs = 10000;  // desappairage sans redemarrage : on redemarre
 
 static Machine sBtn;
+// Desappairage demande (tache loop seulement) : bouton inerte, LED
+// rouge/violet, jusqu'au redemarrage par la tache CHIP.
+static bool sUnpairing = false;
+static uint32_t sUnpairAt = 0;
+// Un esp_restart() est entre dans waitBootHigh() (n'importe quelle tache).
+static bool sRestarting = false;
 
 static bool pinLow() { return digitalRead(PIN_DECOMMISSION_BTN) == LOW; }
 
@@ -206,11 +218,70 @@ static bool pinSettled() {
   }
 }
 
-void bootButtonBegin() { pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP); }
+// Garde de TOUS les resets logiciels (esp_restart() : bouton, 'reboot',
+// 'decommission', et surtout la fin du desappairage : esp_matter::
+// factory_reset() efface l'espace NVS du noeud puis confie la suite a la
+// tache CHIP, qui retire les fabriques, efface le reseau et appelle
+// esp_restart() bien apres matterDecommissionNow(), bouton libre entre-temps).
+// Pas de reset tant qu'IO9 n'a pas ete relue haute kShutdownHighMs de suite.
+// esp_restart() appelle ses gestionnaires du dernier enregistre au premier :
+// enregistre avant le Wi-Fi et Matter, celui-ci passe apres l'arret du Wi-Fi,
+// juste avant le reset (seule la synchro de l'horloge RTC, enregistree avant
+// setup(), le suit). Sans borne : un bouton coince bloque la carte dans le
+// firmware (le relacher la redemarre) au lieu de la laisser en mode
+// telechargement. vTaskDelay laisse tourner les autres taches, et la tache
+// qui attend nourrit le chien de garde si elle y est inscrite (5 s, panique :
+// un reset sans ces gestionnaires).
+static void waitBootHigh() {
+  __atomic_store_n(&sRestarting, true, __ATOMIC_RELAXED);
+  // Hors d'une tache (interruption, ordonnanceur arrete) : attente impossible.
+  if (xPortInIsrContext() || xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) return;
+  const bool wdt = esp_task_wdt_status(nullptr) == ESP_OK;
+  bool told = false;
+  int64_t highSince = esp_timer_get_time();
+  for (;;) {
+    const int64_t now = esp_timer_get_time();
+    if (gpio_get_level((gpio_num_t)PIN_DECOMMISSION_BTN) == 0) {
+      highSince = now;
+      // Texte seul (le mode machine le tolere) : jsonLog() n'appartient qu'a
+      // la tache loop, et c'est peut-etre la tache CHIP qui attend ici.
+      if (!told && Serial.availableForWrite() >= 96) {
+        told = true;
+        Serial.println("[bouton] tenu pendant un redemarrage : reset au relachement (IO9, broche de strapping)");
+      }
+    } else if (now - highSince >= (int64_t)kShutdownHighMs * 1000) {
+      return;
+    }
+    if (wdt) esp_task_wdt_reset();
+    vTaskDelay(1);
+  }
+}
 
-bootbtn::Phase bootButtonPhase() { return sBtn.phase(); }
+void bootButtonBegin() {
+  pinMode(PIN_DECOMMISSION_BTN, INPUT_PULLUP);
+  // Avant netBegin() et matterBridgeBegin() (voir waitBootHigh). Cinq places
+  // seulement : un echec se dit.
+  const esp_err_t err = esp_register_shutdown_handler(waitBootHigh);
+  if (err != ESP_OK)
+    Serial.printf("!! bouton BOOT : garde du reset non enregistree (%s) ; ne pas tenir BOOT pendant un redemarrage\n",
+                  esp_err_to_name(err));
+}
+
+// Pendant le desappairage, la LED garde le motif rouge/violet jusqu'au reset.
+bootbtn::Phase bootButtonPhase() { return sUnpairing ? Phase::Unpair : sBtn.phase(); }
 
 void bootButtonPoll() {
+  if (sUnpairing) {
+    // La tache CHIP efface puis redemarre : le bouton est inerte (un reset
+    // en plein effacement laisserait Matter a moitie retire). Filet si rien
+    // ne redemarre : Matter.decommission() ne rend rien, un echec est muet.
+    if (__atomic_load_n(&sRestarting, __ATOMIC_RELAXED) || millis() - sUnpairAt < kUnpairRestartMs) return;
+    announce("[bouton] toujours en marche %lu s apres le desappairage : redemarrage",
+             (unsigned long)(kUnpairRestartMs / 1000));
+    if (pinSettled()) ESP.restart();
+    sUnpairAt = millis();  // bouton tenu : nouvel essai plus tard
+    return;
+  }
   const Event e = sBtn.update(pinLow(), millis());
   const unsigned long held = sBtn.lastPressMs();
   switch (e) {
@@ -243,8 +314,11 @@ void bootButtonPoll() {
       announce("[bouton] appui long (%lu ms) : retrait de toutes les fabriques Matter, puis redemarrage", held);
       lamp.persistNow();
       if (!pinSettled()) break;
-      // esp_matter::factory_reset() : efface, puis redemarre depuis la tache
-      // CHIP, quelques millisecondes plus tard.
+      // esp_matter::factory_reset() efface l'espace NVS du noeud, puis la
+      // tache CHIP retire les fabriques, efface le reseau et redemarre, un
+      // moment plus tard (waitBootHigh garde ce reset-la aussi).
+      sUnpairing = true;
+      sUnpairAt = millis();
       matterDecommissionNow();
       return;
 #endif

@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 
+#include "boot_button.h"
+
 // ===========================================================================
 //  LED d'etat du produit (signature validee le 23/09)
 //
@@ -14,8 +16,8 @@
 //      automatiques sans effet, ou module perdu : Halo1Lamp::moduleFault())
 //    - Identify (Apple Home)      : arc-en-ciel pendant toute l'identification
 //    - bouton BOOT tenu 8 s       : rouge, noir, violet, noir (100 ms chacun)
-//      tant qu'on tient, puis jusqu'au desappairage : "relache pour
-//      desappairer" (src/boot_button.h)
+//      tant qu'on tient ("relache pour desappairer"), puis pendant le
+//      desappairage, jusqu'au redemarrage (src/boot_button.h)
 //    - bouton BOOT, appui court   : eclat blanc (150 ms), noir, redemarrage
 //  Priorite : Identify > bouton > rouge x3 > rouge fixe > vert > etat du
 //  reseau ('led test' passe sous le bouton). Les trois clignements restent
@@ -59,8 +61,11 @@ enum class Pattern : uint8_t {
   Online
 };
 
-// Ce que le bouton BOOT demande a la LED (bootbtn::Phase, cote carte).
+// Ce que le bouton BOOT demande a la LED.
 enum class Button : uint8_t { None, Unpair, Reboot };
+// D'apres sa phase : Armed et Unpair -> Unpair, Reboot -> Reboot, les autres
+// (Idle, Held, Locked) -> rien.
+Button buttonFor(bootbtn::Phase p);
 
 constexpr uint8_t kMax = 24;                 // plafond par canal
 constexpr uint8_t kGlowMax = 8;              // sommet de la lueur blanche

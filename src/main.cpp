@@ -106,7 +106,10 @@ void setup() {
 
   statusLedBegin();  // WS2812 au noir, IO15 en entree (bogue B9)
   // Bouton BOOT (redemarrage, desappairage) : releve des le premier tour de
-  // loop() ; tenu a ce moment, il est ignore jusqu'a son relachement.
+  // loop() ; tenu a ce moment, il est ignore jusqu'a son relachement. Pose
+  // aussi la garde de tous les esp_restart() (IO9 relue haute avant le
+  // reset) : avant netBegin() et matterBridgeBegin(), pour passer apres
+  // leurs gestionnaires d'arret.
   bootButtonBegin();
 
   // Tant que le noeud n'est pas mis en service, la pile Matter repete une

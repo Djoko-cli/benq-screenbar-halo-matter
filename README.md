@@ -260,7 +260,7 @@ sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
 | eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
 | rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne (aussi quand le module radio est perdu ou en panne) |
 | arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
-| rouge, noir, violet, noir, vite | bouton BOOT tenu 8 s : relacher pour desappairer (voir « 4. Bouton BOOT ») |
+| rouge, noir, violet, noir, vite | bouton BOOT tenu 8 s : relacher pour desappairer, puis desappairage en cours jusqu'au redemarrage (voir « 4. Bouton BOOT ») |
 | eclat blanc (150 ms) | bouton BOOT, appui court relache : redemarrage |
 
 Priorite : arc-en-ciel > bouton BOOT > rouge x3 > rouge fixe > vert > etat du
@@ -316,22 +316,30 @@ relachement** :
 |---|---|---|
 | moins de 2 s | rien de special | eclat blanc (150 ms), puis **redemarrage** (etat de la lampe sauve d'abord, comme `reboot`) |
 | de 2 a 8 s | rien de special | **annule** : rien ne se passe (garde-fou contre une erreur) |
-| 8 s ou plus | rouge, noir, violet, noir, vite (100 ms chacun) des 8 s : « relache pour desappairer » | **desappairage** : retrait de toutes les fabriques Matter (l'accessoire sort d'Apple Home), puis redemarrage |
+| 8 s ou plus | rouge, noir, violet, noir, vite (100 ms chacun) des 8 s : « relache pour desappairer » | **desappairage** : retrait de toutes les fabriques Matter (l'accessoire sort d'Apple Home), puis redemarrage ; la LED garde le rouge/violet jusqu'au redemarrage |
 
 IO9 est une broche de strapping : **tenue basse au moment d'un reset, elle
 fait demarrer le C6 en mode telechargement**, ou il reste inerte jusqu'a une
 coupure d'alimentation. Le firmware n'agit donc jamais bouton enfonce : il
 attend le relachement (anti-rebond de 30 ms), puis 100 ms de releves hauts sans
-interruption, et relit encore la broche 100 ms juste avant le reset (rappuye
-et tenu a ce moment, l'action est abandonnee). Ne pas rappuyer avant la fin du
-redemarrage. D'autres garde-fous :
+interruption, et relit encore la broche 100 ms juste avant l'action (rappuye
+et tenu a ce moment, l'action est abandonnee). Enfin, **tout** redemarrage
+logiciel (bouton, `reboot`, `decommission`, et la fin du desappairage, que la
+pile Matter declenche elle-meme un moment apres) attend la broche relue haute
+50 ms de suite : BOOT tenu pendant un redemarrage le retarde jusqu'au
+relachement, sans limite (un bouton coince bloque la carte, qui repart des
+qu'on le relache, au lieu de la laisser en mode telechargement). D'autres
+garde-fous :
 - un bouton deja enfonce au demarrage est ignore jusqu'a son relachement ;
 - un nouvel appui pendant l'attente d'une action l'abandonne : il compte seul ;
+- pendant le desappairage, le bouton est inerte (un redemarrage en plein
+  effacement laisserait Matter a moitie retire) ; si la carte tourne encore
+  10 s apres, elle redemarre d'elle-meme ;
 - si `loop()` a ete bloquee plus de 100 ms pendant l'appui ou a l'un de ses
   fronts (outil de banc, relance du module radio), la duree est incertaine :
   l'appui est ignore (sauf un appui long deja arme, certain) ;
 - chaque decision est annoncee sur la console, `[bouton] ...` (message `log`,
-  `src` `bouton`, en mode `json log 1`).
+  `src` `bouton`, en mode `json log 1`, hors plafond des logs).
 
 Build diagnostic (sans Matter ni LED) : l'appui court redemarre ; l'appui long
 ne fait que l'expliquer sur la console. Logique pure, testee sur l'hote :

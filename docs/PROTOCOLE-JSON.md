@@ -868,7 +868,7 @@ suivant du meme type porte `sautes`, le nombre omis) :
 |---|---|---|
 | `rx` | 50 par seconde, dont 10 `crc_faux` | `json trames 1` |
 | `tx` | 50 par seconde | `json trames 1` |
-| `log` | 20 par seconde | `json log 1` |
+| `log` | 20 par seconde, sauf `src` `bouton` (jamais plafonne : quelques lignes par appui, anti-rebond de 30 ms ; il porte les `sautes` des autres) | `json log 1` |
 | autres | aucun (rares par nature) | toujours |
 
 ### 7.1 `rx` : trame entendue
@@ -1024,7 +1024,7 @@ change. Champs : `motif`, `avant` (motif precedent), `test`.
 | `motif` | `statusled::Pattern` | Voyant |
 |---|---|---|
 | `identification` | `Identify` | arc-en-ciel |
-| `desappairage` | `ButtonUnpair` | bouton BOOT tenu 8 s, puis jusqu'au desappairage : rouge, noir, violet, noir, 100 ms chacun (rev 1) |
+| `desappairage` | `ButtonUnpair` | bouton BOOT tenu 8 s, puis pendant le desappairage, jusqu'au redemarrage : rouge, noir, violet, noir, 100 ms chacun (rev 1) |
 | `redemarrage` | `ButtonReboot` | bouton BOOT, appui court relache : eclat blanc (150 ms), noir, redemarrage (rev 1) |
 | `injoignable` | `Unreachable` | rouge, 3 clignements (1200 ms) |
 | `panne_radio` | `RadioFault` | rouge fixe |

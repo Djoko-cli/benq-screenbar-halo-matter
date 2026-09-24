@@ -950,12 +950,17 @@ void jsonEventSend() {
 bool jsonLog(const char *src, const char *niv, const char *txt) {
   if (!sS.machine || !sS.log) return false;
   const uint32_t now = millis();
-  if (!sLogCap.available(now)) {
+  // Les annonces du bouton BOOT passent hors plafond : quelques lignes par
+  // appui (anti-rebond de 30 ms), et celle d'une action precede souvent un
+  // reset, apres lequel aucun log ne porterait ses 'sautes'. Elles portent
+  // celles des autres.
+  const bool capped = strcmp(src, "bouton") != 0;
+  if (capped && !sLogCap.available(now)) {
     sLogCap.skip();
     return true;
   }
   if (!claim()) return false;  // ligne en cours (jamais attendu) : en texte
-  sLogCap.take();
+  if (capped) sLogCap.take();
   logLine(sW, sN, now, src, niv, txt, sLogCap.takeSkipped());
   send();
   return true;

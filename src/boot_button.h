@@ -18,7 +18,11 @@
 //  fait demarrer le C6 en mode telechargement (ROM), ou il reste "mort"
 //  jusqu'a une coupure d'alimentation. Aucune action ne part donc avant que
 //  le relachement soit vu ET que la broche soit relue haute sans interruption
-//  pendant kSettleMs ; la carte relit encore la broche juste avant le reset.
+//  pendant kSettleMs ; la carte relit encore la broche juste avant l'action.
+//  Enfin, tout esp_restart() (bouton, 'reboot', 'decommission', fin du
+//  desappairage par la tache CHIP) attend la broche haute avant le reset
+//  (gestionnaire d'arret de boot_button.cpp) ; pendant le desappairage, le
+//  bouton est inerte et la LED reste rouge/violet jusqu'au redemarrage.
 //
 //  La logique (bootbtn::Machine) est pure et sans Arduino : testee sur l'hote
 //  (tools/host_tests). Toutes les durees sont des ecarts non signes : le
@@ -107,12 +111,14 @@ class Machine {
 
 // --- Cote carte (boot_button.cpp, tache loop uniquement) --------------------
 
-// Dans setup() : broche en entree tiree au 3V3. Le premier releve se fait au
-// premier bootButtonPoll() : un bouton encore tenu a ce moment est ignore
-// jusqu'a son relachement.
+// Dans setup(), avant netBegin() et matterBridgeBegin() : broche en entree
+// tiree au 3V3, et garde de tous les esp_restart() (broche relue haute avant
+// le reset). Le premier releve se fait au premier bootButtonPoll() : un
+// bouton encore tenu a ce moment est ignore jusqu'a son relachement.
 void bootButtonBegin();
 // A chaque tour de loop(), avant statusLedPoll() : releve, et action (ne
 // revient pas si elle redemarre la carte).
 void bootButtonPoll();
-// Phase courante, pour la LED d'etat.
+// Phase courante, pour la LED d'etat (Unpair des le desappairage lance,
+// jusqu'au reset).
 bootbtn::Phase bootButtonPhase();
