@@ -51,6 +51,11 @@ struct LigneInfo: View {
     }
 }
 
+extension String {
+    /// Premiere lettre en majuscule (libelles affiches en debut de ligne).
+    var avecMajuscule: String { prefix(1).uppercased() + dropFirst() }
+}
+
 /// Petite etiquette coloree.
 struct Pastille: View {
     let texte: String
@@ -122,6 +127,10 @@ struct VoyantLed: View {
         switch motif {
         case .identification:
             return t + image
+        case .desappairage:
+            return (floor(ms / 100) + 1) * 0.1
+        case .redemarrage:
+            return ms < 150 ? 0.15 : nil
         case .injoignable:
             return ms < 1200 ? (floor(ms / 200) + 1) * 0.2 : nil
         case .panneRadio, .inconnu, nil:
@@ -145,6 +154,16 @@ struct VoyantLed: View {
         case .identification:
             // Roue des couleurs, un tour en 2000 ms (kRainbowMs).
             return (Color(hue: ms.truncatingRemainder(dividingBy: 2000) / 2000, saturation: 1, brightness: 1), 1)
+        case .desappairage:
+            // Bouton tenu 8 s : rouge, noir, violet, noir, par pas de 100 ms (kUnpairStepMs).
+            switch Int(ms / 100) % 4 {
+            case 0: return (.red, 1)
+            case 2: return (.purple, 1)
+            default: return (.red, 0)
+            }
+        case .redemarrage:
+            // Appui court : eclat blanc de 150 ms (kRebootFlashMs), puis noir.
+            return (.white, ms < 150 ? 1 : 0)
         case .injoignable:
             // Rouge, 3 clignements de 200 ms / 200 ms (kRedHalfMs, kRedBlinks), puis noir.
             guard ms < 1200 else { return (.red, 0) }

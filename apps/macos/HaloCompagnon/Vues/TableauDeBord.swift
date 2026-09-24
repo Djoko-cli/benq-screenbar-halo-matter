@@ -224,9 +224,9 @@ private struct CarteVoyant: View {
             HStack(spacing: 14) {
                 VoyantLed(motif: motif, depuis: pont.etat.motifLedDepuis, taille: 34)
                 VStack(alignment: .leading) {
-                    Text(motif?.libelle ?? "inconnu").font(.title3.weight(.semibold))
-                    Text(motif?.description ?? "motif pas encore reçu").foregroundStyle(.secondary)
-                    if pont.etat.ledTest { Pastille(texte: "led test en cours", couleur: .purple) }
+                    Text((motif?.libelle ?? "inconnu").avecMajuscule).font(.title3.weight(.semibold))
+                    Text((motif?.description ?? "motif pas encore reçu").avecMajuscule).foregroundStyle(.secondary)
+                    if pont.etat.ledTest { Pastille(texte: "Test du voyant en cours", couleur: .purple) }
                 }
             }
             if pont.etat.capacites.contains("led") {

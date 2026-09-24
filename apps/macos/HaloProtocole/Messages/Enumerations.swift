@@ -58,6 +58,8 @@ public enum CauseRelance: String, EnumeTolerante {
 /// Motif du voyant (section 7.9).
 public enum MotifLed: String, EnumeTolerante {
     case identification
+    case desappairage   // bouton BOOT tenu 8 s (protocole rev 1)
+    case redemarrage    // bouton BOOT, appui court (protocole rev 1)
     case injoignable
     case panneRadio = "panne_radio"
     case livree
