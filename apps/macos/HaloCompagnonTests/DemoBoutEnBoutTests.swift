@@ -192,7 +192,7 @@ struct DemoBoutEnBoutTests {
     }
 }
 
-@Suite("Modele de l'app en mode demo", .serialized)
+@Suite("Modele de l'app en mode demo", .serialized, .langue(.francais))
 @MainActor
 struct PontDemoTests {
     @Test func connexionEtatEtCommande() async throws {

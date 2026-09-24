@@ -24,7 +24,7 @@ struct TramesEnDirect: View {
                         Text(Format.heure(e.date)).monospacedDigit().foregroundStyle(style(e))
                     }
                     .width(min: 90, ideal: 100, max: 110)
-                    TableColumn("n") { e in
+                    TableColumn(Text(verbatim: "n")) { e in
                         Text(String(e.n)).monospacedDigit().foregroundStyle(.secondary)
                     }
                     .width(min: 40, ideal: 55, max: 80)
@@ -49,8 +49,8 @@ struct TramesEnDirect: View {
             Divider()
             HStack {
                 Text("\(lignes.count) affichées sur \(source.count)")
-                if figees != nil { Pastille(texte: "affichage figé", couleur: .orange) }
-                if pont.tramesCoupees { Pastille(texte: "flux rx/tx coupé (json trames 0)", couleur: .orange) }
+                if figees != nil { Pastille("affichage figé", couleur: .orange) }
+                if pont.tramesCoupees { Pastille("flux rx/tx coupé (json trames 0)", couleur: .orange) }
                 Spacer()
                 Text("Gris : CRC faux (bits douteux) · italique : lignes anciennes, avant le hello")
             }
@@ -58,6 +58,10 @@ struct TramesEnDirect: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+        }
+        // Affichage fige : sa copie du journal suit aussi la langue.
+        .onChange(of: Localisation.partagee.langue) {
+            figees = figees?.map { $0.relocalisee(correspondance: $0.gamma.correspondance) }
         }
     }
 
@@ -85,14 +89,14 @@ struct TramesEnDirect: View {
             Button {
                 figees = figees == nil ? pont.trames.elements : nil
             } label: {
-                Label(figees == nil ? "Figer" : "Reprendre", systemImage: figees == nil ? "pause" : "play")
+                Label(figees == nil ? tr("Figer") : tr("Reprendre"), systemImage: figees == nil ? "pause" : "play")
             }
             .help("Figer l'affichage sans rien demander à la carte")
             Menu {
                 // L'app se regle sur hello.caps, pas sur la version du firmware (5.1).
                 let caps = pont.etat.capacites
                 if caps.contains("trames") {
-                    Button(pont.tramesCoupees ? "Reprendre rx/tx (json trames 1)" : "Couper rx/tx (json trames 0)") {
+                    Button(pont.tramesCoupees ? tr("Reprendre rx/tx (json trames 1)") : tr("Couper rx/tx (json trames 0)")) {
                         pont.couperTrames(!pont.tramesCoupees)
                     }
                     .disabled(!pont.peutCommander)
@@ -104,7 +108,7 @@ struct TramesEnDirect: View {
                         .disabled(!pont.peutCommander || pont.reglages?.log == false)
                 }
                 if !caps.contains("trames") && !caps.contains("log") {
-                    Text(caps.isEmpty ? "Capacités de la carte pas encore reçues" : "Ni trames ni log dans ce build")
+                    Text(caps.isEmpty ? tr("Capacités de la carte pas encore reçues") : tr("Ni trames ni log dans ce build"))
                 }
                 Divider()
                 Button("Écoute de fond active (lampe ecoute 1)") { pont.envoyer("lampe ecoute 1") }
@@ -163,7 +167,7 @@ private struct Detail: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Pastille(texte: e.type, couleur: .blue)
-                        Text("n \(e.n) · ms \(e.ms.map(String.init) ?? "–")").foregroundStyle(.secondary).monospacedDigit()
+                        Text(verbatim: "n \(e.n) · ms \(e.ms.map(String.init) ?? "–")").foregroundStyle(.secondary).monospacedDigit()
                     }
                     Text(e.resume).font(.title3)
                     if e.historique {
@@ -195,11 +199,11 @@ private struct Detail: View {
     private func champs(_ e: EntreeTrame) -> some View {
         switch e.message {
         case .rx(let r):
-            LigneInfo("Source", r.source == .accuse ? "dans une fenêtre d'accusé" : "écoute passive")
+            LigneInfo("Source", r.source == .accuse ? tr("dans une fenêtre d'accusé") : tr("écoute passive"))
             LigneInfo("Brut (8 octets après l'adresse)", r.brut, mono: true)
             LigneInfo("PCF : longueur · PID · NO_ACK", "\(r.len.map(String.init) ?? "–") · \(r.pid.map(String.init) ?? "–") · \(r.noAck.map(String.init) ?? "–")", mono: true)
-            LigneInfo("Charge", r.charge.map { $0.isEmpty ? "(vide)" : $0 }, mono: true)
-            LigneInfo("CRC", r.crc.map { "\($0) \(r.crcOk == true ? "juste" : "FAUX")" }, couleur: r.crcOk == false ? .red : nil, mono: true)
+            LigneInfo("Charge", r.charge.map { $0.isEmpty ? tr("(vide)") : $0 }, mono: true)
+            LigneInfo("CRC", r.crc.map { r.crcOk == true ? tr("\($0) juste") : tr("\($0) FAUX") }, couleur: r.crcOk == false ? .red : nil, mono: true)
             LigneInfo("Classement", r.type.libelle)
         case .tx(let t):
             LigneInfo("Tranche · charge", "\(t.tranche?.libelle ?? "?") · \(t.charge ?? "")", mono: true)
@@ -213,12 +217,12 @@ private struct Detail: View {
             LigneInfo("Issue", l.issue.libelle, couleur: l.issue == .livree ? .green : .red)
             LigneInfo("Consigne", Interpretation.etat(l.consigne))
             LigneInfo("Cru", Interpretation.etat(l.cru))
-            LigneInfo("Commandes de l'app", (l.ids ?? []).isEmpty ? "aucune (Matter, télécommande...)" : l.ids!.map(String.init).joined(separator: ", "))
+            LigneInfo("Commandes de l'app", (l.ids ?? []).isEmpty ? tr("aucune (Matter, télécommande...)") : l.ids!.map(String.init).joined(separator: ", "))
             LigneInfo("Attente", l.attenteMs.map { "\($0) ms" })
         case .relance(let r):
             LigneInfo("Cause", r.cause.libelle)
             LigneInfo("Rang", r.rang.map(String.init))
-            LigneInfo("Résultat", r.ok == true ? "réussie" : "échec", couleur: r.ok == true ? .green : .red)
+            LigneInfo("Résultat", r.ok == true ? tr("réussie") : tr("échec"), couleur: r.ok == true ? .green : .red)
             LigneInfo("Durée (boucle bloquée)", r.dureeMs.map { "\($0) ms" })
             LigneInfo("Total · EN PANNE", "\(r.total ?? 0) · \(Format.oui(r.panne))")
         case .intent(let i):

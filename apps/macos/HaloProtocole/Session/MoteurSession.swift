@@ -71,13 +71,62 @@ public struct MoteurSession: Sendable {
         }
     }
 
+    /// Annonce de la session a l'utilisateur. Gardee sous cette forme (et non
+    /// en texte) : son texte suit la langue en vigueur, meme apres coup (bandeau).
+    public enum Note: Sendable, Equatable {
+        /// `Commande inconnue : "id=1"` (grave).
+        case ancienFirmware
+        /// Banniere de demarrage recue en texte.
+        case texteDemarrage
+        /// `hello` d'une version majeure non geree (grave).
+        case versionInconnue(Int)
+        /// Aucun `hello` apres les renvois de `json 1` (grave).
+        case aucuneReponse
+        case reponseJson1Perdue
+        /// Silence de la carte depuis tant de secondes : `json 1` renvoye.
+        case silence(secondes: Int)
+        /// Pas de `hello` sous 5 s apres le `json 1` du silence : le port est rouvert.
+        case resynchroSansReponse
+        /// `fin` `bail` : `json 1` renvoye.
+        case bailEchu
+
+        /// Montree en bandeau (echec de la connexion).
+        public var grave: Bool {
+            switch self {
+            case .ancienFirmware, .versionInconnue, .aucuneReponse: true
+            default: false
+            }
+        }
+
+        public var texte: String {
+            switch self {
+            case .ancienFirmware:
+                tr("Firmware sans protocole JSON : flasher une version 0.4.0 ou plus. L'app reste en console seule.")
+            case .texteDemarrage:
+                tr("Texte de démarrage reçu : la carte a peut-être redémarré.")
+            case .versionInconnue(let v):
+                tr("Protocole v\(String(v)) non géré par cette app (v1) : console seule.")
+            case .aucuneReponse:
+                tr("Aucune réponse : mauvais port, carte en mode téléchargement, ou commande de banc en cours ? Nouvel essai toutes les 30 s.")
+            case .reponseJson1Perdue:
+                tr("Réponse au json 1 perdue : les commandes reprennent.")
+            case .silence(let s):
+                tr("Silence de la carte depuis \(s) s : json 1 renvoyé.")
+            case .resynchroSansReponse:
+                tr("Pas de réponse à json 1 sous 5 s : fermeture et réouverture du port.")
+            case .bailEchu:
+                tr("La carte a quitté le mode machine (bail échu) : json 1 renvoyé.")
+            }
+        }
+    }
+
     public enum Effet: Sendable, Equatable {
         case envoyer(Data)
         /// Fermer puis rouvrir le transport.
-        case rouvrir(String)
+        case rouvrir(Note)
         /// Redemarrage de la carte : vider les etats derives, nouveau segment de courbes.
         case redemarrage(ancien: String?, nouveau: String?)
-        case note(String, grave: Bool)
+        case note(Note)
         case commandeSansReponse(UUID)
         /// Commande de banc de plus de 20 min.
         case proposerFermeture
@@ -175,13 +224,12 @@ public struct MoteurSession: Sendable {
                 phase = .ancienFirmware
                 json1 = nil
                 correlateur.reinitialiser(maintenant: maintenant)
-                effets.append(.note("Firmware sans protocole JSON : flasher une version 0.4.0 ou plus. "
-                                    + "L'app reste en console seule.", grave: true))
+                effets.append(.note(.ancienFirmware))
             } else if t.classe == .commande || t.classe == .annonce {
                 correlateur.texte(t.texte)
             }
             if t.classe == .demarrage {
-                effets.append(.note("Texte de démarrage reçu : la carte a peut-être redémarré.", grave: false))
+                effets.append(.note(.texteDemarrage))
             }
         case .machine(let l):
             continuite(l.enveloppe.n)
@@ -190,7 +238,7 @@ public struct MoteurSession: Sendable {
             phase = .versionInconnue(v)
             json1 = nil
             correlateur.reinitialiser(maintenant: maintenant)
-            effets.append(.note("Protocole v\(v) non géré par cette app (v1) : console seule.", grave: true))
+            effets.append(.note(.versionInconnue(v)))
         default:
             break
         }
@@ -211,9 +259,7 @@ public struct MoteurSession: Sendable {
                     // Pas de session : ce qui attendait en file ne partira pas plus tard, a l'insu.
                     correlateur.reinitialiser(maintenant: maintenant)
                     statistiques.sansReponse += 1
-                    effets.append(.note("Aucune réponse : mauvais port, carte en mode téléchargement, "
-                                        + "ou commande de banc en cours ? Nouvel essai toutes les 30 s.",
-                                        grave: true))
+                    effets.append(.note(.aucuneReponse))
                 }
             }
         case .sansReponse:
@@ -226,14 +272,14 @@ public struct MoteurSession: Sendable {
                 // hello recu mais pas la reponse fin (ligne perdue ou abimee) : la file repart.
                 json1 = nil
                 statistiques.sansReponse += 1
-                effets.append(.note("Réponse au json 1 perdue : les commandes reprennent.", grave: false))
+                effets.append(.note(.reponseJson1Perdue))
             }
             let limite = parametres.facteurSilence * max(Double(periodeMs) / 1000, parametres.silenceMin)
             if correlateur.commandeDeBanc == nil, maintenant - dernierRecuA >= limite {
                 phase = .resynchro
                 resynchroDepuis = maintenant
                 statistiques.silences += 1
-                effets.append(.note("Silence de la carte depuis \(Int(limite)) s : json 1 renvoyé.", grave: false))
+                effets.append(.note(.silence(secondes: Int(limite))))
                 correlateur.perdreEnVol(maintenant: maintenant)
                 effets += envoyerJson1(maintenant: maintenant)
             }
@@ -241,7 +287,7 @@ public struct MoteurSession: Sendable {
             if let d = resynchroDepuis, maintenant - d >= parametres.delaiResynchro {
                 resynchroDepuis = nil
                 statistiques.reouvertures += 1
-                effets.append(.rouvrir("Pas de réponse à json 1 sous 5 s : fermeture et réouverture du port."))
+                effets.append(.rouvrir(.resynchroSansReponse))
             }
         default:
             break
@@ -365,7 +411,7 @@ public struct MoteurSession: Sendable {
             correlateur.recevoir(liv, maintenant: maintenant)
         case .fin(let f):
             if f.cause == .bail, phase.modeMachine {
-                effets.append(.note("La carte a quitté le mode machine (bail échu) : json 1 renvoyé.", grave: false))
+                effets.append(.note(.bailEchu))
                 historique = true
                 phase = .attenteHello(essai: 1)
                 correlateur.perdreEnVol(maintenant: maintenant)

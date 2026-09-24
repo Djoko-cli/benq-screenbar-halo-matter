@@ -31,7 +31,7 @@ enum ExemplesSpec {
     }
 }
 
-@Suite("Exemples de la specification (section 12)")
+@Suite("Exemples de la specification (section 12)", .langue(.francais))
 struct ExemplesSpecTests {
     @Test func toutesLesLignesSontLues() throws {
         let lignes = try ExemplesSpec.lignes()

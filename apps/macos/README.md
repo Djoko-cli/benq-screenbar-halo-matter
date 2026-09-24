@@ -50,6 +50,64 @@ L'app **n'ouvre jamais un port seule** : il faut choisir une source dans la
 barre latérale (le port Espressif, VID 303A, est proposé en premier) ou le
 mode démo (⇧⌘D).
 
+## Langues : français et anglais
+
+L'app parle français (langue de développement : les clés des catalogues sont
+les textes français) et anglais. **Réglages** (⌘,) › **Langue** : « Langue du
+système » (par défaut), *English* ou *Français*. Le choix est gardé dans les
+préférences de l'app (`langue`).
+
+- **À chaud** : le contenu des fenêtres change tout de suite, sans relancer ni
+  perdre l'écran, les filtres ou la console. Les vues (`Text("...")`) lisent
+  la locale de l'environnement ; les textes calculés (sens décodé, libellés,
+  notes, erreurs, menus de l'app) passent par `Localisation` (framework), qui
+  est observable : une vue qui en a lu un se redessine. Le sens décodé du
+  journal des trames est recalculé (la recherche suit), le bandeau d'alerte et
+  les marqueurs des courbes aussi.
+- **Au prochain lancement** : ce que macOS dessine lui-même (menus
+  Halo Compagnon, Édition, Fenêtre, boîtes du système), qui suit
+  `AppleLanguages` de l'app ; le choix l'écrit (« Langue du système » le
+  retire). Les Réglages le disent. Les lignes déjà écrites dans la console
+  gardent leur langue (c'est un journal).
+- **Langue du système** : la première des langues préférées que l'app sait
+  servir (`en-GB` donne l'anglais) ; aucune (allemand...) : le français, comme
+  AppKit, qui retombe sur la langue de développement.
+- **Formats** (heures, nombres, octets, dates relatives) : la langue choisie
+  avec la région de l'utilisateur, comme macOS pour une langue choisie app par
+  app (anglais en France : `en_FR`, 24 h, virgule décimale, « kB » et non
+  « ko »). Les quantités ont leurs séparateurs de milliers ; les identifiants
+  (`id`, numéros de paquet, versions) et l'hexa restent bruts.
+- **Termes techniques intacts** dans les deux langues : champs et valeurs JSON
+  (`lum`, `temp`, `raz`...), commandes de la CLI (`lampe stats raz`,
+  `json trames 0`), hexa, unités. Lexique anglais : consigne → *target*, état
+  cru → *believed state*, livraison → *delivery*, accusé → *ack*, relance du
+  module → *module restart*, désappairage → *unpairing*, voyant → *status
+  LED*, tranche → *slice*, bail → *lease*, EN PANNE → *DOWN*. Casse : phrase
+  en français ; en anglais, *Title Case* pour les titres (écrans, cartes,
+  sections, menus, boutons, alertes), casse de phrase pour le texte courant,
+  les libellés de ligne, les cases à cocher et les pastilles.
+
+Catalogues (String Catalogs) : `HaloProtocole/Localizable.xcstrings`
+(framework : sens décodé, libellés, erreurs, notes de session, avec pluriels),
+`HaloCompagnon/Ressources/Localizable.xcstrings` (app) et
+`HaloCompagnon/Ressources/Titres.xcstrings` (titre de section dont le texte
+français sert déjà de libellé, avec une autre casse anglaise). Les clés sont
+extraites par le compilateur (`SWIFT_EMIT_LOC_STRINGS`) : Xcode les ajoute en
+construisant ; en ligne de commande, après un changement de texte :
+
+```sh
+I=<DerivedData>/Build/Intermediates.noindex/HaloCompagnon.build/Debug
+xcrun xcstringstool sync HaloProtocole/Localizable.xcstrings \
+    --stringsdata $I/HaloProtocole.build/Objects-normal/arm64/*.stringsdata
+xcrun xcstringstool sync HaloCompagnon/Ressources/*.xcstrings \
+    --stringsdata $I/HaloCompagnon.build/Objects-normal/arm64/*.stringsdata
+```
+
+puis traduire les nouvelles clés. Les tests (`LocalisationTests`) vérifient
+que chaque clé a son anglais (pluriels complets, mêmes valeurs interpolées),
+qu'aucune n'est périmée et que le code et les catalogues vont ensemble. Tester
+toute l'app dans l'autre langue : `xcodebuild ... test -testLanguage en -testRegion US`.
+
 ## Mode démo
 
 La source « Mode démo » remplace le port série par une carte simulée
@@ -172,16 +230,18 @@ apps/macos/
 │   ├── Etat/                    dernier instantané de chaque (t, bloc), datation par ms et l'ancre du hello
 │   ├── Courbes/                 calculs de la section 8
 │   ├── Correspondances/         niveau Matter <-> brut (gamma), mireds <-> temp (portage de halo1_map.cpp)
-│   ├── Interpretation/          sens décodé et libellés français
+│   ├── Interpretation/          sens décodé et libellés
+│   ├── Localisation/            langue en vigueur (observable), choix du réglage, locale des formats
+│   ├── Localizable.xcstrings    textes du framework (français source, anglais)
 │   └── Transport/               protocole Transport (ouvrir, envoyer, fermer, flux d'octets)
-├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, couverture des clés (aucun champ perdu), corrélation, session, courbes, correspondances, fichier de démo
+├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, couverture des clés (aucun champ perdu), corrélation, session, courbes, correspondances, fichier de démo, catalogues et sens décodé dans les deux langues
 ├── HaloCompagnon/               l'app
 │   ├── Serie/                   PortSerie (POSIX, DTR/RTS), TransportSerie (DispatchSource), SurveillantUSB (IOKit)
 │   ├── Demo/                    ScriptDemo, SimulateurDemo (acteur), TransportDemo
-│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux
-│   ├── Vues/                    les quatre écrans et leurs composants
-│   └── Ressources/demo-halo.jsonl
-├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage, changement de source)
+│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux ; réglage de la langue
+│   ├── Vues/                    les quatre écrans, leurs composants, les Réglages
+│   └── Ressources/              demo-halo.jsonl, catalogues de textes (Localizable, Titres)
+├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage, changement de source), langue de l'app
 └── Outils/generer_demo.py       générateur de la chronologie de démo
 ```
 

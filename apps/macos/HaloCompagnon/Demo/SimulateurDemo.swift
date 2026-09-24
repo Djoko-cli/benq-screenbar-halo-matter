@@ -155,7 +155,7 @@ actor SimulateurDemo {
             if index >= script.suite.count {
                 if finDuScriptA == nil { finDuScriptA = ms }
                 if let f = finDuScriptA, ms - f > 15_000 {
-                    fermer("Démo : fin de la chronologie, la carte redémarre (ré-énumération USB simulée)")
+                    fermer(tr("Démo : fin de la chronologie, la carte redémarre (ré-énumération USB simulée)"))
                     return
                 }
             }
@@ -767,7 +767,7 @@ actor SimulateurDemo {
             motifLed = "operationnel"
         case ("reboot", _):
             texte("Redemarrage...")
-            programme.append(Programme(du: msCarte() + 300, groupe: -2, action: .fermer("La carte redémarre (démo) : ré-énumération USB")))
+            programme.append(Programme(du: msCarte() + 300, groupe: -2, action: .fermer(tr("La carte redémarre (démo) : ré-énumération USB"))))
             return  // la carte redemarre avant la fin
         case ("matter", _):
             texte("  Matter : en service, connecte (Thread, child), 1 fabrique (demo)")

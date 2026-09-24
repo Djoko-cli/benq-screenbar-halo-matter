@@ -9,15 +9,15 @@ enum CategorieTrame: String, CaseIterable, Identifiable, Sendable {
 
     var libelle: String {
         switch self {
-        case .rx: "Reçues (rx)"
-        case .tx: "Émises (tx)"
-        case .livraison: "Livraisons"
-        case .relance: "Relances"
-        case .module: "Module"
-        case .matter: "Matter / Thread"
-        case .voyant: "Voyant"
-        case .reponse: "Réponses"
-        case .session: "Session, log"
+        case .rx: tr("Reçues (rx)")
+        case .tx: tr("Émises (tx)")
+        case .livraison: tr("Livraisons")
+        case .relance: tr("Relances")
+        case .module: tr("Module")
+        case .matter: tr("Matter / Thread")
+        case .voyant: tr("Voyant")
+        case .reponse: tr("Réponses")
+        case .session: tr("Session, log")
         }
     }
 
@@ -36,6 +36,20 @@ enum CategorieTrame: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Reglages de la carte dont depend le sens decode d'une trame (niveau Matter
+/// d'une luminosite brute) : gardes pour le recalculer dans une autre langue.
+struct ParametresGamma: Hashable, Sendable {
+    let gammaC: Int?
+    let plancher: Int?
+
+    init(_ etat: EtatPont) {
+        gammaC = etat.config?.valeur.reglages?.gammaC
+        plancher = etat.config?.valeur.matter?.niveauPlancher
+    }
+
+    var correspondance: CorrespondanceLuminosite { CorrespondanceLuminosite(gammaC: gammaC, plancher: plancher) }
+}
+
 /// Un evenement de la carte (tout sauf les instantanes periodiques).
 struct EntreeTrame: Identifiable, Sendable {
     let id: Int
@@ -48,10 +62,41 @@ struct EntreeTrame: Identifiable, Sendable {
     let json: String
     /// Ligne ancienne, restee dans le tampon avant le `hello` de la session.
     let historique: Bool
-    let resume: String
+    let gamma: ParametresGamma
+    /// Sens decode, dans la langue en vigueur a son calcul (recalcule quand elle change).
+    private(set) var resume: String
     /// `resume` et `json` en minuscules, calcules une fois : la recherche ne
     /// refait pas 5000 conversions a chaque evenement recu.
-    let cleRecherche: String
+    private(set) var cleRecherche: String
+
+    init(id: Int, date: Date, n: UInt32, ms: UInt32?, type: String, message: MessageCarte, json: String,
+         historique: Bool, gamma: ParametresGamma, correspondance: CorrespondanceLuminosite) {
+        self.id = id
+        self.date = date
+        self.n = n
+        self.ms = ms
+        self.type = type
+        categorie = .de(message)
+        self.message = message
+        self.json = json
+        self.historique = historique
+        self.gamma = gamma
+        resume = ""
+        cleRecherche = ""
+        localiser(correspondance)
+    }
+
+    private mutating func localiser(_ c: CorrespondanceLuminosite) {
+        resume = Interpretation.resume(message, correspondance: c)
+        cleRecherche = (resume + "\n" + json).lowercased()
+    }
+
+    /// La meme entree, son sens decode dans la langue en vigueur.
+    func relocalisee(correspondance c: CorrespondanceLuminosite) -> EntreeTrame {
+        var e = self
+        e.localiser(c)
+        return e
+    }
 
     /// Trame a bits douteux (CRC faux) : affichee en gris.
     var douteuse: Bool {
@@ -105,18 +150,42 @@ struct Rejet: Identifiable, Sendable {
 
 /// Marqueur sur les courbes.
 struct Marqueur: Identifiable, Sendable {
-    enum Genre: String, Sendable {
-        case relance = "Relance"
-        case module = "Module"
-        case abandon = "Abandon"
-        case role = "Rôle Thread"
-        case redemarrage = "Redémarrage"
+    enum Genre: Sendable {
+        case relance, module, abandon, role, redemarrage
+    }
+
+    /// Ce que dit le marqueur ; son texte suit la langue en vigueur.
+    enum Etiquette: Sendable, Equatable {
+        case relance(CauseRelance)
+        case module(EtatModule)
+        case abandon(CauseAbandon?)
+        case role(de: String?, vers: String)
+        case redemarrage(boot: String?)
     }
 
     let id: Int
     let date: Date
-    let genre: Genre
-    let texte: String
+    let etiquette: Etiquette
+
+    var genre: Genre {
+        switch etiquette {
+        case .relance: .relance
+        case .module: .module
+        case .abandon: .abandon
+        case .role: .role
+        case .redemarrage: .redemarrage
+        }
+    }
+
+    var texte: String {
+        switch etiquette {
+        case .relance(let c): c.libelle
+        case .module(let e): e.libelle
+        case .abandon(let c): c?.libelle ?? tr("abandon")
+        case .role(let de, let vers): "\(de ?? "?") → \(vers)"
+        case .redemarrage(let boot): "boot \(boot ?? "?")"
+        }
+    }
 }
 
 /// Mesure ponctuelle (abonnes actifs, RSSI du parent).
@@ -139,6 +208,11 @@ struct Borne<Element> {
     }
 
     mutating func vider() { elements.removeAll() }
+
+    /// Remplace chaque element, dans l'ordre.
+    mutating func transformer(_ f: (Element) -> Element) {
+        elements = elements.map(f)
+    }
 }
 
 extension Borne: Sendable where Element: Sendable {}

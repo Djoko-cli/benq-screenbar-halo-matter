@@ -18,11 +18,11 @@ public enum ErreurLigne: Error, Sendable, Equatable, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .vide: "Ligne vide."
-        case .tropLongue(let o, let m): "Ligne trop longue : \(o) octets, \(m) au plus avec le préfixe id=."
-        case .caractereInterdit: "Seuls les caractères ASCII imprimables sont permis (pas d'accents)."
-        case .prefixeId: "L'app ajoute elle-même le préfixe id=<n>."
-        case .json: "Jamais de JSON ni d'octet RS vers la carte."
+        case .vide: tr("Ligne vide.")
+        case .tropLongue(let o, let m): tr("Ligne trop longue : \(o) octets, \(m) au plus avec le préfixe id=.")
+        case .caractereInterdit: tr("Seuls les caractères ASCII imprimables sont permis (pas d'accents).")
+        case .prefixeId: tr("L'app ajoute elle-même le préfixe id=<n>.")
+        case .json: tr("Jamais de JSON ni d'octet RS vers la carte.")
         }
     }
 }
@@ -87,47 +87,52 @@ public enum PolitiqueCommandes {
         }
 
         if transport == .udp, !autoriseeADistance(commande) {
-            return .interdite("Interdite à distance (liste blanche, section 10.5).")
+            return .interdite(tr("Interdite à distance (liste blanche, section 10.5)."))
         }
         if m == ["json", "0"] {
-            return .interdite("Utiliser « Libérer le port » : l'app enverra json 0 et fermera le port.")
+            return .interdite(tr("Utiliser « Libérer le port » : l'app enverra json 0 et fermera le port."))
         }
 
-        let dangereuses: [String: String] = [
-            "reboot": "Redémarre la carte (le port USB va se ré-énumérer).",
-            "decommission": "Retire la carte de tous les écosystèmes Matter.",
-            "erase": "Efface la configuration de la carte.",
-            "wifi": "Change les identifiants Wi-Fi.",
-            "addr": "Change l'adresse radio (outil de banc).",
-            "chan": "Change le canal radio (outil de banc).",
-            "xo": "Change le réglage du quartz (outil de banc).",
-            "debit": "Change le débit radio (outil de banc).",
-            "amble": "Change le préambule radio (outil de banc).",
-            "aw": "Change la largeur d'adresse (outil de banc).",
-            "holtek": "Reconfigure le module radio (outil de banc).",
-            "regcfg": "Écrit des registres du module radio (outil de banc).",
-        ]
-        if let raison = dangereuses[premier] { return .confirmation(raison) }
+        if let raison = raisonDangereuse(premier) { return .confirmation(raison) }
 
         if premier == "lampe", m.count >= 2 {
             switch m[1] {
-            case "oublie": return .confirmation("Oublie l'état de la lampe.")
-            case "adresse" where m.count >= 3: return .confirmation("Change l'adresse de la lampe.")
+            case "oublie": return .confirmation(tr("Oublie l'état de la lampe."))
+            case "adresse" where m.count >= 3: return .confirmation(tr("Change l'adresse de la lampe."))
             case "stats" where m.count >= 3 && m[2] == "raz":
-                return .confirmation("Remet à zéro les compteurs du pilote et de la radio.")
+                return .confirmation(tr("Remet à zéro les compteurs du pilote et de la radio."))
             default: break
             }
         }
         if premier == "matter", m.count >= 2 {
-            if m[1] == "med" || m[1] == "maxint" { return .confirmation("Change un réglage Matter persistant.") }
+            if m[1] == "med" || m[1] == "maxint" { return .confirmation(tr("Change un réglage Matter persistant.")) }
             if m[1] == "reprise", m.count >= 3, m[2] == "auto" {
-                return .confirmation("Change la reprise automatique des abonnements.")
+                return .confirmation(tr("Change la reprise automatique des abonnements."))
             }
         }
         if premier == "json", m.count >= 3, m[1] == "cle", m[2] == "nouvelle" || m[2] == "efface" {
-            return .confirmation("Change la clé du transport réseau : toutes les sessions réseau tombent.")
+            return .confirmation(tr("Change la clé du transport réseau : toutes les sessions réseau tombent."))
         }
         return .autorisee
+    }
+
+    /// Commandes dangereuses (premier mot) et la raison de la confirmation.
+    static func raisonDangereuse(_ premier: String) -> String? {
+        switch premier {
+        case "reboot": tr("Redémarre la carte (le port USB va se ré-énumérer).")
+        case "decommission": tr("Retire la carte de tous les écosystèmes Matter.")
+        case "erase": tr("Efface la configuration de la carte.")
+        case "wifi": tr("Change les identifiants Wi-Fi.")
+        case "addr": tr("Change l'adresse radio (outil de banc).")
+        case "chan": tr("Change le canal radio (outil de banc).")
+        case "xo": tr("Change le réglage du quartz (outil de banc).")
+        case "debit": tr("Change le débit radio (outil de banc).")
+        case "amble": tr("Change le préambule radio (outil de banc).")
+        case "aw": tr("Change la largeur d'adresse (outil de banc).")
+        case "holtek": tr("Reconfigure le module radio (outil de banc).")
+        case "regcfg": tr("Écrit des registres du module radio (outil de banc).")
+        default: nil
+        }
     }
 
     /// Apres ces commandes, l'app attend la re-enumeration de l'USB (3.1).

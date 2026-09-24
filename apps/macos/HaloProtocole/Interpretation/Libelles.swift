@@ -1,14 +1,15 @@
 import Foundation
 
-// Libelles francais des enumerations, pour l'interface.
+// Libelles des enumerations, pour l'interface, dans la langue en vigueur
+// (catalogue du framework ; cles : les libelles francais).
 
 extension Lampes {
     public var libelle: String {
         switch self {
-        case .avant: "avant"
-        case .arriere: "arrière"
-        case .deux: "les deux"
-        case .inconnu: "inconnu"
+        case .avant: tr("avant")
+        case .arriere: tr("arrière")
+        case .deux: tr("les deux")
+        case .inconnu: tr("inconnu")
         }
     }
 }
@@ -16,10 +17,10 @@ extension Lampes {
 extension ChampConsigne {
     public var libelle: String {
         switch self {
-        case .marche: "marche"
-        case .lum: "luminosité"
-        case .temp: "température"
-        case .inconnu: "inconnu"
+        case .marche: tr("marche")
+        case .lum: tr("luminosité")
+        case .temp: tr("température")
+        case .inconnu: tr("inconnu")
         }
     }
 }
@@ -27,10 +28,10 @@ extension ChampConsigne {
 extension PhasePilote {
     public var libelle: String {
         switch self {
-        case .repos: "au repos"
-        case .rafale: "rafale en cours"
-        case .reprise: "reprise en attente"
-        case .inconnu: "inconnue"
+        case .repos: tr("au repos")
+        case .rafale: tr("rafale en cours")
+        case .reprise: tr("reprise en attente")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -38,9 +39,9 @@ extension PhasePilote {
 extension EtatLien {
     public var libelle: String {
         switch self {
-        case .inconnu: "inconnu"
-        case .ok: "joignable"
-        case .perdu: "injoignable"
+        case .inconnu: tr("inconnu")
+        case .ok: tr("joignable")
+        case .perdu: tr("injoignable")
         }
     }
 }
@@ -48,11 +49,11 @@ extension EtatLien {
 extension ModeRadio {
     public var libelle: String {
         switch self {
-        case .inconnu: "inconnu"
-        case .reset: "reset"
-        case .emission: "émission"
-        case .ecoute: "écoute"
-        case .veille: "veille"
+        case .inconnu: tr("inconnu")
+        case .reset: tr("reset")
+        case .emission: tr("émission")
+        case .ecoute: tr("écoute")
+        case .veille: tr("veille")
         }
     }
 }
@@ -60,10 +61,10 @@ extension ModeRadio {
 extension Symptome {
     public var libelle: String {
         switch self {
-        case .delais: "délais TX"
-        case .bruit: "bruit (CRC faux)"
-        case .sourde: "puce sourde"
-        case .inconnu: "inconnu"
+        case .delais: tr("délais TX")
+        case .bruit: tr("bruit (CRC faux)")
+        case .sourde: tr("puce sourde")
+        case .inconnu: tr("inconnu")
         }
     }
 }
@@ -71,12 +72,12 @@ extension Symptome {
 extension CauseRelance {
     public var libelle: String {
         switch self {
-        case .verif: "vérification ratée"
-        case .delais: "délais TX"
-        case .bruit: "bruit (CRC faux)"
-        case .sourde: "puce sourde"
-        case .l3: "essai L3 (module perdu)"
-        case .inconnu: "inconnue"
+        case .verif: tr("vérification ratée")
+        case .delais: tr("délais TX")
+        case .bruit: tr("bruit (CRC faux)")
+        case .sourde: tr("puce sourde")
+        case .l3: tr("essai L3 (module perdu)")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -84,30 +85,30 @@ extension CauseRelance {
 extension MotifLed {
     public var libelle: String {
         switch self {
-        case .identification: "identification"
-        case .desappairage: "désappairage armé"
-        case .redemarrage: "redémarrage"
-        case .injoignable: "lampe injoignable"
-        case .panneRadio: "panne radio"
-        case .livree: "consigne livrée"
-        case .nonAppaire: "non appairé"
-        case .horsReseau: "hors réseau"
-        case .operationnel: "opérationnel"
-        case .inconnu: "inconnu"
+        case .identification: tr("identification")
+        case .desappairage: tr("désappairage armé")
+        case .redemarrage: tr("redémarrage")
+        case .injoignable: tr("lampe injoignable")
+        case .panneRadio: tr("panne radio")
+        case .livree: tr("consigne livrée")
+        case .nonAppaire: tr("non appairé")
+        case .horsReseau: tr("hors réseau")
+        case .operationnel: tr("opérationnel")
+        case .inconnu: tr("inconnu")
         }
     }
 
     public var description: String {
         switch self {
-        case .identification: "arc-en-ciel"
-        case .desappairage: "rouge/violet rapide : relâcher le bouton pour désappairer"
-        case .redemarrage: "éclat blanc, puis redémarrage"
-        case .injoignable: "rouge, 3 clignements"
-        case .panneRadio: "rouge fixe"
-        case .livree: "éclat vert"
-        case .nonAppaire: "bleu clignotant"
-        case .horsReseau: "orange lent"
-        case .operationnel: "éteint, lueur blanche toutes les 10 s"
+        case .identification: tr("arc-en-ciel")
+        case .desappairage: tr("rouge/violet rapide : relâcher le bouton pour désappairer")
+        case .redemarrage: tr("éclat blanc, puis redémarrage")
+        case .injoignable: tr("rouge, 3 clignements")
+        case .panneRadio: tr("rouge fixe")
+        case .livree: tr("éclat vert")
+        case .nonAppaire: tr("bleu clignotant")
+        case .horsReseau: tr("orange lent")
+        case .operationnel: tr("éteint, lueur blanche toutes les 10 s")
         case .inconnu: "?"
         }
     }
@@ -116,11 +117,11 @@ extension MotifLed {
 extension TypeTranche {
     public var libelle: String {
         switch self {
-        case .lum: "luminosité"
-        case .temp: "température"
-        case .a: "bouton A"
-        case .brut: "brute"
-        case .inconnu: "inconnue"
+        case .lum: tr("luminosité")
+        case .temp: tr("température")
+        case .a: tr("bouton A")
+        case .brut: tr("brute")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -128,15 +129,15 @@ extension TypeTranche {
 extension TypeTrame {
     public var libelle: String {
         switch self {
-        case .lum: "luminosité"
-        case .temp: "température"
-        case .a: "bouton A"
-        case .accuseLampe: "accusé de la lampe"
-        case .service: "service"
-        case .favori: "favori"
-        case .invalide: "invalide"
-        case .crcFaux: "CRC faux"
-        case .inconnu: "inconnue"
+        case .lum: tr("luminosité")
+        case .temp: tr("température")
+        case .a: tr("bouton A")
+        case .accuseLampe: tr("accusé de la lampe")
+        case .service: tr("service")
+        case .favori: tr("favori")
+        case .invalide: tr("invalide")
+        case .crcFaux: tr("CRC faux")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -144,12 +145,12 @@ extension TypeTrame {
 extension VerdictTx {
     public var libelle: String {
         switch self {
-        case .ack: "accusé"
-        case .ackTrame: "trame au lieu d'un accusé"
-        case .maxRt: "MAX_RT (sans accusé)"
-        case .delai: "délai dépassé"
-        case .fifo: "FIFO refusée"
-        case .inconnu: "inconnu"
+        case .ack: tr("accusé")
+        case .ackTrame: tr("trame au lieu d'un accusé")
+        case .maxRt: tr("MAX_RT (sans accusé)")
+        case .delai: tr("délai dépassé")
+        case .fifo: tr("FIFO refusée")
+        case .inconnu: tr("inconnu")
         }
     }
 
@@ -159,10 +160,10 @@ extension VerdictTx {
 extension IssueLivraison {
     public var libelle: String {
         switch self {
-        case .livree: "livrée"
-        case .abandon: "abandon"
-        case .annulee: "annulée"
-        case .inconnu: "inconnue"
+        case .livree: tr("livrée")
+        case .abandon: tr("abandon")
+        case .annulee: tr("annulée")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -170,9 +171,9 @@ extension IssueLivraison {
 extension CauseAbandon {
     public var libelle: String {
         switch self {
-        case .injoignable: "lampe injoignable"
-        case .module: "module radio perdu"
-        case .inconnu: "inconnue"
+        case .injoignable: tr("lampe injoignable")
+        case .module: tr("module radio perdu")
+        case .inconnu: tr("inconnue")
         }
     }
 }
@@ -180,13 +181,13 @@ extension CauseAbandon {
 extension EtatModule {
     public var libelle: String {
         switch self {
-        case .panne: "EN PANNE"
-        case .retabli: "rétabli"
-        case .perdu: "perdu (muet)"
-        case .retrouve: "retrouvé"
-        case .configRejetee: "configuration rejetée"
-        case .configVerifiee: "configuration vérifiée"
-        case .inconnu: "inconnu"
+        case .panne: tr("EN PANNE")
+        case .retabli: tr("rétabli")
+        case .perdu: tr("perdu (muet)")
+        case .retrouve: tr("retrouvé")
+        case .configRejetee: tr("configuration rejetée")
+        case .configVerifiee: tr("configuration vérifiée")
+        case .inconnu: tr("inconnu")
         }
     }
 }
@@ -194,20 +195,20 @@ extension EtatModule {
 extension CodeReponse {
     public var libelle: String {
         switch self {
-        case .ok: "exécutée"
-        case .accepte: "acceptée, livraison à suivre"
-        case .differe: "différée (rien à émettre)"
-        case .enCours: "en cours"
-        case .execute: "exécutée"
-        case .usage: "arguments invalides"
-        case .refuse: "refusée"
-        case .radioAbsente: "module radio absent"
-        case .radioPerdue: "module radio perdu"
-        case .commandeInconnue: "commande inconnue"
-        case .tropLong: "ligne trop longue"
-        case .cadence: "cadence dépassée"
-        case .interdite: "interdite sur ce transport"
-        case .inconnu: "code inconnu"
+        case .ok: tr("exécutée")
+        case .accepte: tr("acceptée, livraison à suivre")
+        case .differe: tr("différée (rien à émettre)")
+        case .enCours: tr("en cours")
+        case .execute: tr("exécutée")
+        case .usage: tr("arguments invalides")
+        case .refuse: tr("refusée")
+        case .radioAbsente: tr("module radio absent")
+        case .radioPerdue: tr("module radio perdu")
+        case .commandeInconnue: tr("commande inconnue")
+        case .tropLong: tr("ligne trop longue")
+        case .cadence: tr("cadence dépassée")
+        case .interdite: tr("interdite sur ce transport")
+        case .inconnu: tr("code inconnu")
         }
     }
 }
@@ -215,18 +216,18 @@ extension CodeReponse {
 extension EtatCommande {
     public var libelle: String {
         switch self {
-        case .enFile: "en file"
-        case .envoyee: "envoyée"
-        case .enCours: "en cours"
-        case .terminee: "terminée"
-        case .attenteLivraison: "livraison attendue"
-        case .livree: "livrée"
-        case .abandonnee: "abandonnée"
-        case .annulee: "annulée"
-        case .sansReponse: "sans réponse"
-        case .finPerdue: "terminée (fin perdue)"
-        case .remplacee: "remplacée"
-        case .perdue: "connexion perdue"
+        case .enFile: tr("en file")
+        case .envoyee: tr("envoyée")
+        case .enCours: tr("en cours")
+        case .terminee: tr("terminée")
+        case .attenteLivraison: tr("livraison attendue")
+        case .livree: tr("livrée")
+        case .abandonnee: tr("abandonnée")
+        case .annulee: tr("annulée")
+        case .sansReponse: tr("sans réponse")
+        case .finPerdue: tr("terminée (fin perdue)")
+        case .remplacee: tr("remplacée")
+        case .perdue: tr("connexion perdue")
         }
     }
 }
@@ -234,14 +235,14 @@ extension EtatCommande {
 extension MoteurSession.Phase {
     public var libelle: String {
         switch self {
-        case .ferme: "Déconnecté"
-        case .attenteHello(let e): e > 1 ? "Connexion (essai \(e))…" : "Connexion…"
-        case .connecte: "Connecté"
-        case .resynchro: "Resynchronisation…"
-        case .ancienFirmware: "Firmware sans protocole JSON"
-        case .sansReponse: "Aucune réponse de la carte"
-        case .versionInconnue(let v): "Protocole v\(v) non géré"
-        case .modeHumain: "Mode humain"
+        case .ferme: tr("Déconnecté")
+        case .attenteHello(let e): e > 1 ? tr("Connexion (essai \(e))…") : tr("Connexion…")
+        case .connecte: tr("Connecté")
+        case .resynchro: tr("Resynchronisation…")
+        case .ancienFirmware: tr("Firmware sans protocole JSON")
+        case .sansReponse: tr("Aucune réponse de la carte")
+        case .versionInconnue(let v): tr("Protocole v\(String(v)) non géré")
+        case .modeHumain: tr("Mode humain")
         }
     }
 }

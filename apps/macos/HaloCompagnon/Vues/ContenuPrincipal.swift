@@ -8,10 +8,10 @@ enum Ecran: String, CaseIterable, Identifiable {
 
     var titre: String {
         switch self {
-        case .tableau: "Tableau de bord"
-        case .trames: "Trames en direct"
-        case .graphiques: "Graphiques"
-        case .commandes: "Commandes et console"
+        case .tableau: tr("Tableau de bord")
+        case .trames: tr("Trames en direct")
+        case .graphiques: tr("Graphiques")
+        case .commandes: tr("Commandes et console")
         }
     }
 
@@ -53,16 +53,16 @@ struct ContenuPrincipal: View {
         } detail: {
             VStack(spacing: 0) {
                 if let alerte = pont.alerte {
-                    Bandeau(texte: alerte, couleur: .red, icone: "exclamationmark.octagon.fill")
+                    Bandeau(texte: alerte.texte, couleur: .red, icone: "exclamationmark.octagon.fill")
                 }
                 if pont.estDemo {
-                    Bandeau(texte: "Mode démo : une carte simulée rejoue demo-halo.jsonl (exemples de la spécification). "
-                            + "Les commandes reçoivent des réponses simulées.",
+                    Bandeau(texte: tr("Mode démo : une carte simulée rejoue demo-halo.jsonl (exemples de la spécification). Les commandes reçoivent des réponses simulées."),
                             couleur: .purple, icone: "play.rectangle.fill")
                 }
                 if let banc = pont.commandeDeBanc {
-                    Bandeau(texte: "Commande de banc en cours : « \(PolitiqueCommandes.masquerCle(banc.commande)) ». La carte ne lit plus la CLI "
-                            + "et n'émet plus d'état jusqu'à la fin.", couleur: .orange, icone: "hourglass")
+                    let commande = PolitiqueCommandes.masquerCle(banc.commande)
+                    Bandeau(texte: tr("Commande de banc en cours : « \(commande) ». La carte ne lit plus la CLI et n'émet plus d'état jusqu'à la fin."),
+                            couleur: .orange, icone: "hourglass")
                 }
                 Group {
                     switch ecran {
@@ -84,14 +84,12 @@ struct ContenuPrincipal: View {
             Button("Fermer le port", role: .destructive) { pont.deconnecter() }
             Button("Attendre", role: .cancel) {}
         } message: {
-            Text("Aucune commande de banc ne lit Serial : rien ne peut l'interrompre. Fermer le port ne l'arrête pas "
-                 + "non plus, mais libère l'app.")
+            Text("Aucune commande de banc ne lit Serial : rien ne peut l'interrompre. Fermer le port ne l'arrête pas non plus, mais libère l'app.")
         }
         .confirmationDialog("Libérer le port ?", isPresented: $confirmerLiberation) {
             Button("Libérer le port") { pont.libererPort() }
         } message: {
-            Text("L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. "
-                 + "Rien ne se rouvre avant « Reconnecter ».")
+            Text("L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. Rien ne se rouvre avant « Reconnecter ».")
         }
     }
 
@@ -184,7 +182,7 @@ struct PanneauConnexion: View {
             HStack {
                 switch pont.etatTransport {
                 case .ferme, .erreur, .libere:
-                    Button(pont.source == nil ? "Connecter" : "Reconnecter") {
+                    Button(pont.source == nil ? tr("Connecter") : tr("Reconnecter")) {
                         if pont.source == nil { pont.connecter(pont.sourceParDefaut) } else { pont.reconnecter() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -201,21 +199,21 @@ struct PanneauConnexion: View {
 
     private var libelleSource: String {
         switch pont.source {
-        case .demo: "Démo"
+        case .demo: tr("Démo")
         case .serie(let chemin, _): chemin.replacingOccurrences(of: "/dev/cu.", with: "")
-        case nil: "Choisir une source…"
+        case nil: tr("Choisir une source…")
         }
     }
 
     private var libelleTransport: String {
         switch pont.etatTransport {
-        case .ferme: "Port fermé"
-        case .ouverture: "Ouverture…"
-        case .ouvert: "Ouvert · \(pont.phase.libelle)"
+        case .ferme: tr("Port fermé")
+        case .ouverture: tr("Ouverture…")
+        case .ouvert: tr("Ouvert · \(pont.phase.libelle)")
         case .attente(let prochain, let raison):
-            "\(raison)\nRéouverture \(prochain.formatted(.relative(presentation: .numeric)))"
-        case .libere: "Port libéré (json 0) : flasher est possible"
-        case .erreur(let e): "Erreur : \(e)"
+            tr("\(raison)\nRéouverture \(prochain.formatted(.relative(presentation: .numeric).locale(Localisation.partagee.locale)))")
+        case .libere: tr("Port libéré (json 0) : flasher est possible")
+        case .erreur(let e): tr("Erreur : \(e)")
         }
     }
 }

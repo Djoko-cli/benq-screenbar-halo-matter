@@ -1,0 +1,16 @@
+{
+  "sourceLanguage" : "fr",
+  "strings" : {
+    "Consignes abandonnées" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abandoned Targets"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

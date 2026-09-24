@@ -135,7 +135,7 @@ public struct RecepteurLignes: Sendable {
         }
         if let premierRS {
             compteurs.lignesAbimees += 1
-            sortie.append(.abimee(raison: "ligne machine coupee avant son LF",
+            sortie.append(.abimee(raison: tr("ligne machine coupée avant son LF"),
                                   brut: String(decoding: avant[(premierRS + 1)...], as: UTF8.self)))
         }
         let json = ligne[(i + 1)...]
@@ -147,9 +147,9 @@ public struct RecepteurLignes: Sendable {
             sortie.append(.abimee(raison: raison, brut: String(decoding: json, as: UTF8.self)))
         }
 
-        guard json.count <= Self.jsonMax else { return abimee("plus de \(Self.jsonMax) octets") }
-        guard json.starts(with: Self.debutJSON) else { return abimee("ne commence pas par {\"v\":") }
-        guard json.last == UInt8(ascii: "}") else { return abimee("ne finit pas par }") }
+        guard json.count <= Self.jsonMax else { return abimee(tr("plus de \(String(Self.jsonMax)) octets")) }
+        guard json.starts(with: Self.debutJSON) else { return abimee(tr("ne commence pas par {\"v\":")) }
+        guard json.last == UInt8(ascii: "}") else { return abimee(tr("ne finit pas par }")) }
 
         switch DecodeurMessages.decoder(json: Data(json)) {
         case .valide(let l):

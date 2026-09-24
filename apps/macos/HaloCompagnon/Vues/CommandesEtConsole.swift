@@ -32,14 +32,13 @@ private struct PanneauCommandes: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if !pont.peutCommander {
-                    Bandeau(texte: "Pas de session machine : les commandes sont désactivées.", couleur: .secondary,
+                    Bandeau(texte: tr("Pas de session machine : les commandes sont désactivées."), couleur: .secondary,
                             icone: "bolt.horizontal.circle")
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else if !pont.etat.capacites.isEmpty, !pont.etat.capacites.contains("lampe_async") {
                     // L'app se regle sur caps (5.1) : sans lampe_async, une commande lampe avec id
                     // reste historique (reponse debut, texte, fin) et bloque la boucle de la carte.
-                    Bandeau(texte: "Ce firmware n'a pas les commandes lampe asynchrones (capacité lampe_async) : "
-                            + "chaque commande lampe bloque la carte jusqu'à 6 s, sans livraison.",
+                    Bandeau(texte: tr("Ce firmware n'a pas les commandes lampe asynchrones (capacité lampe_async) : chaque commande lampe bloque la carte jusqu'à 6 s, sans livraison."),
                             couleur: .orange, icone: "hourglass")
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
@@ -87,14 +86,14 @@ private struct PanneauCommandes: View {
                         Text("· \(CorrespondanceLuminosite.pourcent(niveau: n)) % · brut \(Format.hexa(brut))")
                             .foregroundStyle(.secondary).monospacedDigit()
                         Spacer()
-                        Text("gamma \(String(format: "%.2f", correspondance.gamma))").font(.caption).foregroundStyle(.secondary)
+                        Text(verbatim: "gamma \(Interpretation.decimal(correspondance.gamma, chiffres: 2))").font(.caption).foregroundStyle(.secondary)
                     }
                     Slider(value: $niveau, in: Double(correspondance.plancher)...254, step: 1) {
                         Text("Niveau")
                     } minimumValueLabel: {
-                        Text("\(correspondance.plancher)")
+                        Text(verbatim: "\(correspondance.plancher)")
                     } maximumValueLabel: {
-                        Text("254")
+                        Text(verbatim: "254")
                     } onEditingChanged: { enCours in
                         glisseNiveau = enCours
                         if !enCours { pont.curseur("lampe niveau \(Int(niveau))", cle: "niveau", fini: true) }
@@ -104,16 +103,15 @@ private struct PanneauCommandes: View {
                     }
                     CourbeGamma(correspondance: correspondance, niveau: n, brutCru: pont.etat.lampe?.valeur.cru.lum)
                         .frame(height: 120)
-                    Text("Brut = 0x4C + round(178 × ((niveau − 1) / 253)^gamma) ; les niveaux 1 à \(correspondance.plancher) "
-                         + "donnent 4C (plancher rapporté à Apple Home). Une commande toutes les 150 ms au plus pendant le "
-                         + "glissement, la valeur finale au relâchement.")
+                    Text("Brut = 0x4C + round(178 × ((niveau − 1) / 253)^gamma) ; les niveaux 1 à \(correspondance.plancher) donnent 4C (plancher rapporté à Apple Home). Une commande toutes les 150 ms au plus pendant le glissement, la valeur finale au relâchement.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text("Brute (hexa)").foregroundStyle(.secondary)
-                        TextField("A5", text: $lumHexa).frame(width: 50).textFieldStyle(.roundedBorder)
-                        Button("lampe lum") { pont.envoyer("lampe lum \(lumHexa.uppercased())") }
+                        TextField(text: $lumHexa, prompt: Text(verbatim: "A5")) { Text(verbatim: "A5") }
+                            .frame(width: 50).textFieldStyle(.roundedBorder)
+                        Button { pont.envoyer("lampe lum \(lumHexa.uppercased())") } label: { Text(verbatim: "lampe lum") }
                             .disabled(Int(lumHexa, radix: 16).map { !(0x4C...0xFE).contains($0) } ?? true)
-                        Text("4C..FE").font(.caption).foregroundStyle(.secondary)
+                        Text(verbatim: "4C..FE").font(.caption).foregroundStyle(.secondary)
                     }
                     .controlSize(.small)
                 }
@@ -122,13 +120,13 @@ private struct PanneauCommandes: View {
                     let m = Int(mired)
                     let t = CorrespondanceLuminosite.temp(mired: m)
                     HStack {
-                        Text("\(m) mireds").font(.title3.weight(.semibold)).monospacedDigit()
+                        Text(verbatim: "\(m) mireds").font(.title3.weight(.semibold)).monospacedDigit()
                         Text("· ~\(CorrespondanceLuminosite.kelvin(mired: m)) K · brute \(t)")
                             .foregroundStyle(.secondary).monospacedDigit()
                         Spacer()
                     }
                     Slider(value: $mired, in: 153...370, step: 1) {
-                        Text("Mireds")
+                        Text(verbatim: "Mireds")
                     } minimumValueLabel: {
                         Label("froid", systemImage: "snowflake").labelStyle(.titleAndIcon).font(.caption)
                     } maximumValueLabel: {
@@ -143,8 +141,8 @@ private struct PanneauCommandes: View {
                     }
                     HStack {
                         Text("Brute (0..100)").foregroundStyle(.secondary)
-                        Stepper(value: $tempBrute, in: 0...100) { Text("\(tempBrute)").monospacedDigit() }
-                        Button("lampe temp") { pont.envoyer("lampe temp \(tempBrute)") }
+                        Stepper(value: $tempBrute, in: 0...100) { Text(verbatim: "\(tempBrute)").monospacedDigit() }
+                        Button { pont.envoyer("lampe temp \(tempBrute)") } label: { Text(verbatim: "lampe temp") }
                         Text("Kelvin nominaux, non mesurés").font(.caption).foregroundStyle(.secondary)
                     }
                     .controlSize(.small)
@@ -231,7 +229,7 @@ private struct LigneSuivi: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(suivi.numero.map { "id=\($0)" } ?? "–").font(.caption.monospaced()).foregroundStyle(.secondary)
+            Text(verbatim: suivi.numero.map { "id=\($0)" } ?? "–").font(.caption.monospaced()).foregroundStyle(.secondary)
                 .frame(width: 52, alignment: .leading)
             Text(PolitiqueCommandes.masquerCle(suivi.commande)).font(.callout.monospaced()).lineLimit(1)
             Spacer()
@@ -242,7 +240,7 @@ private struct LigneSuivi: View {
 
     private var libelle: String {
         if suivi.etat == .terminee, let f = suivi.fin, !f.ok { return f.code.libelle }
-        if suivi.etat == .terminee, let f = suivi.fin, f.code == .differe { return "différée" }
+        if suivi.etat == .terminee, let f = suivi.fin, f.code == .differe { return tr("différée") }
         return suivi.etat.libelle
     }
 
@@ -315,7 +313,7 @@ private struct ConsoleBrute: View {
         }
         .alert("Confirmer la commande", isPresented: Binding(get: { aConfirmer != nil }, set: { if !$0 { aConfirmer = nil } }),
                presenting: aConfirmer) { c in
-            Button("Envoyer « \(c.ligne) »", role: .destructive) {
+            Button(tr("Envoyer « \(c.ligne) »"), role: .destructive) {
                 traiter(pont.console(c.ligne, confirme: true), ligne: c.ligne)
             }
             Button("Annuler", role: .cancel) {}
@@ -327,7 +325,7 @@ private struct ConsoleBrute: View {
     private var saisieVue: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(pont.consoleAvecId ? "id=…" : "brut").font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(pont.consoleAvecId ? "id=…" : tr("brut")).font(.caption.monospaced()).foregroundStyle(.secondary)
                 TextField("commande de la CLI (ex. lampe stats, help)", text: $saisie)
                     .textFieldStyle(.roundedBorder)
                     .font(.body.monospaced())
