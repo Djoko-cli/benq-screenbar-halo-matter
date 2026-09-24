@@ -403,6 +403,36 @@
         }
       }
     },
+    "Adresse (OMR)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address (OMR)"
+          }
+        }
+      }
+    },
+    "Afficher…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show…"
+          }
+        }
+      }
+    },
+    "Ajouter à Maison" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to Home"
+          }
+        }
+      }
+    },
     "Allumer" : {
       "localizations" : {
         "en" : {
@@ -823,12 +853,22 @@
         }
       }
     },
-    "Code manuel" : {
+    "Code d'appairage" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Manual code"
+            "value" : "Pairing code"
+          }
+        }
+      }
+    },
+    "Code d'appairage Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter pairing code"
           }
         }
       }
@@ -983,6 +1023,26 @@
         }
       }
     },
+    "Copie les chiffres du code manuel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copies the digits of the manual code"
+          }
+        }
+      }
+    },
+    "Copier" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy"
+          }
+        }
+      }
+    },
     "Couper rx/tx (json trames 0)" : {
       "localizations" : {
         "en" : {
@@ -1029,6 +1089,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "DTR and RTS to 0 (TIOCMSET)"
+          }
+        }
+      }
+    },
+    "Dans Maison : + › Ajouter un accessoire, puis scanner ce code. Sans appareil photo : « Plus d'options » et le code à 11 chiffres." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In Home: + › Add Accessory, then scan this code. Without a camera: “More options” and the 11-digit code."
           }
         }
       }
@@ -1323,6 +1393,16 @@
         }
       }
     },
+    "Fermer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        }
+      }
+    },
     "Fermer le port" : {
       "localizations" : {
         "en" : {
@@ -1483,6 +1563,16 @@
         }
       }
     },
+    "L'iPhone près du pont : la mise en service passe par le Bluetooth." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the iPhone near the bridge: commissioning uses Bluetooth."
+          }
+        }
+      }
+    },
     "La carte redémarre (démo) : ré-énumération USB" : {
       "localizations" : {
         "en" : {
@@ -1549,6 +1639,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Window contents switch right away. macOS menus (Halo Compagnon, Edit, Window…) and system dialogs follow at the next launch. Texts already recorded keep their language until the next one: console lines, connection error, last rejected line, console input error."
+          }
+        }
+      }
+    },
+    "Le pont attend d'être ajouté à un contrôleur Matter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bridge is waiting to be added to a Matter controller."
+          }
+        }
+      }
+    },
+    "Le pont est déjà dans Maison. Ce code ne sert que pendant une fenêtre de mise en service : pont remis à zéro (bouton BOOT tenu 8 s) ou retiré de son dernier contrôleur." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bridge is already in Home. This code only works during a commissioning window: after a reset (BOOT button held for 8 s) or once the bridge is removed from its last controller."
+          }
+        }
+      }
+    },
+    "Le pont n'est pas encore mis en service. Ses codes d'appairage s'affichent par la liaison USB." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bridge is not commissioned yet. Its pairing codes are shown over the USB link."
           }
         }
       }
@@ -1743,16 +1863,6 @@
         }
       }
     },
-    "Mise en service" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Commissioning"
-          }
-        }
-      }
-    },
     "Mode" : {
       "localizations" : {
         "en" : {
@@ -1849,6 +1959,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Level %lld"
+          }
+        }
+      }
+    },
+    "Nom réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network name"
           }
         }
       }
@@ -2083,6 +2203,16 @@
         }
       }
     },
+    "Pour l'ajouter à un autre écosystème (Google Home, Alexa…), ouvrir sa fiche dans Maison et choisir « Activer le mode d'appairage » : Maison donne alors un code temporaire." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To add it to another ecosystem (Google Home, Alexa…), open its settings in Home and choose “Turn On Pairing Mode”: Home then gives a temporary code."
+          }
+        }
+      }
+    },
     "Produit" : {
       "localizations" : {
         "en" : {
@@ -2119,6 +2249,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "State · counters · network periods"
+          }
+        }
+      }
+    },
+    "QR code Matter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matter QR code"
           }
         }
       }
@@ -2385,6 +2525,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Resync"
+          }
+        }
+      }
+    },
+    "Retirer le pont de Maison efface aussi la clé du transport réseau : elle se règle de nouveau par l'USB." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removing the bridge from Home also erases the network transport key: set it again over USB."
           }
         }
       }
@@ -2749,6 +2899,16 @@
         }
       }
     },
+    "Transport réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network transport"
+          }
+        }
+      }
+    },
     "Type" : {
       "localizations" : {
         "en" : {
@@ -3025,6 +3185,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "connected"
+          }
+        }
+      }
+    },
+    "coupé (aucune clé)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "off (no key)"
           }
         }
       }
@@ -3421,6 +3591,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "lost (L3)"
+          }
+        }
+      }
+    },
+    "port %lld · clé %@ · %lld session(s)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port %1$lld · key %2$@ · %3$lld session(s)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "port %1$lld · clé %2$@ · %3$lld session(s)"
           }
         }
       }

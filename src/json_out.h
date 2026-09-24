@@ -27,8 +27,9 @@ constexpr uint8_t kVersion = 1;         // v : version majeure
 // hello.rev : revision mineure (ajouts). 1 : motifs led desappairage et
 // redemarrage, log src bouton (bouton BOOT). 2 : transport reseau (section
 // 10 : caps udp et cle, session.transport udp, bloc reseau ip, reponse cle et
-// empreinte, code interdite).
-constexpr uint8_t kRev = 2;
+// empreinte, code interdite). 3 : reseau.thread.matter.code_manuel et qr
+// aussi une fois le pont mis en service (USB seulement).
+constexpr uint8_t kRev = 3;
 constexpr size_t kLineMax = 1024;       // RS et LF compris
 constexpr size_t kBudget = 896;         // pire cas vise par message (marge de 128 pour les ajouts)
 constexpr size_t kCmdMax = 127;         // ligne de l'hote, prefixe id= compris

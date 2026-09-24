@@ -51,6 +51,7 @@ enum CouvertureCles {
         case .compteursMatter(let v): return try e.encode(v)
         case .reseauThread(let v): return try e.encode(v)
         case .reseauAbonnements(let v): return try e.encode(v)
+        case .reseauIp(let v): return try e.encode(v)
         case .battement(let v): return try e.encode(v)
         case .fin(let v): return try e.encode(v)
         case .reponse(let v): return try e.encode(v)

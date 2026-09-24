@@ -19,6 +19,8 @@ struct TableauDeBord: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 14, alignment: .top)],
                           alignment: .leading, spacing: 14) {
+                    // Pont pas encore mis en service : l'appairage passe avant tout.
+                    if avecMatter && horsService { CarteAppairage() }
                     CarteLampe()
                     CarteModule()
                     CarteLiaison()
@@ -35,6 +37,11 @@ struct TableauDeBord: View {
             }
             .defaultScrollAnchor(.top)
         }
+    }
+
+    /// Pont connu comme pas mis en service (bloc `thread`, ou `sante` a defaut).
+    private var horsService: Bool {
+        (pont.etat.thread?.valeur.matter?.enService ?? pont.etat.sante?.valeur.matter?.enService) == false
     }
 
     /// Cartes Thread et Matter : seulement si le build compile le pont Matter
@@ -248,13 +255,15 @@ private struct CarteVoyant: View {
 
 private struct CarteThread: View {
     @Environment(Pont.self) private var pont
+    @State private var feuilleAppairage = false
 
     var body: some View {
         let r = pont.etat.thread?.valeur
         let m = pont.etat.sante?.valeur.matter
+        let enService = (r?.matter?.enService ?? m?.enService) == true
         Carte(titre: "Thread et Matter", icone: "point.3.connected.trianglepath.dotted") {
             HStack(spacing: 6) {
-                if (r?.matter?.enService ?? m?.enService) == true {
+                if enService {
                     Pastille("en service", couleur: .green)
                 } else {
                     Pastille("pas en service", couleur: .orange)
@@ -277,21 +286,146 @@ private struct CarteThread: View {
             LigneInfo("SRP", r?.thread?.srp.map { tr("\($0.hote ?? "?") · \($0.enregistres ?? 0)/\($0.services ?? 0) services") })
             LigneInfo("Fabriques", r?.matter?.fabriques.map(String.init))
             if let f = r?.fraisMs, f > 2000 { LigneInfo("Âge des valeurs", Format.ms(f), couleur: .orange) }
-            if let code = r?.matter?.codeManuel {
+            if let ip = pont.etat.ip?.valeur {
+                // Bloc ip (build Thread) : ce que l'app visera par le reseau.
+                LigneInfo("Nom réseau", ip.srp?.nom.map { "\($0).local" }, mono: true)
+                LigneInfo("Adresse (OMR)", ip.adresseOmr, mono: true)
+                LigneInfo("Transport réseau", ip.udp.map { u in
+                    guard u.ouvert == true, let e = u.empreinte else { return tr("coupé (aucune clé)") }
+                    return tr("port \(u.port ?? 0) · clé \(e) · \(u.sessions ?? 0) session(s)")
+                })
+            }
+            // Deja en service : l'etiquette du pont, a la demande (hors service,
+            // elle a sa propre carte en tete du tableau de bord).
+            if enService, let code = r?.matter?.codeManuel {
                 Divider()
-                Text("Mise en service").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading) {
-                        Text("Code manuel").foregroundStyle(.secondary)
-                        Text(code).font(.title3.monospaced()).textSelection(.enabled)
-                        if let qr = r?.matter?.qr { Text(qr).font(.caption.monospaced()).textSelection(.enabled) }
-                    }
+                HStack {
+                    Text("Code d'appairage").foregroundStyle(.secondary)
                     Spacer()
-                    if let qr = r?.matter?.qr, let image = CodeQR.image(qr) {
-                        Image(nsImage: image).interpolation(.none).resizable().frame(width: 110, height: 110)
-                    }
+                    Button("Afficher…") { feuilleAppairage = true }
+                        .controlSize(.small)
+                }
+                .font(.callout)
+                .sheet(isPresented: $feuilleAppairage) {
+                    FeuilleAppairage(code: code, qr: r?.matter?.qr)
                 }
             }
+        }
+    }
+}
+
+// MARK: - Appairage Matter
+
+/// Pont pas encore mis en service : tout ce qu'il faut pour l'ajouter a Maison.
+private struct CarteAppairage: View {
+    @Environment(Pont.self) private var pont
+
+    var body: some View {
+        let m = pont.etat.thread?.valeur.matter
+        Carte(titre: "Ajouter à Maison", icone: "qrcode.viewfinder", accent: .blue) {
+            if let code = m?.codeManuel {
+                HStack(alignment: .top, spacing: 16) {
+                    if let qr = m?.qr { ImageCodeQR(charge: qr, cote: 168) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Le pont attend d'être ajouté à un contrôleur Matter.")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Dans Maison : + › Ajouter un accessoire, puis scanner ce code. Sans appareil photo : « Plus d'options » et le code à 11 chiffres.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        CodeManuel(code: code)
+                        Text("L'iPhone près du pont : la mise en service passe par le Bluetooth.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.callout)
+            } else {
+                // Codes jamais envoyes par le reseau (10.5).
+                Text("Le pont n'est pas encore mis en service. Ses codes d'appairage s'affichent par la liaison USB.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.callout)
+            }
+        }
+    }
+}
+
+/// Deja en service : l'etiquette du pont, et quand elle sert.
+private struct FeuilleAppairage: View {
+    let code: String
+    let qr: String?
+    @Environment(\.dismiss) private var fermer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Code d'appairage Matter", systemImage: "qrcode")
+                .font(.title3.weight(.semibold))
+            HStack(alignment: .top, spacing: 18) {
+                if let qr { ImageCodeQR(charge: qr, cote: 200) }
+                VStack(alignment: .leading, spacing: 10) {
+                    CodeManuel(code: code)
+                    Text("Le pont est déjà dans Maison. Ce code ne sert que pendant une fenêtre de mise en service : pont remis à zéro (bouton BOOT tenu 8 s) ou retiré de son dernier contrôleur.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Pour l'ajouter à un autre écosystème (Google Home, Alexa…), ouvrir sa fiche dans Maison et choisir « Activer le mode d'appairage » : Maison donne alors un code temporaire.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Retirer le pont de Maison efface aussi la clé du transport réseau : elle se règle de nouveau par l'USB.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.callout)
+            }
+            HStack {
+                Spacer()
+                Button("Fermer") { fermer() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+    }
+}
+
+/// Code manuel groupe comme dans Maison, selectionnable, et un bouton pour le copier.
+private struct CodeManuel: View {
+    let code: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(verbatim: CodeAppairage.lisible(code))
+                .font(.title2.monospaced().weight(.semibold))
+                .textSelection(.enabled)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+            } label: {
+                Label("Copier", systemImage: "doc.on.doc")
+            }
+            .controlSize(.small)
+            .help("Copie les chiffres du code manuel")
+        }
+    }
+}
+
+/// QR code Matter en noir sur blanc, avec sa marge de silence (lisible en mode
+/// sombre aussi) ; rien si la charge n'est pas un `MT:...`.
+private struct ImageCodeQR: View {
+    let charge: String
+    let cote: CGFloat
+
+    var body: some View {
+        if CodeAppairage.chargeValide(charge), let image = CodeQR.image(charge) {
+            Image(nsImage: image)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: cote, height: cote)
+                .padding(10)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.black.opacity(0.1)))
+                .accessibilityLabel(Text("QR code Matter"))
+                .help(Text(verbatim: charge))
         }
     }
 }

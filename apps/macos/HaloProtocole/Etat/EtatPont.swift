@@ -25,6 +25,7 @@ public struct EtatPont: Sendable, Equatable {
     public private(set) var compteursMatter: Instantane<CompteursMatter>?
     public private(set) var thread: Instantane<ReseauThread>?
     public private(set) var abonnements: Instantane<ReseauAbonnements>?
+    public private(set) var ip: Instantane<ReseauIp>?
     public private(set) var battement: Instantane<Battement>?
 
     /// Motif du voyant : bloc `sante` ou evenement `led`, le plus recent.
@@ -43,7 +44,7 @@ public struct EtatPont: Sendable, Equatable {
     public static func == (a: EtatPont, b: EtatPont) -> Bool {
         a.helloBase == b.helloBase && a.identite == b.identite && a.config == b.config && a.lampe == b.lampe
             && a.tranches == b.tranches && a.sante == b.sante && a.pilote == b.pilote && a.radio == b.radio
-            && a.compteursMatter == b.compteursMatter && a.thread == b.thread && a.abonnements == b.abonnements
+            && a.compteursMatter == b.compteursMatter && a.thread == b.thread && a.abonnements == b.abonnements && a.ip == b.ip
             && a.battement == b.battement && a.motifLed == b.motifLed && a.ledTest == b.ledTest
             && a.derniereLivraison == b.derniereLivraison && a.derniereRelance == b.derniereRelance
             && a.dernierModule == b.dernierModule && a.ancre?.date == b.ancre?.date && a.ancre?.ms == b.ancre?.ms
@@ -82,6 +83,7 @@ public struct EtatPont: Sendable, Equatable {
         case .compteursMatter(let v): compteursMatter = inst(v)
         case .reseauThread(let v): thread = inst(v)
         case .reseauAbonnements(let v): abonnements = inst(v)
+        case .reseauIp(let v): ip = inst(v)
         case .battement(let v): battement = inst(v)
         case .led(let v):
             motifLed = v.motif

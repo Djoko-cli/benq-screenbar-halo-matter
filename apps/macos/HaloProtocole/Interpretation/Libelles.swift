@@ -208,6 +208,7 @@ extension CodeReponse {
         case .tropLong: tr("ligne trop longue")
         case .cadence: tr("cadence dépassée")
         case .interdite: tr("interdite sur ce transport")
+        case .dejaTraite: tr("déjà traitée (rien de réexécuté)")
         case .inconnu: tr("code inconnu")
         }
     }
