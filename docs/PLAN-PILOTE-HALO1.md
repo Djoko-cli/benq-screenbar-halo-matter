@@ -1258,6 +1258,31 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
     telechargement (la carte repond toujours sur l'USB) ;
   - B5 : bouton tenu pendant le demarrage (apres le chargeur) : ignore
     jusqu'au relachement.
+- Suites de revue (24/09/2026) :
+  - `esp_matter::factory_reset()` n'efface que l'espace NVS du noeud, puis
+    `chip::Server::ScheduleFactoryReset()` : la tache CHIP retire les
+    fabriques, puis `DoFactoryReset` efface le reseau et appelle
+    `esp_restart()`, deux travaux en file et des effacements de flash plus
+    tard (pas « quelques ms »). Le bouton etait deja libre : un nouvel appui
+    tenu a ce moment aurait mis le C6 en mode telechargement.
+  - Garde de tous les resets : `bootButtonBegin()` enregistre
+    `waitBootHigh()` par `esp_register_shutdown_handler()`, avant
+    `netBegin()` et `matterBridgeBegin()` (les gestionnaires passent du
+    dernier enregistre au premier : celui-ci suit l'arret du Wi-Fi). Il
+    attend IO9 haute 50 ms de suite, sans limite, par `vTaskDelay(1)`, en
+    nourrissant le chien de garde si la tache y est inscrite (panique a 5 s :
+    reset sans gestionnaires). Couvre aussi `reboot` et `decommission`.
+  - Pendant le desappairage : bouton inerte, phase `Unpair` gardee (LED
+    rouge/violet jusqu'au reset) ; filet a 10 s si rien ne redemarre
+    (`Matter.decommission()` ne rend rien).
+  - Annonces du bouton hors du plafond des `log` (20/s partages avec les
+    traces de la lampe) ; correspondance phase -> LED en fonction pure
+    (`statusled::buttonFor`), testee sur l'hote, comme la relance de la
+    machine apres une derniere garde ratee.
+  - Au banc, en plus : B6 : relacher apres 8 s puis rappuyer et tenir
+    aussitot : la LED reste rouge/violet, la ligne `[bouton] tenu pendant un
+    redemarrage` apparait, la carte redemarre au relachement (jamais de mode
+    telechargement) ; B7 : `reboot` tape bouton tenu : meme chose.
 
 ---
 
@@ -1320,7 +1345,7 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 | 18 | Re-appairage en rejouant la balise (non essaye, fenetre d'appairage necessaire) | hors perimetre ; adresse d'appairage refusee partout |
 | 19 | Outils de banc (`txack`, `xo`) qui modifient la puce ou `gXoTrim` | invalidation apres chaque commande hors liste blanche ; B11 corrige |
 | 20 | Puce bloquee que la verification ne voit pas (incident du 24/09 : quartz touche, registres conformes, tous les envois en delai) | L2 sur symptome : 3 delais TX de suite, deluge de CRC faux en ecoute, ou ecoute sourde (1000 rearmements hors RX en moins de 10 s, vue en ~2-3 s au rythme de l'incident) ; jamais sur une lampe muette (C.5) |
-| 21 | Reset avec IO9 (BOOT) tenu bas : mode telechargement, carte inerte jusqu'a une coupure d'alimentation | actions du bouton seulement relache, apres 100 ms haut sans interruption, et relecture juste avant le reset (C9) ; reste la fenetre de quelques ms entre `matterDecommissionNow()` et le redemarrage par la tache CHIP : ne pas rappuyer avant la fin |
+| 21 | Reset avec IO9 (BOOT) tenu bas : mode telechargement, carte inerte jusqu'a une coupure d'alimentation | actions du bouton seulement relache, apres 100 ms haut sans interruption, et relecture juste avant l'action ; tout `esp_restart()` (bouton, `reboot`, `decommission`, fin du desappairage par la tache CHIP, qui arrive bien apres `matterDecommissionNow()`) attend IO9 haute 50 ms de suite dans un gestionnaire d'arret, sans limite ; bouton inerte pendant le desappairage (C9). Reste : un reset sans ces gestionnaires (panique, chien de garde) bouton tenu |
 ---
 
 ## Resultats du banc (23/09/2026, build diag, carte A = 144401, temoin B = 11301)

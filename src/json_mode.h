@@ -81,5 +81,6 @@ jsonp::Writer *jsonEventOpen(const char *type);
 void jsonEventSend();
 // Mode 'json log 1' : la ligne part en message log (src lampe|matter|bouton, niv
 // notice|trace) ; true si elle est prise (emise, plafonnee ou perdue), false
-// pour l'afficher en texte comme avant.
+// pour l'afficher en texte comme avant. Plafond de 20 par seconde, sauf pour
+// src bouton (quelques lignes par appui, jamais plafonnees).
 bool jsonLog(const char *src, const char *niv, const char *txt);

@@ -1888,6 +1888,40 @@ static void testStatusLed() {
   CHECK(renderMono(P::ButtonReboot, 0) && !renderMono(P::ButtonReboot, kRebootFlashMs), "LED simple : eclat");
   CHECK(bootbtn::kRebootDelayMs >= kRebootFlashMs + 50, "redemarrage avant la fin de l'eclat");
 
+  // Phase du bouton BOOT -> LED (statusLedPoll) : rouge/violet des l'armement
+  // et jusqu'au desappairage, eclat blanc pour le redemarrage, rien sinon.
+  {
+    using bootbtn::Phase;
+    const struct {
+      Phase ph;
+      Button b;
+    } map[] = {{Phase::Idle, Button::None},     {Phase::Held, Button::None},     {Phase::Armed, Button::Unpair},
+               {Phase::Reboot, Button::Reboot}, {Phase::Unpair, Button::Unpair}, {Phase::Locked, Button::None}};
+    for (const auto &m : map)
+      CHECK(buttonFor(m.ph) == m.b, "LED pour la phase %s : %u", bootbtn::phaseName(m.ph), (unsigned)buttonFor(m.ph));
+    // Et de bout en bout : la phase choisit le motif, qui passe sur 'led test'
+    // et sur le rouge fixe, pas sur Identify.
+    Logic l;
+    l.setNet(Net::Online, 0);
+    l.setFault(true, 0);
+    l.startTest(0);
+    l.setButton(buttonFor(Phase::Armed), 10);
+    CHECK(l.frame(20).p == P::ButtonUnpair, "phase armee : %s", patternName(l.frame(20).p));
+    // Relache apres l'armement (Armed -> Unpair) : le motif continue sans
+    // repartir du debut (a +110 ms du depart : noir ; repris a 30 : rouge).
+    l.setButton(buttonFor(Phase::Unpair), 30);
+    CHECK(l.frame(40).p == P::ButtonUnpair && dark(l.frame(120).c), "desappairage : meme motif, meme depart");
+    l.setButton(buttonFor(Phase::Held), 130);
+    CHECK(l.frame(140).p != P::ButtonUnpair && l.frame(140).p != P::ButtonReboot, "tenu : pas de motif du bouton");
+    l.setButton(buttonFor(Phase::Reboot), 150);
+    CHECK(l.frame(150).p == P::ButtonReboot && rgbIs(l.frame(150).c, kMax, kMax, kMax), "redemarrage : eclat blanc");
+    l.setIdentify(true, 160);
+    CHECK(l.frame(170).p == P::Identify, "Identify passe devant le bouton");
+    l.setIdentify(false, 180);
+    l.setButton(buttonFor(Phase::Locked), 180);
+    CHECK(l.frame(190).p != P::ButtonUnpair && l.frame(190).p != P::ButtonReboot, "tenu au demarrage : rien");
+  }
+
   // Intensite : jamais plus de 24 par canal, 8 pour la lueur.
   const P all[] = {P::Identify,   P::ButtonUnpair, P::ButtonReboot, P::Unreachable, P::RadioFault,
                    P::Delivered,  P::Unpaired,     P::Offline,      P::Online};
@@ -2325,6 +2359,36 @@ static void testBootButton() {
     b.level(true, 500);
     b.level(false, 2000);
     CHECK(b.only(Event::BootReleased), "tenu brievement au demarrage : rien fait");
+  }
+
+  // Derniere garde ratee (bouton rappuye pendant pinSettled()) : la carte
+  // relance la machine avec begin(broche basse). Action en attente oubliee,
+  // appui en cours ignore jusqu'au relachement, jamais d'action.
+  for (bool longPress : {false, true}) {
+    Btn b(1000);
+    b.level(false, 100);
+    b.level(true, longPress ? 9000 : 500);
+    b.level(false, kDebounceMs + 1);
+    CHECK(b.m.phase() == (longPress ? Phase::Unpair : Phase::Reboot), "garde ratee : action en attente");
+    b.clear();
+    b.m.begin(true, b.now);
+    CHECK(b.m.phase() == Phase::Locked, "garde ratee : verrouille");
+    b.level(true, 12000);
+    CHECK(b.n == 0 && b.m.phase() == Phase::Locked, "garde ratee : tenu, rien (%u evenement(s))", b.n);
+    b.level(false, 5000);
+    CHECK(b.only(Event::BootReleased) && b.m.phase() == Phase::Idle, "garde ratee (%s) : relache, rien fait",
+          longPress ? "long" : "court");
+  }
+  {
+    // Relance avec la broche deja haute : simplement au repos.
+    Btn b(1000);
+    b.level(false, 100);
+    b.level(true, 500);
+    b.level(false, kDebounceMs + 1);
+    b.clear();
+    b.m.begin(false, b.now);
+    b.level(false, 5000);
+    CHECK(b.n == 0 && b.m.phase() == Phase::Idle, "relance broche haute : rien en attente");
   }
 
   // Trous de releves (loop() bloquee) : un front date a plus de kMaxGapMs

@@ -134,6 +134,18 @@ void Logic::setFault(bool on, uint32_t now) {
   fault_ = on;
 }
 
+Button buttonFor(bootbtn::Phase p) {
+  switch (p) {
+    case bootbtn::Phase::Armed:
+    case bootbtn::Phase::Unpair: return Button::Unpair;
+    case bootbtn::Phase::Reboot: return Button::Reboot;
+    case bootbtn::Phase::Idle:
+    case bootbtn::Phase::Held:
+    case bootbtn::Phase::Locked: break;
+  }
+  return Button::None;
+}
+
 void Logic::setButton(Button b, uint32_t now) {
   if (b == button_) return;
   button_ = b;
@@ -317,12 +329,7 @@ void statusLedPoll() {
   }
   sLed.setIdentify(matterIdentifying(), now);
   sLed.setFault(lamp.moduleFault(), now);
-  switch (bootButtonPhase()) {
-    case bootbtn::Phase::Armed:
-    case bootbtn::Phase::Unpair: sLed.setButton(Button::Unpair, now); break;
-    case bootbtn::Phase::Reboot: sLed.setButton(Button::Reboot, now); break;
-    default: sLed.setButton(Button::None, now); break;
-  }
+  sLed.setButton(buttonFor(bootButtonPhase()), now);
   const uint32_t delivered = lamp.deliveredCount(), giveUps = lamp.giveUpCount();
   if (delivered != sSeenDelivered) {
     sSeenDelivered = delivered;
