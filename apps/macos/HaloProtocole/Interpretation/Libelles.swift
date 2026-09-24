@@ -85,6 +85,8 @@ extension MotifLed {
     public var libelle: String {
         switch self {
         case .identification: "identification"
+        case .desappairage: "désappairage armé"
+        case .redemarrage: "redémarrage"
         case .injoignable: "lampe injoignable"
         case .panneRadio: "panne radio"
         case .livree: "consigne livrée"
@@ -98,6 +100,8 @@ extension MotifLed {
     public var description: String {
         switch self {
         case .identification: "arc-en-ciel"
+        case .desappairage: "rouge/violet rapide : relâcher le bouton pour désappairer"
+        case .redemarrage: "éclat blanc, puis redémarrage"
         case .injoignable: "rouge, 3 clignements"
         case .panneRadio: "rouge fixe"
         case .livree: "éclat vert"
