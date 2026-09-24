@@ -12,6 +12,7 @@
 #include "config.h"
 #include "halo1_lamp.h"
 #include "json_mode.h"
+#include "net_udp.h"
 #include "status_led.h"
 
 #if MATTER_NET_THREAD
@@ -50,6 +51,9 @@ static bool sMatterStarted = false;
 // expire, IDF 5.5.5 rend lui-meme le premier (firmware.elf desassemble) : un
 // refus ne laisse rien a rendre. Ici, totalMs est le delai total.
 static bool otLockTry(uint32_t totalMs) { return esp_openthread_lock_acquire(pdMS_TO_TICKS(totalMs / 2)); }
+
+bool matterOtTryLock(uint32_t totalMs) { return sMatterStarted && otLockTry(totalMs); }
+void matterOtUnlock() { esp_openthread_lock_release(); }
 
 // ===========================================================================
 //  Garde d'antenne Thread autour de chaque paquet lampe
@@ -1926,10 +1930,33 @@ void matterBridgeBegin() {
   sForceReflect = true;
 }
 
+#if MATTER_NET_THREAD
+// Dernier controleur parti sans remise a zero (accessoire retire d'Apple Home) :
+// la bibliotheque rouvre la mise en service ; la cle de l'app part aussi, sinon
+// l'ancien proprietaire garderait l'acces au transport reseau apres qu'un
+// autre a ajoute le pont. Seul un passage observe de "en service" a "aucune
+// fabrique" compte (pas l'etat au demarrage).
+static void ownerPoll(uint32_t now) {
+  static int8_t sSeen = -1;  // -1 : pas encore lu
+  static uint32_t sAt = 0;
+  if (!sMatterStarted || (sSeen >= 0 && now - sAt < 500)) return;
+  sAt = now;
+  const bool commissioned = Matter.isDeviceCommissioned();
+  char kid[9];
+  if (sSeen == 1 && !commissioned && netUdpKid(kid)) {
+    const bool ok = netUdpKeyErase();
+    bridgeLog(ok ? "[matter] plus aucun controleur : cle du transport reseau effacee"
+                 : "[matter] plus aucun controleur : cle retiree de la memoire, effacement NVS en echec");
+  }
+  sSeen = commissioned ? 1 : 0;
+}
+#endif
+
 void matterBridgePoll() {
   const uint32_t now = millis();
 #if MATTER_NET_THREAD
   threadPoll(now);  // mesures, traces et relance des abonnements
+  ownerPoll(now);
 #endif
   halo1::MatterIntents in;
   uint32_t first = 0;
@@ -2004,7 +2031,16 @@ bool matterIsConnected() {
 #else
 bool matterIsConnected() { return Matter.isDeviceConnected(); }
 #endif
-void matterDecommissionNow() { Matter.decommission(); }
+void matterDecommissionNow() {
+#if MATTER_NET_THREAD
+  // Remise a zero : la cle de l'app part aussi, sinon l'ancien proprietaire
+  // garderait l'acces au transport reseau (halo1/cle survit a Matter, qui
+  // n'efface que son propre espace NVS). Deux essais : un echec la laisserait
+  // revenir au demarrage suivant.
+  if (!netUdpKeyErase() && !netUdpKeyErase()) bridgeLog("[matter] cle du transport reseau : effacement NVS en echec");
+#endif
+  Matter.decommission();
+}
 
 bool matterIdentifying() {
   const uint32_t now = millis();
@@ -2257,7 +2293,7 @@ static void linkModeLetters(const otLinkModeConfig &m, char b[4]) {
 }
 #endif
 
-void matterJsonNetThread(jsonp::Writer &w, uint32_t now) {
+void matterJsonNetThread(jsonp::Writer &w, uint32_t now, bool remote) {
   if (chip::DeviceLayer::PlatformMgr().TryLockChipStack()) {
     const uint8_t n = chip::Server::GetInstance().GetFabricTable().FabricCount();
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
@@ -2280,9 +2316,10 @@ void matterJsonNetThread(jsonp::Writer &w, uint32_t now) {
   const bool commissioned = Matter.isDeviceCommissioned();
   const bool connected = matterIsConnected();
   // Codes d'appairage : caches par la bibliotheque, sans verrou ; seulement
-  // tant que le noeud n'est pas mis en service.
+  // tant que le noeud n'est pas mis en service, et jamais sur le reseau (qui
+  // les lirait pourrait ajouter le pont a son propre controleur).
   char manual[24] = "", qr[64] = "";
-  if (!commissioned) {
+  if (!commissioned && !remote) {
     snprintf(manual, sizeof(manual), "%s", Matter.getManualPairingCode().c_str());
     qrPayload(Matter.getOnboardingQRCodeUrl(), qr, sizeof(qr));
   }

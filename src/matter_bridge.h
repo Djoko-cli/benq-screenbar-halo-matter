@@ -87,10 +87,17 @@ uint32_t matterConfigSig();
 // Champs du bloc compteurs.matter (apres "bloc").
 void matterJsonCounters(jsonp::Writer &w);
 // Champs du bloc reseau.thread : frais_ms, objet matter, objet thread (build
-// Thread seulement ; null si OpenThread n'a jamais pu etre lu).
-void matterJsonNetThread(jsonp::Writer &w, uint32_t now);
+// Thread seulement ; null si OpenThread n'a jamais pu etre lu). remote : ligne
+// pour le transport reseau, sans les codes d'appairage (10.5).
+void matterJsonNetThread(jsonp::Writer &w, uint32_t now, bool remote);
 #if MATTER_NET_THREAD
 // Champs du bloc reseau.abonnements. refreshSaved : relire les abonnements
 // sauves (NVS, verrou de la pile) meme avant les 30 s ('json etat').
 void matterJsonNetSubs(jsonp::Writer &w, uint32_t now, bool refreshSaved);
+
+// Verrou OpenThread pour le transport reseau (net_udp.cpp) : false si la pile
+// n'est pas demarree ou si le verrou n'est pas libre dans totalMs (0 : sans
+// attente). Sous ce verrou, AUCUN appel Matter/CHIP (voir la garde d'antenne).
+bool matterOtTryLock(uint32_t totalMs);
+void matterOtUnlock();
 #endif

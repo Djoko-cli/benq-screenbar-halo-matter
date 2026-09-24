@@ -172,6 +172,10 @@ void statusLedBegin();
 void statusLedPoll();
 // Commande 'led [test|stop]'.
 void statusLedCommand(const char *arg);
+// 'led test' (start) ou 'led stop', sans aucun texte : commande recue par le
+// reseau (le texte humain bloquerait la boucle si l'hote USB ne lit plus).
+// false en build diagnostic (aucun voyant).
+bool statusLedTest(bool start);
 // Motif affiche au dernier statusLedPoll() et test en cours ; false en build
 // diagnostic (aucun voyant).
 bool statusLedState(statusled::Pattern *p, bool *testing);

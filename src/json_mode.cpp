@@ -13,10 +13,14 @@
 #include <string.h>
 
 #include "config.h"
+#include "h1_proto.h"
 #include "halo1_lamp.h"
 #include "status_led.h"
 #ifndef DIAG_ONLY
 #include "matter_bridge.h"
+#endif
+#if MATTER_NET_THREAD
+#include "net_udp.h"
 #endif
 
 using namespace jsonp;
@@ -31,38 +35,66 @@ static constexpr uint32_t kPeriodDefault = 1000, kCountersDefault = 1000, kNetDe
 static constexpr uint16_t kLeaseDefault = 30;
 static constexpr uint8_t kReplies = 4;           // reponses differees (apres un instantane)
 static constexpr uint32_t kHeapBlocMs = 10000;   // plus grand bloc du tas relu au plus toutes les 10 s
+// Transport reseau (sections 10.5 et 10.6) : profil de 'json 1', trames
+// coupees seules apres 60 s, retard admis dans la file (le debit plafonne du
+// reseau la vide plus lentement que l'USB : un instantane fait ~6 Ko, deux
+// instantanes simultanes ~12 Ko a 3 Ko/s).
+static constexpr uint32_t kRemotePeriod = 2000, kRemoteCounters = 0, kRemoteNet = 30000;
+static constexpr uint32_t kRemoteFramesMs = 60000;
+static constexpr uint32_t kRemoteLateMs = 6000;
+// Plafonds d'evenements par seconde d'une session reseau (USB : 50, 10, 50, 20).
+static constexpr uint16_t kRemoteRxCap = 10, kRemoteCrcCap = 5, kRemoteTxCap = 10, kRemoteLogCap = 10;
+// Sessions : l'USB, plus une par session reseau etablie dans le build Thread.
+#if MATTER_NET_THREAD
+static constexpr uint8_t kSinks = kOrigins;
+#else
+static constexpr uint8_t kSinks = 1;
+#endif
 
 static Writer sW;              // le seul tampon de formatage (1024 octets)
 static bool sBusy = false;     // une ligne en cours de formatage dans sW
-static uint32_t sN = 0;        // n de la prochaine ligne produite (USB)
-static uint32_t sLost = 0, sTooLong = 0, sRejected = 0;
 static uint32_t sBoot = 0;
 
-static struct {
-  bool machine = false;
-  uint32_t periodMs = kPeriodDefault, countersMs = kCountersDefault, netMs = kNetDefault;
-  uint16_t leaseS = kLeaseDefault;
-  bool frames = true, log = false;
-  uint32_t nextEtat = 0, nextCpt = 0, nextNet = 0, nextHb = 0;
-} sS;
-static uint32_t sLastRx = 0, sLastCmd = 0;  // bail : dernier octet recu, fin de la derniere commande
-
-static Queue sQ;
 // Reponse differee : part par la file (apres les lignes deja en file, ou
 // quand une ligne entiere tient dans le tampon d'emission).
-static struct PendingReply {
+struct PendingReply {
   bool used;
   Reply r;         // r.cmd pointe sur cmd ; r.code litteral ; r.msg nul
   uint32_t t0;     // durAtSend : duree_ms mesuree a l'envoi (instantane)
   bool durAtSend;
+  bool cache;      // gardee pour un id repete (reseau) ; pas un refus deja_traite
   char cmd[kCmdTextMax + 1];
-} sReplies[kReplies];
+};
 
-static RateCap sRxCap(50), sCrcCap(10), sTxCap(50), sLogCap(20);
-static Cadence sCadence;
+// Une session par transport (origine). L'USB (kUsb) existe toujours ; une
+// origine reseau n'a de sens que tant que sa session H1 est etablie
+// (net_udp.cpp : jsonRemoteReset a chaque changement).
+struct Sink {
+  bool machine = false;
+  uint32_t periodMs = kPeriodDefault, countersMs = kCountersDefault, netMs = kNetDefault;
+  uint16_t leaseS = kLeaseDefault;
+  bool frames = true, log = false;
+  uint32_t framesUntil = 0;  // reseau : trames coupees a cet instant (0 : sans limite)
+  uint32_t nextEtat = 0, nextCpt = 0, nextNet = 0, nextHb = 0;
+  uint32_t lastRx = 0, lastCmd = 0;  // bail : dernier octet ou message recu, fin de la derniere commande
+  uint32_t n = 0;                    // n de la prochaine ligne produite sur ce transport
+  uint32_t lost = 0, tooLong = 0, rejected = 0;
+  uint32_t loopMaxMs = 0;            // plus long tour de loop() depuis le bloc sante emis
+  uint32_t topId = 0;                // reseau : plus haut id admis dans cette session (jsonRemoteAdmit)
+  Queue q;
+  PendingReply replies[kReplies] = {};
+  RateCap rxCap{50}, crcCap{10}, txCap{50}, logCap{20};
+  Cadence cadence;
+};
+static Sink sSinks[kSinks];
+#if MATTER_NET_THREAD
+static ReplyCache sCache[kSinks - 1];  // origines reseau seulement
+#endif
+static uint8_t sOrigin = kUsb;           // origine de la commande en cours
+
 static uint32_t sConfigSig = 0;
 static bool sRefreshSaved = false;             // 'json etat' : abonnements sauves relus
-static uint32_t sLoopAt = 0, sLoopMaxMs = 0;   // plus long tour de loop() depuis le bloc sante emis
+static uint32_t sLoopAt = 0;
 // heap_caps_get_largest_free_block() parcourt tout le tas en section critique
 // (interruptions masquees sur ce C6 mono-coeur) : relu au plus toutes les
 // kHeapBlocMs, et a chaque 'json 1' ou 'json etat'.
@@ -72,10 +104,44 @@ static bool sHeapBlocStale = true;
 static DeliveryWatch sDel;  // observateur de livraison (section 7.3)
 
 static uint32_t upS() { return (uint32_t)(esp_timer_get_time() / 1000000); }
+static bool remote(uint8_t o) { return o != kUsb; }
+
+static bool anyMachine() {
+  for (const Sink &s : sSinks)
+    if (s.machine) return true;
+  return false;
+}
 
 // ===========================================================================
 //  Emission
 // ===========================================================================
+
+// Place d'emission libre sur ce transport : octets du tampon de HWCDC (USB),
+// ou places de la file des datagrammes x une ligne (reseau).
+static int room(uint8_t o) {
+  if (o == kUsb) return Serial.availableForWrite();
+#if MATTER_NET_THREAD
+  return (int)netUdpFreeSlots() * (int)kLineMax;
+#else
+  return 0;
+#endif
+}
+
+// Ecrit la ligne fermee de sW sur ce transport, entiere ou pas du tout.
+static bool emit(uint8_t o) {
+  const size_t len = sW.size();
+  if (o == kUsb) {
+    if (Serial.availableForWrite() < (int)len) return false;
+    Serial.write(sW.data(), len);
+    return true;
+  }
+#if MATTER_NET_THREAD
+  // Un datagramme : l'objet JSON seul, sans RS ni LF (section 10.2).
+  return len >= 2 && netUdpSend((uint8_t)(o - 1), sW.data() + 1, len - 2);
+#else
+  return false;
+#endif
+}
 
 // Reserve le tampon unique. false : une ligne est deja en cours (bogue :
 // aucun formatage ne doit en appeler un autre), rien n'est produit.
@@ -85,30 +151,40 @@ static bool claim() {
   return true;
 }
 
-// Ferme la ligne et l'ecrit d'un seul Serial.write, ou la perd sans attendre.
-// n compte toute ligne produite, ecrite ou perdue.
-static bool send() {
+// Ferme la ligne formatee pour la session o et l'ecrit, ou la perd sans
+// attendre. n compte toute ligne produite, ecrite ou perdue.
+static bool send(uint8_t o) {
   sBusy = false;
-  sN++;
+  Sink &s = sSinks[o];
+  s.n++;
   if (!sW.finish()) {
-    sTooLong++;
+    s.tooLong++;
     return false;
   }
-  const size_t len = sW.size();
-  if (Serial.availableForWrite() < (int)len) {
-    sLost++;
+  if (!emit(o)) {
+    s.lost++;
     return false;
   }
-  Serial.write(sW.data(), len);
   return true;
 }
 
-// Texte emis par le protocole lui-meme (fin de bail, invite) : meme chemin
-// non bloquant, perdu et compte si le tampon est plein.
+// Evenement frequent (rx, tx, log) vers une session reseau : seulement s'il
+// reste ensuite la place d'une ligne periodique ou d'une reponse (debit
+// plafonne : 20 evenements par seconde depasseraient les 3 Ko/s et
+// affameraient etat et reponses). Sinon perdu, n consomme et compte.
+static bool eventRoom(uint8_t o) {
+  if (!remote(o) || room(o) >= 2 * (int)kLineMax) return true;
+  sSinks[o].n++;
+  sSinks[o].lost++;
+  return false;
+}
+
+// Texte emis par le protocole lui-meme sur l'USB (fin de bail, invite) : meme
+// chemin non bloquant, perdu et compte si le tampon est plein.
 static void textNb(const char *s) {
   const size_t len = strlen(s);
   if (Serial.availableForWrite() < (int)len) {
-    sLost++;
+    sSinks[kUsb].lost++;
     return;
   }
   Serial.write((const uint8_t *)s, len);
@@ -174,9 +250,10 @@ static void bootUp() {
   sW.u32("up_s", upS());
 }
 
-static void helloBase(uint32_t now) {
+static void helloBase(uint8_t o, uint32_t now) {
+  const Sink &s = sSinks[o];
   const esp_app_desc_t *d = esp_app_get_description();
-  sW.begin("hello", sN, now);
+  sW.begin("hello", s.n, now);
   sW.str("bloc", "base");
   sW.u32("rev", kRev);
   sW.str("fw", FW_VERSION_FULL);
@@ -204,13 +281,13 @@ static void helloBase(uint32_t now) {
   sW.u32("reset_n", (uint32_t)r);
   sW.u32("up_s", upS());
   sW.obj("session");
-  sW.str("transport", "usb");
-  sW.u32("periode_ms", sS.periodMs);
-  sW.u32("compteurs_ms", sS.countersMs);
-  sW.u32("reseau_ms", sS.netMs);
-  sW.u32("bail_s", sS.leaseS);
-  sW.boolean("trames", sS.frames);
-  sW.boolean("log", sS.log);
+  sW.str("transport", remote(o) ? "udp" : "usb");
+  sW.u32("periode_ms", s.periodMs);
+  sW.u32("compteurs_ms", s.countersMs);
+  sW.u32("reseau_ms", s.netMs);
+  sW.u32("bail_s", s.leaseS);
+  sW.boolean("trames", s.frames);
+  sW.boolean("log", s.log);
   sW.end();
   sW.obj("limites");
   sW.u32("ligne_max", kLineMax);
@@ -218,8 +295,8 @@ static void helloBase(uint32_t now) {
   sW.end();
 }
 
-static void helloIdentity(uint32_t now) {
-  sW.begin("hello", sN, now);
+static void helloIdentity(uint8_t o, uint32_t now) {
+  sW.begin("hello", sSinks[o].n, now);
   sW.str("bloc", "identite");
   sW.hexU32("boot", sBoot, 8);
   uint8_t mac[8];
@@ -259,13 +336,17 @@ static void helloIdentity(uint32_t now) {
   sW.str(nullptr, "lampe_async");
   sW.str(nullptr, "trames");
   sW.str(nullptr, "log");
+#if MATTER_NET_THREAD
+  sW.str(nullptr, "udp");
+  sW.str(nullptr, "cle");
+#endif
   sW.end();
 }
 
 static uint32_t gammaC() { return (uint32_t)(mapGamma() * 100.0f + 0.5f); }
 
-static void config(uint32_t now) {
-  sW.begin("config", sN, now);
+static void config(uint8_t o, uint32_t now) {
+  sW.begin("config", sSinks[o].n, now);
   sW.obj("lampe");
   sW.hex("adresse", lamp.address(), 4);
   sW.hex("air", lamp.radio.air(), 4);
@@ -332,8 +413,8 @@ static uint32_t configSig() {
   return h;
 }
 
-static void etatLampe(uint32_t now) {
-  sW.begin("etat", sN, now);
+static void etatLampe(uint8_t o, uint32_t now) {
+  sW.begin("etat", sSinks[o].n, now);
   sW.str("bloc", "lampe");
   bootUp();
   state(sW, "consigne", lamp.target());
@@ -359,8 +440,8 @@ static void etatLampe(uint32_t now) {
   sW.boolean("trace", lamp.tracing());
 }
 
-static void etatTranches(uint32_t now) {
-  sW.begin("etat", sN, now);
+static void etatTranches(uint8_t o, uint32_t now) {
+  sW.begin("etat", sSinks[o].n, now);
   sW.str("bloc", "tranches");
   bootUp();
   sW.arr("tranches");
@@ -379,8 +460,9 @@ static void etatTranches(uint32_t now) {
   sW.end();
 }
 
-static void etatSante(uint32_t now) {
-  sW.begin("etat", sN, now);
+static void etatSante(uint8_t o, uint32_t now) {
+  const Sink &k = sSinks[o];
+  sW.begin("etat", k.n, now);
   sW.str("bloc", "sante");
   bootUp();
   const Halo1Radio &r = lamp.radio;
@@ -450,16 +532,16 @@ static void etatSante(uint32_t now) {
   }
   sW.u32("heap_bloc", sHeapBloc);
   sW.u32("pile_boucle", (uint32_t)uxTaskGetStackHighWaterMark(nullptr));  // octets sous ESP-IDF
-  sW.u32("boucle_max_ms", sLoopMaxMs);  // remis a 0 quand la ligne part (produce)
-  sW.u32("json_perdus", sLost);
-  sW.u32("json_trop_longs", sTooLong);
-  sW.u32("rejets", sRejected);
+  sW.u32("boucle_max_ms", k.loopMaxMs);  // remis a 0 quand la ligne part (produce)
+  sW.u32("json_perdus", k.lost);
+  sW.u32("json_trop_longs", k.tooLong);
+  sW.u32("rejets", k.rejected);
   sW.end();
 }
 
-static void cptPilote(uint32_t now) {
+static void cptPilote(uint8_t o, uint32_t now) {
   const Halo1Lamp::Stats &s = lamp.stats;
-  sW.begin("compteurs", sN, now);
+  sW.begin("compteurs", sSinks[o].n, now);
   sW.str("bloc", "pilote");
   sW.u32("raz", lamp.statsResets());
   sW.obj("tx");
@@ -501,9 +583,9 @@ static void cptPilote(uint32_t now) {
   sW.end();
 }
 
-static void cptRadio(uint32_t now) {
+static void cptRadio(uint8_t o, uint32_t now) {
   const Halo1Radio::Stats &r = lamp.radio.stats;
-  sW.begin("compteurs", sN, now);
+  sW.begin("compteurs", sSinks[o].n, now);
   sW.str("bloc", "radio");
   sW.u32("raz", lamp.statsResets());
   sW.obj("radio");
@@ -538,53 +620,74 @@ static void cptRadio(uint32_t now) {
   sW.end();
 }
 
-// Une ligne de la file : formatee maintenant, avec les valeurs du moment.
-static void produce(const Queued &q, uint32_t now) {
+// Une reponse vient de partir vers une origine reseau : gardee pour un id repete.
+static void cacheReply(uint8_t o, const Reply &r) {
+#if MATTER_NET_THREAD
+  if (remote(o) && r.fin) sCache[o - 1].put(r);
+#else
+  (void)o;
+  (void)r;
+#endif
+}
+
+// Une ligne de la file de la session o : formatee maintenant, avec les
+// valeurs du moment.
+static void produce(uint8_t o, const Queued &q, uint32_t now) {
   if (!claim()) return;
+  Sink &k = sSinks[o];
+  Reply sent;
+  bool isReply = false;
   switch (q.item) {
-    case Item::HelloBase: helloBase(now); break;
-    case Item::HelloId: helloIdentity(now); break;
+    case Item::HelloBase: helloBase(o, now); break;
+    case Item::HelloId: helloIdentity(o, now); break;
     case Item::Config:
-      config(now);
+      config(o, now);
       sConfigSig = configSig();
       break;
-    case Item::EtatLampe: etatLampe(now); break;
-    case Item::EtatTranches: etatTranches(now); break;
-    case Item::EtatSante: etatSante(now); break;
-    case Item::CptPilote: cptPilote(now); break;
-    case Item::CptRadio: cptRadio(now); break;
+    case Item::EtatLampe: etatLampe(o, now); break;
+    case Item::EtatTranches: etatTranches(o, now); break;
+    case Item::EtatSante: etatSante(o, now); break;
+    case Item::CptPilote: cptPilote(o, now); break;
+    case Item::CptRadio: cptRadio(o, now); break;
 #ifndef DIAG_ONLY
     case Item::CptMatter:
-      sW.begin("compteurs", sN, now);
+      sW.begin("compteurs", k.n, now);
       sW.str("bloc", "matter");
       matterJsonCounters(sW);
       break;
     case Item::NetThread:
-      sW.begin("reseau", sN, now);
+      sW.begin("reseau", k.n, now);
       sW.str("bloc", "thread");
-      matterJsonNetThread(sW, now);
+      matterJsonNetThread(sW, now, remote(o));
       break;
 #if MATTER_NET_THREAD
     case Item::NetSubs:
-      sW.begin("reseau", sN, now);
+      sW.begin("reseau", k.n, now);
       sW.str("bloc", "abonnements");
       matterJsonNetSubs(sW, now, sRefreshSaved);
       sRefreshSaved = false;
       break;
+    case Item::NetIp:
+      sW.begin("reseau", k.n, now);
+      sW.str("bloc", "ip");
+      netUdpJson(sW, now);
+      break;
 #endif
 #endif
-    case Item::Heartbeat: heartbeat(sW, sN, now, sBoot, upS(), sLost); break;
+    case Item::Heartbeat: heartbeat(sW, k.n, now, sBoot, upS(), k.lost); break;
     case Item::Reply: {
-      PendingReply &p = sReplies[q.arg < kReplies ? q.arg : 0];
+      PendingReply &p = k.replies[q.arg < kReplies ? q.arg : 0];
       Reply r = p.r;
       r.cmd = p.cmd;
       if (p.durAtSend) r.durMs = now - p.t0;
       if (r.hasLease) {
-        r.leaseS = sS.leaseS;
+        r.leaseS = k.leaseS;
         r.upS = upS();
       }
-      reply(sW, sN, now, r);
+      reply(sW, k.n, now, r);
       p.used = false;
+      sent = r;
+      isReply = p.cache;
       break;
     }
     default:  // bloc absent de ce build : rien de produit
@@ -592,99 +695,132 @@ static void produce(const Queued &q, uint32_t now) {
       return;
   }
   // Le maximum n'est remis a 0 que s'il est parti : perdue, la ligne suivante le porte.
-  if (send() && q.item == Item::EtatSante) sLoopMaxMs = 0;
+  const bool ok = send(o);
+  if (ok && q.item == Item::EtatSante) k.loopMaxMs = 0;
+  // Perdue ou non, une reponse est donnee pour cet id : un id repete la renvoie
+  // (sauf un refus deja_traite, jamais garde).
+  if (isReply) cacheReply(o, sent);
 }
 
-static void drain(uint32_t now) {
+static void drain(uint8_t o, uint32_t now) {
+  Sink &k = sSinks[o];
   // Ligne periodique perdue par retard : n consomme (trou visible), comptee.
   // Jamais une reponse (Queue::dropLate).
-  const uint8_t late = sQ.dropLate(now);
-  sN += late;
-  sLost += late;
-  const Queued *q = sQ.front();
+  const uint8_t late = k.q.dropLate(now, remote(o) ? kRemoteLateMs : kLateMs);
+  k.n += late;
+  k.lost += late;
+  const Queued *q = k.q.front();
   if (!q || sBusy) return;
   // Periodique : avec 2048 octets libres, il en reste 1024 apres elle pour un
   // evenement. Reponse : des que 1024 sont libres. Sinon, au tour suivant.
-  if (!sQ.frontReady(Serial.availableForWrite())) return;
+  if (!k.q.frontReady(room(o))) return;
   const Queued item = *q;
-  sQ.pop();
-  produce(item, now);
+  k.q.pop();
+  produce(o, item, now);
 }
 
-static void push(Item item, uint32_t now, bool session) {
-  if (!sQ.push(item, now, session)) {
+static void push(uint8_t o, Item item, uint32_t now, bool session) {
+  Sink &k = sSinks[o];
+  if (!k.q.push(item, now, session)) {
     // File pleine : la ligne est perdue, comme une ligne en retard.
-    sN++;
-    sLost++;
+    k.n++;
+    k.lost++;
   }
 }
 
-static void pushState(uint32_t now, bool session) {
-  push(Item::EtatLampe, now, session);
-  push(Item::EtatTranches, now, session);
-  push(Item::EtatSante, now, session);
+static void pushState(uint8_t o, uint32_t now, bool session) {
+  push(o, Item::EtatLampe, now, session);
+  push(o, Item::EtatTranches, now, session);
+  push(o, Item::EtatSante, now, session);
 }
 
-static void pushCounters(uint32_t now, bool session) {
-  push(Item::CptPilote, now, session);
-  push(Item::CptRadio, now, session);
+static void pushCounters(uint8_t o, uint32_t now, bool session) {
+  push(o, Item::CptPilote, now, session);
+  push(o, Item::CptRadio, now, session);
 #ifndef DIAG_ONLY
-  push(Item::CptMatter, now, session);
+  push(o, Item::CptMatter, now, session);
 #endif
 }
 
-static void pushNet(uint32_t now, bool session) {
+static void pushNet(uint8_t o, uint32_t now, bool session) {
 #ifndef DIAG_ONLY
-  push(Item::NetThread, now, session);
+  push(o, Item::NetThread, now, session);
 #if MATTER_NET_THREAD
-  push(Item::NetSubs, now, session);
+  push(o, Item::NetSubs, now, session);
+  push(o, Item::NetIp, now, session);
 #endif
 #else
+  (void)o;
   (void)now;
   (void)session;
 #endif
 }
 
-static void pushHello(uint32_t now, bool session) {
-  push(Item::HelloBase, now, session);
-  push(Item::HelloId, now, session);
-  push(Item::Config, now, session);
+static void pushHello(uint8_t o, uint32_t now, bool session) {
+  push(o, Item::HelloBase, now, session);
+  push(o, Item::HelloId, now, session);
+  push(o, Item::Config, now, session);
 }
 
 // ===========================================================================
-//  Reponses
+//  Reponses (vers l'origine de la commande en cours)
 // ===========================================================================
 
-void jsonReply(const Reply &r) {
-  if (!claim()) return;
-  reply(sW, sN, millis(), r);
-  send();
+// Ecrit la reponse tout de suite (perdue et comptee si elle ne tient pas).
+// Perdue ou non, elle est donnee pour cet id : gardee (reseau) pour un renvoi.
+static void replyEmit(uint8_t o, const Reply &r, bool cache) {
+  if (claim()) {
+    reply(sW, sSinks[o].n, millis(), r);
+    send(o);
+  }
+  if (cache) cacheReply(o, r);
 }
 
-// Reponse par la file (apres les lignes deja en file) ; sans place (4
-// reponses en attente, file pleine) : tout de suite, comme un evenement.
-static void queueReply(const Reply &r, uint32_t t0, bool durAtSend) {
+// Reponse par la file de la session o (apres les lignes deja en file) ; sans
+// place (4 reponses en attente, file pleine) : tout de suite. Differee, elle
+// perd son msg (il pointerait sur un tampon disparu).
+static void replyQueue(uint8_t o, const Reply &r, uint32_t t0, bool durAtSend, bool cache = true) {
+  Sink &k = sSinks[o];
   for (uint8_t i = 0; i < kReplies; i++) {
-    PendingReply &p = sReplies[i];
+    PendingReply &p = k.replies[i];
     if (p.used) continue;
     p.used = true;
     p.r = r;
-    p.r.msg = nullptr;  // jamais de msg differe : il pointerait sur un tampon disparu
+    p.r.msg = nullptr;
+    p.r.key = nullptr;
+    p.r.kid = nullptr;
+    p.r.hasKid = false;
     p.t0 = t0;
     p.durAtSend = durAtSend;
+    p.cache = cache;
     copyCmd(p.cmd, r.cmd);
-    if (sQ.push(Item::Reply, millis(), false, i)) return;
+    if (k.q.push(Item::Reply, millis(), false, i)) return;
     p.used = false;
     break;
   }
   Reply now = r;
   if (durAtSend) now.durMs = millis() - t0;
   if (now.hasLease) {
-    now.leaseS = sS.leaseS;
+    now.leaseS = k.leaseS;
     now.upS = upS();
   }
-  jsonReply(now);
+  replyEmit(o, now, cache);
 }
+
+// Reponse immediate. Reseau : la cle n'y part jamais ; sans place dans la file
+// des datagrammes, ou derriere une reponse deja en file (l'ordre des reponses
+// est garde), elle attend dans la file de la session au lieu d'etre perdue.
+static void replyTo(uint8_t o, const Reply &r, bool cache = true) {
+  Reply out = r;
+  if (remote(o)) out.key = nullptr;
+  if (remote(o) && (room(o) < (int)kLineMax || sSinks[o].q.has(Item::Reply))) {
+    replyQueue(o, out, 0, false, cache);
+    return;
+  }
+  replyEmit(o, out, cache);
+}
+
+void jsonReply(const Reply &r) { replyTo(sOrigin, r); }
 
 // Reponse apres les lignes d'un instantane deja en file.
 static void replyAfterQueue(const JsonCmd &c, bool lease) {
@@ -693,18 +829,18 @@ static void replyAfterQueue(const JsonCmd &c, bool lease) {
   r.id = c.id;
   r.cmd = c.cmd;
   r.hasLease = lease;
-  queueReply(r, c.t0, true);
+  replyQueue(sOrigin, r, c.t0, true);
 }
 
 void jsonReplyEnd(const Reply &r) {
   // Rien a doubler et la place d'une ligne entiere : tout de suite, juste
   // apres le texte. Sinon (le texte de la commande a rempli le tampon
   // d'emission : 'help' en ecrit 7 Ko), par la file, des que la place revient.
-  if (!sQ.has(Item::Reply) && Serial.availableForWrite() >= (int)kLineMax) {
+  if (!sSinks[sOrigin].q.has(Item::Reply) && room(sOrigin) >= (int)kLineMax) {
     jsonReply(r);
     return;
   }
-  queueReply(r, 0, false);
+  replyQueue(sOrigin, r, 0, false);
 }
 
 static void replyNow(const JsonCmd &c, bool ok, const char *code, const char *msg, bool lease = false) {
@@ -717,87 +853,197 @@ static void replyNow(const JsonCmd &c, bool ok, const char *code, const char *ms
   r.msg = msg;
   r.durMs = millis() - c.t0;
   r.hasLease = lease;
-  r.leaseS = sS.leaseS;
+  r.leaseS = sSinks[sOrigin].leaseS;
   r.upS = upS();
   jsonReply(r);
 }
 
 void jsonRefuse(const JsonCmd &c, const char *code, const char *msg) {
-  sRejected++;
+  sSinks[sOrigin].rejected++;
   if (c.hasId) replyNow(c, false, code, msg);
-  else if (!sS.machine) Serial.printf("Ligne refusee (%s) : %s\n", code, msg);
+  else if (sOrigin == kUsb && !sSinks[kUsb].machine) Serial.printf("Ligne refusee (%s) : %s\n", code, msg);
 }
 
 // ===========================================================================
 //  Session
 // ===========================================================================
 
-static void resetTimers(uint32_t now) {
-  sS.nextEtat = now + sS.periodMs;
-  sS.nextCpt = now + sS.countersMs;
-  sS.nextNet = now + sS.netMs;
-  sS.nextHb = now + kHbMs;
+static void resetTimers(Sink &k, uint32_t now) {
+  k.nextEtat = now + k.periodMs;
+  k.nextCpt = now + k.countersMs;
+  k.nextNet = now + k.netMs;
+  k.nextHb = now + kHbMs;
 }
 
-static void enterMachine(uint16_t leaseS, uint32_t now) {
-  sS.machine = true;
-  sLoopMaxMs = 0;  // pas les tours du mode humain (commandes de banc) avant la session
-  sS.periodMs = kPeriodDefault;
-  sS.countersMs = kCountersDefault;
-  sS.netMs = kNetDefault;
-  sS.leaseS = leaseS;
-  sS.frames = true;
-  sS.log = false;
-  sLastRx = sLastCmd = now;
-  resetTimers(now);
-}
-
-// Fin du mode machine : lignes de session retirees, message fin, puis texte
-// et invite par le chemin non bloquant.
-static void leaveMachine(bool lease, uint32_t now) {
-  sQ.dropSession();
-  if (claim()) {
-    sessionEnd(sW, sN, now, lease ? "bail" : "commande");
-    send();
+static void enterMachine(uint8_t o, uint16_t leaseS, uint32_t now) {
+  Sink &k = sSinks[o];
+  k.machine = true;
+  k.loopMaxMs = 0;  // pas les tours du mode humain (commandes de banc) avant la session
+  if (remote(o)) {
+    // Profil distant (10.6) : chaque etat (~1,2 Ko, trois datagrammes) fait une
+    // douzaine de trames 802.15.4 a quelques cm du BM5602.
+    k.periodMs = kRemotePeriod;
+    k.countersMs = kRemoteCounters;
+    k.netMs = kRemoteNet;
+    k.frames = false;
+    k.rxCap.setLimit(kRemoteRxCap);
+    k.crcCap.setLimit(kRemoteCrcCap);
+    k.txCap.setLimit(kRemoteTxCap);
+    k.logCap.setLimit(kRemoteLogCap);
+  } else {
+    k.periodMs = kPeriodDefault;
+    k.countersMs = kCountersDefault;
+    k.netMs = kNetDefault;
+    k.frames = true;
   }
-  sS.machine = false;
+  k.framesUntil = 0;
+  k.leaseS = leaseS;
+  k.log = false;
+  k.lastRx = k.lastCmd = now;
+  resetTimers(k, now);
+}
+
+// Fin du mode machine : lignes de session retirees, message fin, puis (USB)
+// texte et invite par le chemin non bloquant.
+static void leaveMachine(uint8_t o, bool lease, uint32_t now) {
+  Sink &k = sSinks[o];
+  k.q.dropSession();
+  if (claim()) {
+    sessionEnd(sW, k.n, now, lease ? "bail" : "commande");
+    send(o);
+  }
+  k.machine = false;
+  if (o != kUsb) return;
   if (lease) {
     char t[80];
-    snprintf(t, sizeof(t), "json : mode machine coupe (hote muet depuis %u s)\r\n> ", (unsigned)sS.leaseS);
+    snprintf(t, sizeof(t), "json : mode machine coupe (hote muet depuis %u s)\r\n> ", (unsigned)k.leaseS);
     textNb(t);
   } else {
     textNb("> ");
   }
 }
 
-bool jsonMachine() { return sS.machine; }
-void jsonNoteRx() { sLastRx = millis(); }
+bool jsonMachine() { return sSinks[kUsb].machine; }
+void jsonNoteRx() { sSinks[kUsb].lastRx = millis(); }
 uint32_t jsonBootId() { return sBoot; }
 
-bool jsonCadenceOk(uint32_t now) { return sCadence.allow(now); }
+// Une origine invalide ne change rien (jamais de repli silencieux sur l'USB,
+// qui echappe a la liste blanche).
+void jsonSetOrigin(uint8_t origin) {
+  if (origin < kSinks) sOrigin = origin;
+}
+uint8_t jsonOrigin() { return sOrigin; }
+
+void jsonRemoteReset(uint8_t origin) {
+  if (origin == kUsb || origin >= kSinks) return;
+  // Sur place (un Sink temporaire couterait pres d'un Ko de pile). n continue :
+  // numero de ligne du transport depuis le demarrage ; le reste repart des
+  // valeurs par defaut.
+  Sink &k = sSinks[origin];
+  k.machine = false;
+  k.periodMs = kPeriodDefault;
+  k.countersMs = kCountersDefault;
+  k.netMs = kNetDefault;
+  k.leaseS = kLeaseDefault;
+  k.frames = true;
+  k.log = false;
+  k.framesUntil = 0;
+  k.nextEtat = k.nextCpt = k.nextNet = k.nextHb = 0;
+  k.lastRx = k.lastCmd = 0;
+  k.lost = k.tooLong = k.rejected = 0;
+  k.loopMaxMs = 0;
+  k.topId = 0;
+  k.q.clear();
+  for (PendingReply &p : k.replies) p.used = false;
+  k.rxCap = RateCap(50);
+  k.crcCap = RateCap(10);
+  k.txCap = RateCap(50);
+  k.logCap = RateCap(20);
+  k.cadence = Cadence();
+#if MATTER_NET_THREAD
+  sCache[origin - 1].clear();
+#endif
+  sDel.dropOrigin(origin);
+}
+
+void jsonNoteRemoteRx(uint8_t origin) {
+  if (origin != kUsb && origin < kSinks) sSinks[origin].lastRx = millis();
+}
+
+bool jsonRemoteAdmit(uint32_t id, const char *shown) {
+#if !MATTER_NET_THREAD
+  (void)id;
+  (void)shown;
+  return false;
+#else
+  const uint8_t o = sOrigin;
+  if (o == kUsb || o >= kSinks) return false;
+  Sink &k = sSinks[o];
+  // Reponse differee de cet id encore en file (instantane) : elle partira.
+  for (const PendingReply &p : k.replies)
+    if (p.used && p.r.id == id) return true;
+  const Reply *cached = sCache[o - 1].find(id);
+  if (cached && !strcmp(cached->cmd, shown)) {
+    // Meme id, meme commande : la reponse perdue repart, rien n'est reexecute.
+    Reply out = *cached;
+    char cmd[kCmdTextMax + 1];
+    copyCmd(cmd, cached->cmd);  // put() va reecrire l'entree : plus de pointeur dedans
+    out.cmd = cmd;
+    replyTo(o, out);
+    return true;
+  }
+  if (cached || id <= k.topId) {
+    // id deja traite, reponse plus en cache (ou autre commande sous le meme id) :
+    // jamais de nouvelle execution. Refus non garde (le cache reste celui de l'id).
+    Reply r;
+    r.id = id;
+    r.cmd = shown;
+    r.ok = false;
+    r.code = "deja_traite";
+    r.msg = "id deja traite (reponse plus disponible) : rien n'est reexecute";
+    replyTo(o, r, false);
+    return true;
+  }
+  k.topId = id;
+  return false;
+#endif
+}
+
+void jsonCountRejected() { sSinks[sOrigin].rejected++; }
+
+bool jsonCadenceOk(uint32_t now) { return sSinks[sOrigin].cadence.allow(now); }
 
 void jsonAfterCommand() {
-  sLastCmd = millis();
-  if (!sS.machine) return;
+  const uint32_t now = millis();
+  sSinks[sOrigin].lastCmd = now;
+  if (!anyMachine()) return;
   const uint32_t sig = configSig();
   if (sig != sConfigSig) {
     sConfigSig = sig;  // une seule fois par changement, meme si la ligne se perd
-    push(Item::Config, millis(), true);
+    for (uint8_t o = 0; o < kSinks; o++)
+      if (sSinks[o].machine) push(o, Item::Config, now, true);
   }
 }
 
 static void printSession(Print &out) {
-  out.printf("Mode machine : %s", sS.machine ? "ACTIF" : "coupe ('json 1' pour l'activer)");
-  if (sS.machine) {
-    if (sS.leaseS) out.printf(", bail de %u s", sS.leaseS);
+  const Sink &k = sSinks[kUsb];
+  out.printf("Mode machine : %s", k.machine ? "ACTIF" : "coupe ('json 1' pour l'activer)");
+  if (k.machine) {
+    if (k.leaseS) out.printf(", bail de %u s", k.leaseS);
     else out.print(", sans bail (jusqu'a 'json 0')");
   }
   out.println();
   out.printf("  periodes : etat %lu ms, compteurs %lu ms, reseau %lu ms ; trames %s ; log %s\n",
-             (unsigned long)sS.periodMs, (unsigned long)sS.countersMs, (unsigned long)sS.netMs,
-             sS.frames ? "oui" : "non", sS.log ? "oui" : "non");
+             (unsigned long)k.periodMs, (unsigned long)k.countersMs, (unsigned long)k.netMs,
+             k.frames ? "oui" : "non", k.log ? "oui" : "non");
   out.printf("  lignes   : n = %lu, %lu perdue(s), %lu trop longue(s), %lu ligne(s) de l'hote refusee(s)\n",
-             (unsigned long)sN, (unsigned long)sLost, (unsigned long)sTooLong, (unsigned long)sRejected);
+             (unsigned long)k.n, (unsigned long)k.lost, (unsigned long)k.tooLong, (unsigned long)k.rejected);
+  for (uint8_t o = 1; o < kSinks; o++) {
+    const Sink &r = sSinks[o];
+    if (!r.n && !r.machine) continue;
+    out.printf("  reseau %u : mode machine %s ; n = %lu, %lu perdue(s), %lu refusee(s)\n", (unsigned)o,
+               r.machine ? "actif" : "coupe", (unsigned long)r.n, (unsigned long)r.lost, (unsigned long)r.rejected);
+  }
   out.printf("  demarrage : boot %08lX\n", (unsigned long)sBoot);
   out.println("  protocole : docs/PROTOCOLE-JSON.md (v1)");
 }
@@ -819,22 +1065,137 @@ static bool parseU32(const char *s, uint32_t *v) {
   return true;
 }
 
-// Periode : 0 (coupe) ou lo..60000 ms.
-static bool setPeriod(char *p, uint32_t lo, uint32_t *out, uint32_t *next, uint32_t now) {
+// Periode : 0 (coupe, si permis) ou lo..60000 ms.
+static bool setPeriod(char *p, uint32_t lo, bool zeroOk, uint32_t *out, uint32_t *next, uint32_t now) {
   uint32_t v;
-  if (!parseU32(nextWord(p), &v) || *nextWord(p) || (v && (v < lo || v > 60000))) return false;
+  if (!parseU32(nextWord(p), &v) || *nextWord(p) || (!v && !zeroOk) || (v && (v < lo || v > 60000))) return false;
   *out = v;
   *next = now + v;
   return true;
+}
+
+// 'json cle ...' (section 10.4) : USB seulement. La liste blanche la refuse
+// deja au reseau ; refusee ici aussi (defense en profondeur : la reponse de
+// 'nouvelle' porte la cle).
+static void keyCommand(char *p, const JsonCmd &c) {
+  if (sOrigin != kUsb) {
+    replyNow(c, false, "interdite", "json cle : USB seulement");
+    return;
+  }
+#if MATTER_NET_THREAD
+  const char *w = nextWord(p);
+  char kid[9] = {};
+  if (!*w) {
+    const bool has = netUdpKid(kid);
+    Reply r;
+    r.id = c.id;
+    r.cmd = c.cmd;
+    r.durMs = millis() - c.t0;
+    r.hasKid = true;
+    r.kid = has ? kid : nullptr;
+    if (c.hasId) jsonReply(r);
+    else if (has) Serial.printf("json cle : empreinte %s (transport reseau actif, port UDP %u)\n", kid, kHaloUdpPort);
+    else Serial.println("json cle : aucune cle, transport reseau coupe");
+    return;
+  }
+  if (!strcmp(w, "nouvelle")) {
+    const char *hex = nextWord(p);
+    uint8_t appRandom[32];
+    bool hexOk = strlen(hex) == 64 && !*nextWord(p);
+    for (uint8_t i = 0; hexOk && i < 32; i++) {
+      auto nib = [](char ch) -> int {
+        return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+      };
+      const int hi = nib(hex[2 * i]), lo = nib(hex[2 * i + 1]);
+      if (hi < 0 || lo < 0) hexOk = false;
+      else appRandom[i] = (uint8_t)(hi << 4 | lo);
+    }
+    if (!c.hasId) {
+      // La cle ne s'affiche jamais en texte : 'pio device monitor' enregistre la
+      // session (log2file) dans un fichier a la racine du depot.
+      h1::wipe(appRandom, sizeof(appRandom));
+      Serial.println("json cle nouvelle : reservee a l'app (ligne avec id=, la cle part dans la reponse)");
+      return;
+    }
+    if (!hexOk) {
+      h1::wipe(appRandom, sizeof(appRandom));
+      replyNow(c, false, "usage", "json cle nouvelle <64 hexa majuscules> (alea de l'app)");
+      return;
+    }
+    // La reponse est la seule copie de la cle : pas de cle neuve si elle ne peut
+    // pas partir tout de suite (tampon d'emission USB plein).
+    if (Serial.availableForWrite() < (int)kLineMax) {
+      h1::wipe(appRandom, sizeof(appRandom));
+      replyNow(c, false, "refuse", "tampon USB plein : rien n'est change, reessayer");
+      return;
+    }
+    char keyHex[65];
+    const NetKeyResult res = netUdpKeyNew(appRandom, keyHex, kid);
+    h1::wipe(appRandom, sizeof(appRandom));
+    if (res == NetKeyResult::Crypto || res == NetKeyResult::Nvs) {
+      replyNow(c, false, "refuse",
+               res == NetKeyResult::Nvs ? "cle non ecrite (NVS) : ancienne cle gardee"
+                                        : "cle non creee (crypto) : ancienne cle gardee");
+      return;
+    }
+    Reply r;
+    r.id = c.id;
+    r.cmd = c.cmd;
+    r.durMs = millis() - c.t0;
+    r.msg = res == NetKeyResult::Ok ? "nouvelle cle : les sessions reseau tombent"
+                                    : "cle ecrite mais pas chargee : transport reseau coupe jusqu'au redemarrage";
+    r.key = keyHex;
+    r.hasKid = true;
+    r.kid = kid;
+    jsonReply(r);
+    h1::wipe(keyHex, sizeof(keyHex));
+    return;
+  }
+  if (!strcmp(w, "efface") && !*nextWord(p)) {
+    const bool ok = netUdpKeyErase();
+    if (c.hasId) {
+      Reply r;
+      r.id = c.id;
+      r.cmd = c.cmd;
+      r.ok = ok;
+      r.code = ok ? "ok" : "refuse";
+      r.msg = ok ? "cle effacee : transport reseau coupe" : "effacement NVS en echec (cle retiree de la memoire)";
+      r.durMs = millis() - c.t0;
+      r.hasKid = true;
+      r.kid = nullptr;
+      jsonReply(r);
+    } else {
+      Serial.println(ok ? "json cle : cle effacee, transport reseau coupe"
+                        : "json cle : effacement NVS en echec (cle retiree de la memoire)");
+    }
+    return;
+  }
+  replyNow(c, false, "usage", "json cle [nouvelle <64 hexa> | efface]");
+  if (!c.hasId) Serial.println("Usage : json cle [efface]   ('json cle nouvelle' : app seulement)");
+#else
+  (void)p;
+  // Transport reseau (section 10) : pas dans ce firmware.
+  replyNow(c, false, "refuse", "json cle : transport reseau absent de ce firmware");
+  if (!c.hasId) Serial.println("json cle : transport reseau absent de ce firmware (USB seulement)");
+#endif
 }
 
 void jsonCommand(char *arg, const JsonCmd &c) {
   char *p = arg;
   const char *sub = nextWord(p);
   const uint32_t now = millis();
+  const uint8_t o = sOrigin;
+  Sink &k = sSinks[o];
   static const char *const kUsage =
       "json [1 [bail 0|10..600] | 0 | etat | hello | ping | periode ms | compteurs ms | reseau ms | "
+#if MATTER_NET_THREAD
+      "trames 0|1 | log 0|1 | cle]";
+#else
       "trames 0|1 | log 0|1]";
+#endif
+  // Reseau (10.5) : bornes propres, verifiees ici aussi (la liste blanche les
+  // verifie deja ; defense en profondeur).
+  const bool rem = remote(o);
   const char *usage = nullptr;  // non nul : arguments refuses
   bool sessionChanged = false;
 
@@ -848,17 +1209,17 @@ void jsonCommand(char *arg, const JsonCmd &c) {
     const char *w = nextWord(p);
     const bool bad = *w && (strcmp(w, "bail") || !parseU32(nextWord(p), &lease) || *nextWord(p) ||
                             (lease && (lease < 10 || lease > 600)));
-    if (bad) {
-      usage = "json 1 [bail 0|10..600]";
+    if (bad || (rem && (lease < 10 || lease > 120))) {
+      usage = rem ? "json 1 [bail 10..120] (reseau)" : "json 1 [bail 0|10..600]";
     } else {
       // Idempotent : renvoyer 'json 1' resynchronise (instantane complet).
-      enterMachine((uint16_t)lease, now);
+      enterMachine(o, (uint16_t)lease, now);
       sRefreshSaved = true;
       sHeapBlocStale = true;
-      pushHello(now, true);
-      pushState(now, true);
-      pushCounters(now, true);
-      pushNet(now, true);
+      pushHello(o, now, true);
+      pushState(o, now, true);
+      pushCounters(o, now, true);
+      pushNet(o, now, true);
       replyAfterQueue(c, true);
       return;
     }
@@ -866,40 +1227,43 @@ void jsonCommand(char *arg, const JsonCmd &c) {
     if (*nextWord(p)) {
       usage = "json 0";
     } else {
-      replyNow(c, true, "ok", sS.machine ? nullptr : "deja en mode humain");
-      if (sS.machine) leaveMachine(false, now);
+      replyNow(c, true, "ok", k.machine ? nullptr : "deja en mode humain");
+      if (k.machine) leaveMachine(o, false, now);
       else if (!c.hasId) Serial.println("json : mode machine deja coupe");
       return;
     }
   } else if (!strcmp(sub, "etat")) {
     sRefreshSaved = true;
     sHeapBlocStale = true;
-    pushState(now, false);
-    pushCounters(now, false);
-    pushNet(now, false);
+    pushState(o, now, false);
+    pushCounters(o, now, false);
+    pushNet(o, now, false);
     replyAfterQueue(c, false);
     return;
   } else if (!strcmp(sub, "hello")) {
-    pushHello(now, false);
+    pushHello(o, now, false);
     replyAfterQueue(c, false);
     return;
   } else if (!strcmp(sub, "ping")) {
     // Le bail court deja depuis cette ligne (octets recus, fin de commande).
     replyNow(c, true, "ok", nullptr, true);
     if (!c.hasId) {
-      if (sS.machine) Serial.printf("json : bail renouvele (%u s)\n", sS.leaseS);
+      if (k.machine) Serial.printf("json : bail renouvele (%u s)\n", k.leaseS);
       else Serial.println("json : pas de session machine ('json 1')");
     }
     return;
   } else if (!strcmp(sub, "periode")) {
-    if (!setPeriod(p, 200, &sS.periodMs, &sS.nextEtat, now)) usage = "json periode 0|200..60000";
-    sS.nextHb = now + kHbMs;
+    if (!setPeriod(p, rem ? 2000 : 200, !rem, &k.periodMs, &k.nextEtat, now))
+      usage = rem ? "json periode 2000..60000 (reseau)" : "json periode 0|200..60000";
+    k.nextHb = now + kHbMs;
     sessionChanged = !usage;
   } else if (!strcmp(sub, "compteurs")) {
-    if (!setPeriod(p, 200, &sS.countersMs, &sS.nextCpt, now)) usage = "json compteurs 0|200..60000";
+    if (!setPeriod(p, rem ? 5000 : 200, true, &k.countersMs, &k.nextCpt, now))
+      usage = rem ? "json compteurs 0|5000..60000 (reseau)" : "json compteurs 0|200..60000";
     sessionChanged = !usage;
   } else if (!strcmp(sub, "reseau")) {
-    if (!setPeriod(p, 1000, &sS.netMs, &sS.nextNet, now)) usage = "json reseau 0|1000..60000";
+    if (!setPeriod(p, rem ? 10000 : 1000, true, &k.netMs, &k.nextNet, now))
+      usage = rem ? "json reseau 0|10000..60000 (reseau)" : "json reseau 0|1000..60000";
     sessionChanged = !usage;
   } else if (!strcmp(sub, "trames") || !strcmp(sub, "log")) {
     const char *w = nextWord(p);
@@ -907,13 +1271,15 @@ void jsonCommand(char *arg, const JsonCmd &c) {
     if ((!on && strcmp(w, "0")) || *nextWord(p)) {
       usage = !strcmp(sub, "trames") ? "json trames 0|1" : "json log 0|1";
     } else {
-      (!strcmp(sub, "trames") ? sS.frames : sS.log) = on;
+      const bool frames = !strcmp(sub, "trames");
+      (frames ? k.frames : k.log) = on;
+      // A distance, les trames se coupent seules apres 60 s (10.5).
+      const uint32_t until = now + kRemoteFramesMs;
+      if (frames) k.framesUntil = on && remote(o) ? (until ? until : 1) : 0;
       sessionChanged = true;
     }
   } else if (!strcmp(sub, "cle")) {
-    // Transport reseau (section 10) : pas dans ce firmware.
-    replyNow(c, false, "refuse", "json cle : transport reseau absent de ce firmware");
-    if (!c.hasId) Serial.println("json cle : transport reseau absent de ce firmware (USB seulement)");
+    keyCommand(p, c);
     return;
   } else {
     usage = kUsage;
@@ -925,85 +1291,119 @@ void jsonCommand(char *arg, const JsonCmd &c) {
     return;
   }
   // Reglage de session change : hello.base le porte.
-  if (sessionChanged && sS.machine) push(Item::HelloBase, now, true);
+  if (sessionChanged && k.machine) push(o, Item::HelloBase, now, true);
   replyNow(c, true, "ok", nullptr);
   if (!c.hasId)
     Serial.printf("json : etat %lu ms, compteurs %lu ms, reseau %lu ms, trames %s, log %s\n",
-                  (unsigned long)sS.periodMs, (unsigned long)sS.countersMs, (unsigned long)sS.netMs,
-                  sS.frames ? "oui" : "non", sS.log ? "oui" : "non");
+                  (unsigned long)k.periodMs, (unsigned long)k.countersMs, (unsigned long)k.netMs,
+                  k.frames ? "oui" : "non", k.log ? "oui" : "non");
 }
 
 // ===========================================================================
-//  Evenements
+//  Evenements (vers chaque session en mode machine)
 // ===========================================================================
 
+// Evenement du pont : formate une fois (n provisoire 0), puis renumerote pour
+// chaque session en mode machine (Writer::setN) ; aucun champ propre a une
+// session dans intent, abonnement, thread. Le tampon reste reserve jusqu'a la
+// fin de la diffusion.
 Writer *jsonEventOpen(const char *type) {
-  if (!sS.machine || !claim()) return nullptr;
-  sW.begin(type, sN, millis());
+  if (!anyMachine() || !claim()) return nullptr;
+  sW.begin(type, 0, millis());
   return &sW;
 }
 
 void jsonEventSend() {
-  if (sBusy) send();
+  if (!sBusy) return;
+  const bool ok = sW.finish();
+  for (uint8_t o = 0; o < kSinks; o++) {
+    Sink &k = sSinks[o];
+    if (!k.machine) continue;
+    const bool numbered = ok && sW.setN(k.n);
+    k.n++;
+    if (!numbered) {
+      k.tooLong++;
+      continue;
+    }
+    if (!emit(o)) k.lost++;
+  }
+  sBusy = false;
 }
 
 bool jsonLog(const char *src, const char *niv, const char *txt) {
-  if (!sS.machine || !sS.log) return false;
   const uint32_t now = millis();
   // Les annonces du bouton BOOT passent hors plafond : quelques lignes par
   // appui (anti-rebond de 30 ms), et celle d'une action precede souvent un
   // reset, apres lequel aucun log ne porterait ses 'sautes'. Elles portent
   // celles des autres.
   const bool capped = strcmp(src, "bouton") != 0;
-  if (capped && !sLogCap.available(now)) {
-    sLogCap.skip();
-    return true;
+  bool usbTaken = false;  // le texte n'est plus ecrit sur l'USB
+  for (uint8_t o = 0; o < kSinks; o++) {
+    Sink &k = sSinks[o];
+    if (!k.machine || !k.log) continue;
+    if (capped && !k.logCap.available(now)) {
+      k.logCap.skip();
+      if (o == kUsb) usbTaken = true;
+      continue;
+    }
+    if (!eventRoom(o)) continue;
+    if (!claim()) continue;  // ligne en cours (jamais attendu) : en texte sur l'USB
+    if (capped) k.logCap.take();
+    logLine(sW, k.n, now, src, niv, txt, k.logCap.takeSkipped());
+    send(o);
+    if (o == kUsb) usbTaken = true;
   }
-  if (!claim()) return false;  // ligne en cours (jamais attendu) : en texte
-  if (capped) sLogCap.take();
-  logLine(sW, sN, now, src, niv, txt, sLogCap.takeSkipped());
-  send();
-  return true;
+  return usbTaken;
 }
 
 static void onLampRx(const RxEvent &e) {
-  if (!sS.machine || !sS.frames) return;
   const uint32_t now = millis();
   const bool crc = e.kind == Kind::CrcBad;
-  if (!sRxCap.available(now) || (crc && !sCrcCap.available(now))) {
-    sRxCap.skip();
-    return;
+  for (uint8_t o = 0; o < kSinks; o++) {
+    Sink &k = sSinks[o];
+    if (!k.machine || !k.frames) continue;
+    if (!k.rxCap.available(now) || (crc && !k.crcCap.available(now))) {
+      k.rxCap.skip();
+      continue;
+    }
+    if (!eventRoom(o) || !claim()) continue;
+    k.rxCap.take();
+    if (crc) k.crcCap.take();
+    rx(sW, k.n, now, e, k.rxCap.takeSkipped());
+    send(o);
   }
-  if (!claim()) return;
-  sRxCap.take();
-  if (crc) sCrcCap.take();
-  rx(sW, sN, now, e, sRxCap.takeSkipped());
-  send();
 }
 
 static void onLampTx(const TxEvent &e) {
-  if (!sS.machine || !sS.frames) return;
   const uint32_t now = millis();
-  if (!sTxCap.available(now)) {
-    sTxCap.skip();
-    return;
+  for (uint8_t o = 0; o < kSinks; o++) {
+    Sink &k = sSinks[o];
+    if (!k.machine || !k.frames) continue;
+    if (!k.txCap.available(now)) {
+      k.txCap.skip();
+      continue;
+    }
+    if (!eventRoom(o) || !claim()) continue;
+    k.txCap.take();
+    tx(sW, k.n, now, e, k.txCap.takeSkipped());
+    send(o);
   }
-  if (!claim()) return;
-  sTxCap.take();
-  tx(sW, sN, now, e, sTxCap.takeSkipped());
-  send();
 }
 
 static void onLampRelaunch(const RelaunchEvent &e) {
-  if (!sS.machine || !claim()) return;
-  relaunch(sW, sN, millis(), e);
-  send();
+  for (uint8_t o = 0; o < kSinks; o++) {
+    if (!sSinks[o].machine || !claim()) continue;
+    relaunch(sW, sSinks[o].n, millis(), e);
+    send(o);
+  }
 }
 
 static void onLampModule(const ModuleEvent &e) {
-  if (!sS.machine || !claim()) return;
-  module(sW, sN, millis(), e);
-  send();
+  for (uint8_t o = 0; o < kSinks; o++) {
+    if (!sSinks[o].machine || !claim()) continue;
+    module(sW, sSinks[o].n, millis(), e);
+    send(o);
+  }
 }
 
 static bool onLampLog(bool trace, const char *line) { return jsonLog("lampe", trace ? "trace" : "notice", line); }
@@ -1011,19 +1411,22 @@ static bool onLampLog(bool trace, const char *line) { return jsonLog("lampe", tr
 static const LampHooks kLampHooks = {onLampRx, onLampTx, onLampRelaunch, onLampModule, onLampLog};
 
 static void onLed(statusled::Pattern now, statusled::Pattern before, bool testing) {
-  if (!sS.machine || !claim()) return;
-  led(sW, sN, millis(), statusled::patternCode(now), statusled::patternCode(before), testing);
-  send();
+  for (uint8_t o = 0; o < kSinks; o++) {
+    if (!sSinks[o].machine || !claim()) continue;
+    led(sW, sSinks[o].n, millis(), statusled::patternCode(now), statusled::patternCode(before), testing);
+    send(o);
+  }
 }
 
 // ===========================================================================
 //  Observateur de livraison (section 7.3)
 // ===========================================================================
 
-void jsonPendingId(uint32_t id) { sDel.pendingId(id, lamp.pendingSince()); }
+void jsonPendingId(uint32_t id) { sDel.pendingId(id, lamp.pendingSince(), sOrigin); }
 
 // Pur et teste sur l'hote (DeliveryWatch, json_out) ; ici, le releve du pilote
-// et l'emission.
+// et l'emission : chaque session recoit la livraison avec ses propres id
+// (hors mode machine, seulement si elle en attendait).
 static void deliveryPoll(uint32_t now) {
   LampSample s;
   s.busy = lamp.busy();
@@ -1032,16 +1435,27 @@ static void deliveryPoll(uint32_t now) {
   s.giveUps = lamp.giveUpCount();
   s.pendingSince = lamp.pendingSince();
   Delivery d;
-  if (!sDel.poll(s, now, sS.machine, &d)) return;
+  if (!sDel.poll(s, now, anyMachine(), &d)) return;
   d.cause = lamp.lastGiveUp();
   d.last = lamp.lastDelivered();
   d.version = lamp.version();
   d.target = lamp.target();
   d.believed = lamp.believed();
   d.dirty = lamp.dirty();
-  if (claim()) {
-    delivery(sW, sN, now, d);
-    send();
+  for (uint8_t o = 0; o < kSinks; o++) {
+    uint32_t ids[kIdsMax];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < d.nIds; i++)
+      if (d.origins && d.origins[i] == o) ids[n++] = d.ids[i];
+    const uint32_t lost = d.idsLostBy ? d.idsLostBy[o] : 0;
+    if (!sSinks[o].machine && !n && !lost) continue;
+    Delivery mine = d;
+    mine.ids = ids;
+    mine.nIds = n;
+    mine.idsLost = lost;
+    if (!claim()) continue;
+    delivery(sW, sSinks[o].n, now, mine);
+    send(o);
   }
 }
 
@@ -1081,19 +1495,32 @@ void jsonPoll() {
   // n'est pas un tour de loop()).
   if (sLoopAt) {
     const uint32_t turn = now - sLoopAt;
-    if (turn > sLoopMaxMs) sLoopMaxMs = turn;
+    for (Sink &k : sSinks)
+      if (turn > k.loopMaxMs) k.loopMaxMs = turn;
   }
   sLoopAt = now ? now : 1;
 
   deliveryPoll(now);
 
-  if (sS.machine && leaseExpired(now, sLastRx, sLastCmd, sS.leaseS)) leaveMachine(true, now);
-
-  if (sS.machine) {
-    if (due(sS.nextEtat, sS.periodMs, now)) pushState(now, true);
-    if (due(sS.nextCpt, sS.countersMs, now)) pushCounters(now, true);
-    if (due(sS.nextNet, sS.netMs, now)) pushNet(now, true);
-    if ((!sS.periodMs || sS.periodMs > kHbMs) && due(sS.nextHb, kHbMs, now)) push(Item::Heartbeat, now, true);
+  // L'USB d'abord ; les sessions reseau, qui partagent la file des datagrammes
+  // et son debit, a tour de role (deux instantanes simultanes avancent ensemble).
+  static uint8_t sTurn = 0;
+  sTurn++;
+  for (uint8_t i = 0; i < kSinks; i++) {
+    const uint8_t o = i == 0 || kSinks < 3 ? i : (uint8_t)(1 + ((i - 1 + sTurn) % (kSinks - 1)));
+    Sink &k = sSinks[o];
+    if (k.machine && leaseExpired(now, k.lastRx, k.lastCmd, k.leaseS)) leaveMachine(o, true, now);
+    if (k.machine) {
+      if (k.framesUntil && (int32_t)(now - k.framesUntil) >= 0) {
+        k.frames = false;
+        k.framesUntil = 0;
+        push(o, Item::HelloBase, now, true);  // reglage de session change
+      }
+      if (due(k.nextEtat, k.periodMs, now)) pushState(o, now, true);
+      if (due(k.nextCpt, k.countersMs, now)) pushCounters(o, now, true);
+      if (due(k.nextNet, k.netMs, now)) pushNet(o, now, true);
+      if ((!k.periodMs || k.periodMs > kHbMs) && due(k.nextHb, kHbMs, now)) push(o, Item::Heartbeat, now, true);
+    }
+    drain(o, now);
   }
-  drain(now);
 }
