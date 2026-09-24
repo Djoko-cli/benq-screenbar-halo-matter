@@ -1868,6 +1868,11 @@ static void testStatusLed() {
     }
     CHECK(patternName(p) && *patternName(p), "nom du motif %u", (unsigned)p);
   }
+  // Codes du protocole JSON (7.9), dans l'ordre des motifs : tous distincts.
+  static const char *const kCodes[] = {"identification", "injoignable", "panne_radio", "livree",
+                                       "non_appaire",    "hors_reseau", "operationnel"};
+  for (unsigned i = 0; i < 7; i++)
+    CHECK(!strcmp(patternCode(all[i]), kCodes[i]), "code du motif %u : %s", i, patternCode(all[i]));
 
   // LED simple : pas de lueur, Identify clignote vite, le reste suit la couleur.
   for (uint32_t t = 0; t < 25000; t += 13) {

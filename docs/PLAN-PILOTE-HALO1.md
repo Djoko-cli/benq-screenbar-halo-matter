@@ -1189,6 +1189,25 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 **C7 « Regler les valeurs par defaut d'apres le banc »**
 - Ecart, silence, rearmement fort, bascule legere, γ, numero A de depart.
 
+**C8 « Mode machine pour l'app compagnon » (firmware 0.4.0)**
+- Contrat : [PROTOCOLE-JSON.md](PROTOCOLE-JSON.md), section 11. Fichiers :
+  `json_out.*` (pur, teste sur l'hote), `json_mode.*`, `halo1_events.h`,
+  crochets du pilote (`Halo1Lamp::setHooks`), de la LED
+  (`statusLedSetObserver`) et du pont ; `cli.cpp` (prefixe `id=`, `json` dans
+  `kFree`, echo, invite et flush coupes en mode machine, refus `trop_long` et
+  `cadence`, Ctrl-U) ; `cli_lampe.cpp` (commandes d'etat asynchrones).
+- Le pilote ne connait pas le JSON : il passe des evenements en donnees
+  simples (trame entendue, paquet emis, relance, etat du module, ligne de
+  journal) ; `Halo1Lamp` expose en lecture sa phase, ses tranches, ses echecs,
+  l'age du dernier accuse, la cause du dernier abandon, la tranche qui a clos
+  la derniere livraison et le compteur `raz`.
+- **Fait le 24/09/2026**, sans rien flasher : builds thread, supermini et diag
+  sans avertissement ; tests hote (messages compares aux exemples de la
+  section 12, pires cas sous le budget de 896 octets) ; `tools/json_check.py`
+  valide les 43 exemples de la specification et les messages des tests.
+- Restent au banc : U1 a U10 (PROTOCOLE-JSON.md, section 11), captures
+  verifiees par `python3 tools/json_check.py <capture>`.
+
 ---
 
 ## I. Essais sur la vraie lampe

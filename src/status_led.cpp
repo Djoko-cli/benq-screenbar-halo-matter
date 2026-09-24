@@ -78,6 +78,19 @@ const char *patternName(Pattern p) {
   return "?";
 }
 
+const char *patternCode(Pattern p) {
+  switch (p) {
+    case Pattern::Identify: return "identification";
+    case Pattern::Unreachable: return "injoignable";
+    case Pattern::RadioFault: return "panne_radio";
+    case Pattern::Delivered: return "livree";
+    case Pattern::Unpaired: return "non_appaire";
+    case Pattern::Offline: return "hors_reseau";
+    case Pattern::Online: return "operationnel";
+  }
+  return "operationnel";
+}
+
 void Logic::setNet(Net n, uint32_t now) {
   if (n == net_) return;
   net_ = n;
@@ -196,7 +209,9 @@ using namespace statusled;
 static constexpr uint32_t kNetSampleMs = 200;  // etat Matter releve 5 fois par seconde, pas a chaque tour
 static Logic sLed;
 static Frame sFrame{Pattern::Unpaired, Rgb{}, false};  // image du dernier tour ('led')
+static bool sFrameValid = false;                        // sFrame vient d'un tour de statusLedPoll()
 static bool sShownValid = false;                        // quelque chose a deja ete ecrit
+static StatusLedObserver sObserver = nullptr;
 static uint32_t sNetAt = 0, sSeenDelivered = 0, sSeenGiveUps = 0;
 
 #ifdef PIN_RGB_STATUS_LED
@@ -217,7 +232,11 @@ static void monoWrite(bool on) { digitalWrite(PIN_STATUS_LED, STATUS_LED_ACTIVE_
 // toutes les 10 s, 25 par seconde pendant l'arc-en-ciel, sinon une par
 // changement de motif ou demi-periode de clignotement.
 static void show(const Frame &f) {
+  const Pattern before = sFrame.p;
+  const bool changed = sFrameValid && f.p != before;
   sFrame = f;
+  sFrameValid = true;
+  if (changed && sObserver) sObserver(f.p, before, sLed.testing());
 #ifdef PIN_RGB_STATUS_LED
   if (!sShownValid || f.c != sShown) rgbWrite(f.c);
 #else
@@ -279,6 +298,26 @@ void statusLedPoll() {
     sLed.unreachable(now);
   }
   show(sLed.frame(now));
+#endif
+}
+
+void statusLedSetObserver(StatusLedObserver fn) {
+#ifndef DIAG_ONLY
+  sObserver = fn;
+#else
+  (void)fn;
+#endif
+}
+
+bool statusLedState(Pattern *p, bool *testing) {
+#ifndef DIAG_ONLY
+  if (p) *p = sFrame.p;
+  if (testing) *testing = sLed.testing();
+  return true;
+#else
+  (void)p;
+  (void)testing;
+  return false;
 #endif
 }
 

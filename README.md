@@ -73,7 +73,7 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
 | NodeLabel | `Halo` (reecrit a chaque demarrage : un nom pose par un controleur dans cet attribut est remplace) |
 | SerialNumber | `HALO1-` + l'adresse MAC d'usine en 12 chiffres hexa, unique par carte |
 | HardwareVersion / HardwareVersionString | `1` / `ESP32-C6 SuperMini + BM5602` |
-| SoftwareVersionString | `0.3.0-<commit>` (« Programme interne » dans Apple Home) |
+| SoftwareVersionString | `0.4.0-<commit>` (« Programme interne » dans Apple Home) |
 
 - Le VID et le PID ne changent pas (`0xFFF1` / `0x8000`, certificat de test),
   ni le discriminateur et le code d'appairage : pas de remise en service. Une
@@ -87,7 +87,7 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
 - `matter` affiche ces valeurs telles que la pile les rapporte (lignes
   `identite` et `versions`), sauf le NodeLabel (valeur demandee, non relue),
   et signale toute valeur refusee. Le demarrage affiche
-  `firmware 0.3.0-<commit>` et alerte si le descripteur lu dans l'image flashee
+  `firmware 0.4.0-<commit>` et alerte si le descripteur lu dans l'image flashee
   differe. Sans carte, la meme version (`App version`) se lit avec :
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 
@@ -355,6 +355,40 @@ la CSA et une certification — hors de portée d'un projet perso.
 sondes de la puce, du spectre et de GIO3, module CC2500. `addr` et `chan` ne
 reglent que ces outils ; le pilote a sa propre adresse (`lampe adresse`).
 
+Une ligne de plus de 127 caracteres est refusee (`Ligne refusee (trop_long)`),
+au lieu d'etre tronquee puis executee ; Ctrl-U vide la ligne en cours.
+
+### Mode machine (app compagnon, depuis la 0.4.0)
+
+L'app de supervision (macOS d'abord) parle a la carte par le meme port USB,
+avec le protocole de [docs/PROTOCOLE-JSON.md](docs/PROTOCOLE-JSON.md) : elle
+envoie les commandes de la console prefixees de `id=<n> `, la carte repond par
+des lignes machine (octet RS 0x1E + un objet JSON compact + LF, 1024 octets au
+plus), melees au texte habituel. Sans `json 1` et sans `id=`, la console
+humaine est inchangee.
+
+| Commande | Effet |
+|---|---|
+| `json` | etat de la session, en texte |
+| `json 1 [bail 0\|10..600]` | mode machine : echo, invite et `Serial.flush()` coupes ; `hello`, `config` puis l'instantane complet ; bail de 30 s par defaut, renouvele par toute ligne recue (`json ping`) ; `bail 0` au banc : jusqu'a `json 0` |
+| `json 0` | retour au mode humain (message `fin`, puis l'invite) |
+| `json etat` / `json hello` | instantane (`etat`, `compteurs`, `reseau`) / `hello` et `config`, une fois, meme en mode humain |
+| `json periode\|compteurs\|reseau <ms>` | periodes des `etat` (0 ou 200..60000, 1000 par defaut), `compteurs` (idem), `reseau` (0 ou 1000..60000, 5000) ; `hb` toutes les 2 s si les `etat` sont coupes ou lents |
+| `json trames 0\|1` / `json log 0\|1` | evenements `rx` et `tx` (oui par defaut) / annonces `[lampe]` et `[matter]` en messages `log` au lieu du texte |
+
+- Avec `id=`, toute ligne recoit une `reponse` ; les commandes `lampe` d'etat
+  (`on`, `off`, `avant`, `arriere`, `mode`, `lum`, `niveau`, `temp`, `mired`,
+  `auto`, `sync`) deviennent asynchrones : `reponse` tout de suite (code
+  `accepte`, `differe` ou `ok`), puis `livraison` quand le pilote a fini. Les
+  autres commandes gardent leur texte, entre `reponse debut` et `reponse fin`.
+- La carte n'attend jamais l'app : une ligne qui ne tient pas dans le tampon
+  d'emission est perdue et comptee (`etat.sante.sys.json_perdus`), et `n`
+  saute. Au plus 20 lignes par seconde de l'hote (`cadence`).
+- Rien n'est persiste : chaque demarrage repart en mode humain. `json cle`
+  (transport reseau, section 10) n'existe pas encore.
+- Au banc, `python3 tools/json_check.py <capture>` verifie une capture brute
+  du port (tramage, types, champs obligatoires, tailles, trous de `n`).
+
 ## Protocole du Halo 1
 
 Le protocole est etabli, et verifie par emission sur la lampe : trame BC5602
@@ -384,17 +418,22 @@ src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telec
 src/cli_lampe.cpp         commandes 'lampe ...'
 src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne, Identify
 src/matter_resume.h       calendrier de relance des abonnements Matter (pont Thread)
+src/halo1_events.h        evenements du pilote en donnees simples (trames, paquets, relances, module)
+src/json_out.{h,cpp}      protocole JSON : ecrivain de lignes machine, messages, file (pur, teste sur l'hote)
+src/json_mode.{h,cpp}     mode machine : session, commandes 'json', etat periodique, evenements, livraisons
 src/status_led.{h,cpp}    LED d'etat : motifs et priorites (logique pure, testee sur l'hote)
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
 src/main.cpp              assemblage, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
+docs/PROTOCOLE-JSON.md    protocole JSON entre la carte et l'app compagnon (mode machine)
 docs/WIRING.md            câblage et pièges matériels
 docs/AUDIT-2026-09-23.md  audit du format de trame et des bogues, avec leur statut
 docs/PLAN-PILOTE-HALO1.md plan du pilote Halo 1, etapes et resultats du banc
 docs/BRIEF-BOITIER.md     brief du boitier imprime 3D
 docs/PISTES-FUTURES.md    idees hors du perimetre actuel
-tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module et de la LED d'etat, sans carte
+tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module, de la LED d'etat et du protocole JSON, sans carte
+tools/json_check.py       verifie des lignes machine capturees (et les exemples de docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 ```
 
