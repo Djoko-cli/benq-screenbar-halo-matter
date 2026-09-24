@@ -164,7 +164,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ · level %2$lld (%3$lld %%)"
+            "value" : "%1$@ · level %2$lld (%3$lld%%)"
           }
         },
         "fr" : {
@@ -233,12 +233,34 @@
         }
       }
     },
+    "%lld CRC faux" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld bad CRC"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld bad CRCs"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld affichées sur %lld" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld shown of %2$lld"
+            "value" : "Showing %1$lld of %2$lld"
           }
         },
         "fr" : {
@@ -281,18 +303,42 @@
         }
       }
     },
-    "%lld trames, %lld CRC faux" : {
+    "%lld trames" : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "frames: %1$lld, bad CRC: %2$lld"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld frame"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld frames"
+                }
+              }
+            }
           }
         },
         "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld trames, %2$lld CRC faux"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld trame"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld trames"
+                }
+              }
+            }
           }
         }
       }
@@ -462,7 +508,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Waiting for USB re-enumeration (the board is restarting)."
+            "value" : "Waiting for USB re-enumeration (the board is rebooting)."
           }
         }
       }
@@ -677,6 +723,16 @@
         }
       }
     },
+    "Cause du démarrage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset reason"
+          }
+        }
+      }
+    },
     "Ce firmware n'a pas les commandes lampe asynchrones (capacité lampe_async) : chaque commande lampe bloque la carte jusqu'à 6 s, sans livraison." : {
       "localizations" : {
         "en" : {
@@ -712,7 +768,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Each line goes out with an id: text received between reponse debut and fin is attached to it."
+            "value" : "Each line is sent with an id: text received between reponse debut and fin is attached to it."
           }
         }
       }
@@ -872,7 +928,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connections · restarts"
+            "value" : "Connections · reboots"
           }
         }
       }
@@ -1152,7 +1208,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Demo: end of the timeline, the board restarts (simulated USB re-enumeration)"
+            "value" : "Demo: end of the timeline, the board reboots (simulated USB re-enumeration)"
           }
         }
       }
@@ -1432,7 +1488,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The board restarts (demo): USB re-enumeration"
+            "value" : "The board reboots (demo): USB re-enumeration"
           }
         }
       }
@@ -1487,12 +1543,12 @@
         }
       }
     },
-    "Le contenu des fenêtres change tout de suite. Les menus de macOS (Halo Compagnon, Édition, Fenêtre…) et les boîtes du système suivent au prochain lancement. Les lignes déjà écrites dans la console gardent leur langue." : {
+    "Le contenu des fenêtres change tout de suite. Les menus de macOS (Halo Compagnon, Édition, Fenêtre…) et les boîtes du système suivent au prochain lancement. Les textes déjà consignés gardent leur langue jusqu'au suivant : lignes de la console, erreur de connexion, dernière ligne rejetée, erreur de saisie de la console." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Window contents switch right away. macOS menus (Halo Compagnon, Edit, Window…) and system dialogs follow at the next launch. Lines already written to the console keep their language."
+            "value" : "Window contents switch right away. macOS menus (Halo Compagnon, Edit, Window…) and system dialogs follow at the next launch. Texts already recorded keep their language until the next one: console lines, connection error, last rejected line, console input error."
           }
         }
       }
@@ -1572,7 +1628,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Host lines refused"
+            "value" : "Rejected host lines"
           }
         }
       }
@@ -1922,7 +1978,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "loop() stack never used"
+            "value" : "Unused loop() stack"
           }
         }
       }
@@ -2062,7 +2118,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Periods state · counters · network"
+            "value" : "State · counters · network periods"
           }
         }
       }
@@ -2172,7 +2228,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Board restart detected (boot %1$@ → %2$@): states cleared, new chart segment."
+            "value" : "Board reboot detected (boot %1$@ → %2$@): states cleared, new chart segment."
           }
         },
         "fr" : {
@@ -2188,7 +2244,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reception Refusals"
+            "value" : "RX Rejections"
           }
         }
       }
@@ -2468,7 +2524,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Session, log"
+            "value" : "Session, Log"
           }
         }
       }
@@ -2588,7 +2644,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Test LED"
+            "value" : "Test Status LED"
           }
         }
       }
@@ -2728,7 +2784,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A negative difference, a raz or a restart starts a new segment."
+            "value" : "A negative difference, a raz or a reboot starts a new segment."
           }
         }
       }
@@ -2738,7 +2794,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "One lamp:"
+            "value" : "Single lamp:"
           }
         }
       }
@@ -3114,7 +3170,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "retry in %@"
+            "value" : "next attempt in %@"
           }
         }
       }
@@ -3144,7 +3200,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "cold"
+            "value" : "cool"
           }
         }
       }
@@ -3384,7 +3440,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "port closed (EOF): the board may have restarted"
+            "value" : "port closed (EOF): the board may have rebooted"
           }
         }
       }
@@ -3524,7 +3580,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "unknown status LED"
+            "value" : "Status LED: unknown"
           }
         }
       }
@@ -3544,7 +3600,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "· %1$lld %% · raw %2$@"
+            "value" : "· %1$lld%% · raw %2$@"
           }
         },
         "fr" : {
@@ -3555,18 +3611,18 @@
         }
       }
     },
-    "· ~%lld K · brute %lld" : {
+    "· ~%@ K · brute %lld" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "· ~%1$lld K · raw %2$lld"
+            "value" : "· ~%1$@ K · raw %2$lld"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "· ~%1$lld K · brute %2$lld"
+            "value" : "· ~%1$@ K · brute %2$lld"
           }
         }
       }
@@ -3696,7 +3752,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Δ crc_faux / Δ frames (%%); line: deluge_pct (%lld %%)."
+            "value" : "Δ crc_faux / Δ frames (%%); line: deluge_pct (%lld%%)."
           }
         }
       }
@@ -3716,7 +3772,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Δ rx.crc_faux per minute; line: flood threshold (%1$lld frames with %2$lld %% bad CRC over %3$@, scaled to one minute)."
+            "value" : "Δ rx.crc_faux per minute; line: flood threshold (%1$lld frames with %2$lld%% bad CRC over %3$@, scaled to one minute)."
           }
         },
         "fr" : {

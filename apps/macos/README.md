@@ -66,9 +66,17 @@ préférences de l'app (`langue`).
   les marqueurs des courbes aussi.
 - **Au prochain lancement** : ce que macOS dessine lui-même (menus
   Halo Compagnon, Édition, Fenêtre, boîtes du système), qui suit
-  `AppleLanguages` de l'app ; le choix l'écrit (« Langue du système » le
-  retire). Les Réglages le disent. Les lignes déjà écrites dans la console
-  gardent leur langue (c'est un journal).
+  `AppleLanguages` de l'app ; le choix l'écrit. Réglages Système (Langue et
+  région › Applications) écrit au même endroit : la valeur qui s'y trouvait
+  avant le premier choix *English*/*Français* est gardée
+  (`AppleLanguagesAvantChoix`) et « Langue du système » la rend (ou retire
+  `AppleLanguages` s'il n'y en avait pas). Les Réglages le disent.
+- **Gardent leur langue jusqu'au texte suivant** (les Réglages le disent
+  aussi) : les lignes déjà écrites dans la console (c'est un journal), la
+  raison d'une reconnexion ou d'une erreur de port dans la barre latérale, la
+  dernière ligne rejetée et l'erreur de saisie de la console. Ces textes
+  sont faits au moment de l'événement, en partie de textes du système
+  (`strerror`, erreurs de décodage).
 - **Langue du système** : la première des langues préférées que l'app sait
   servir (`en-GB` donne l'anglais) ; aucune (allemand...) : le français, comme
   AppKit, qui retombe sur la langue de développement.
@@ -76,12 +84,18 @@ préférences de l'app (`langue`).
   avec la région de l'utilisateur, comme macOS pour une langue choisie app par
   app (anglais en France : `en_FR`, 24 h, virgule décimale, « kB » et non
   « ko »). Les quantités ont leurs séparateurs de milliers ; les identifiants
-  (`id`, numéros de paquet, versions) et l'hexa restent bruts.
+  (`id`, numéros de paquet, versions), les kelvins, les microsecondes et
+  l'hexa restent bruts, sur tous les écrans.
 - **Termes techniques intacts** dans les deux langues : champs et valeurs JSON
   (`lum`, `temp`, `raz`...), commandes de la CLI (`lampe stats raz`,
-  `json trames 0`), hexa, unités. Lexique anglais : consigne → *target*, état
+  `json trames 0`), hexa, unités. Seules exceptions, les valeurs à liste
+  fermée aux noms français (`ValeurFirmware`) : cause du démarrage (`reset` :
+  `mise_sous_tension` → *power-on*...), `build`, sort du bouton A d'un
+  `intent`, origine, mode et verdicts des reprises d'abonnements ; une valeur
+  inconnue reste brute. Lexique anglais : consigne → *target*, état
   cru → *believed state*, livraison → *delivery*, accusé → *ack*, relance du
-  module → *module restart*, désappairage → *unpairing*, voyant → *status
+  module → *module restart*, redémarrage de la carte → *reboot* (comme la
+  commande `reboot`), désappairage → *unpairing*, voyant → *status
   LED*, tranche → *slice*, bail → *lease*, EN PANNE → *DOWN*. Casse : phrase
   en français ; en anglais, *Title Case* pour les titres (écrans, cartes,
   sections, menus, boutons, alertes), casse de phrase pour le texte courant,

@@ -195,7 +195,8 @@ private struct CarteModule: View {
             JaugeSeuil(libelle: "Délais TX de suite", valeur: s?.surveil?.delaisSuite, seuil: seuils?.delaisSuite)
             JaugeSeuil(libelle: "Réarmements hors RX (10 s)", valeur: s?.surveil?.horsRx10s, seuil: seuils?.sourdHorsRx)
             JaugeSeuil(libelle: "Relances sans guérison", valeur: s?.surveil?.sansGuerison, seuil: seuils?.sansGuerison)
-            LigneInfo("Fenêtre d'écoute", tr("\(s?.surveil?.fenTrames ?? 0) trames, \(s?.surveil?.fenCrcFaux ?? 0) CRC faux"))
+            LigneInfo("Fenêtre d'écoute",
+                      tr("\(s?.surveil?.fenTrames ?? 0) trames") + ", " + tr("\(s?.surveil?.fenCrcFaux ?? 0) CRC faux"))
             LigneInfo("Relances automatiques", s?.surveil?.relances.map(String.init))
             if let d = s?.surveil?.derniere {
                 LigneInfo("Dernière relance", tr("\(d.cause?.libelle ?? "?"), il y a \(Format.duree(secondes: d.ilYaS))"))
@@ -394,7 +395,9 @@ private struct CarteVersions: View {
             if let fw = h?.fw, let desc = h?.fwDesc, fw != desc {
                 LigneInfo("Descripteur (Matter)", desc, couleur: .orange, mono: true)
             }
-            LigneInfo("Environnement", h.map { "\($0.env ?? "?") · \($0.build ?? "?") · \($0.reseauBuild ?? "?")" })
+            LigneInfo("Environnement", h.map {
+                "\($0.env ?? "?") · \($0.build.map(ValeurFirmware.build) ?? "?") · \($0.reseauBuild ?? "?")"
+            })
             LigneInfo("Compilé le", h.map { "\($0.date ?? "?") \($0.heure ?? "")" })
             LigneInfo("Puce · IDF · Arduino", h.map { "\($0.puce ?? "?") · \($0.idf ?? "?") · \($0.arduino ?? "?")" })
             LigneInfo("Protocole", h.map { "v1 rev \($0.rev ?? 0)" })
@@ -437,7 +440,9 @@ private struct CarteSysteme: View {
         Carte(titre: "Démarrage et système", icone: "cpu") {
             LigneInfo("En marche depuis", Format.duree(secondes: pont.etat.upS))
             LigneInfo("Démarrage (boot)", pont.etat.boot, mono: true)
-            LigneInfo("Cause", h.map { "\($0.reset ?? "?") (\($0.resetN.map(String.init) ?? "?"))" })
+            LigneInfo("Cause du démarrage", h.map {
+                "\($0.reset.map(ValeurFirmware.causeDemarrage) ?? "?") (\($0.resetN.map(String.init) ?? "?"))"
+            })
             LigneInfo("Tas libre · minimum", sys.map { "\(Format.octets($0.heap)) · \(Format.octets($0.heapMin))" })
             LigneInfo("Plus grand bloc", Format.octets(sys?.heapBloc))
             LigneInfo("Pile de loop() jamais utilisée", Format.octets(sys?.pileBoucle))

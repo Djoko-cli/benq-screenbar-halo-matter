@@ -151,22 +151,22 @@
         }
       }
     },
+    " en %@ µs" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " in %@ µs"
+          }
+        }
+      }
+    },
     " en %lld ms" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : " in %lld ms"
-          }
-        }
-      }
-    },
-    " en %lld µs" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : " in %lld µs"
           }
         }
       }
@@ -1544,7 +1544,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Restarts the board (the USB port will re-enumerate)."
+            "value" : "Reboots the board (the USB port will re-enumerate)."
           }
         }
       }
@@ -1697,18 +1697,18 @@
         }
       }
     },
-    "Température %lld (%lld mireds, ~%lld K)" : {
+    "Température %lld (%lld mireds, ~%@ K)" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Temperature %1$lld (%2$lld mireds, ~%3$lld K)"
+            "value" : "Temperature %1$lld (%2$lld mireds, ~%3$@ K)"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Température %1$lld (%2$lld mireds, ~%3$lld K)"
+            "value" : "Température %1$lld (%2$lld mireds, ~%3$@ K)"
           }
         }
       }
@@ -1718,7 +1718,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Startup text received: the board may have restarted."
+            "value" : "Startup text received: the board may have rebooted."
           }
         }
       }
@@ -1879,6 +1879,16 @@
         }
       }
     },
+    "appui" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pressed"
+          }
+        }
+      }
+    },
     "arc-en-ciel" : {
       "localizations" : {
         "en" : {
@@ -1949,6 +1959,16 @@
         }
       }
     },
+    "autre chien de garde" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "other watchdog"
+          }
+        }
+      }
+    },
     "avant" : {
       "localizations" : {
         "en" : {
@@ -1979,6 +1999,16 @@
         }
       }
     },
+    "baisse de tension" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "brownout"
+          }
+        }
+      }
+    },
     "bleu clignotant" : {
       "localizations" : {
         "en" : {
@@ -1995,6 +2025,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A button"
+          }
+        }
+      }
+    },
+    "broche de reset" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "reset pin"
           }
         }
       }
@@ -2045,6 +2085,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "wrongly typed field: %@"
+          }
+        }
+      }
+    },
+    "chien de garde (interruption)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "interrupt watchdog"
+          }
+        }
+      }
+    },
+    "chien de garde (tâche)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "task watchdog"
           }
         }
       }
@@ -2125,6 +2185,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "cannot decode"
+          }
+        }
+      }
+    },
+    "déjà servi" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "already served"
           }
         }
       }
@@ -2239,12 +2309,22 @@
         }
       }
     },
+    "file pleine" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "queue full"
+          }
+        }
+      }
+    },
     "hors réseau" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "off network"
+            "value" : "not on network"
           }
         }
       }
@@ -2254,7 +2334,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "identify"
+            "value" : "identifying"
+          }
+        }
+      }
+    },
+    "ignoré" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ignored"
           }
         }
       }
@@ -2309,6 +2399,16 @@
         }
       }
     },
+    "itérateur occupé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iterator busy"
+          }
+        }
+      }
+    },
     "joignable" : {
       "localizations" : {
         "en" : {
@@ -2325,6 +2425,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "lamp unreachable"
+          }
+        }
+      }
+    },
+    "lancée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "launched"
           }
         }
       }
@@ -2379,6 +2489,16 @@
         }
       }
     },
+    "logiciel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "software"
+          }
+        }
+      }
+    },
     "lum %@" : {
       "localizations" : {
         "en" : {
@@ -2415,12 +2535,32 @@
         }
       }
     },
+    "manuelle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "manual"
+          }
+        }
+      }
+    },
     "marche" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "power"
+          }
+        }
+      }
+    },
+    "mise sous tension" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "power-on"
           }
         }
       }
@@ -2461,6 +2601,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "does not end with }"
+          }
+        }
+      }
+    },
+    "neuf" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "new"
           }
         }
       }
@@ -2510,7 +2660,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "slow orange"
+            "value" : "slow blinking orange"
           }
         }
       }
@@ -2521,6 +2671,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "yes"
+          }
+        }
+      }
+    },
+    "panique" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "panic"
           }
         }
       }
@@ -2555,6 +2715,16 @@
         }
       }
     },
+    "produit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "production"
+          }
+        }
+      }
+    },
     "puce sourde" : {
       "localizations" : {
         "en" : {
@@ -2580,7 +2750,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "restart"
+            "value" : "reboot"
+          }
+        }
+      }
+    },
+    "refusé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "refused"
           }
         }
       }
@@ -2601,6 +2781,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "replaced"
+          }
+        }
+      }
+    },
+    "repris" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "resumed"
+          }
+        }
+      }
+    },
+    "repris par la pile" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "resumed by the stack"
+          }
+        }
+      }
+    },
+    "repris par le pont" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "resumed by the bridge"
           }
         }
       }
@@ -2630,7 +2840,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "found again"
+            "value" : "detected again"
+          }
+        }
+      }
+    },
+    "rien à reprendre" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "nothing to resume"
           }
         }
       }
@@ -2681,6 +2901,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "no response"
+          }
+        }
+      }
+    },
+    "sans stockage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no storage"
           }
         }
       }
@@ -2812,7 +3042,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "white flash, then restart"
+            "value" : "white flash, then reboot"
           }
         }
       }
@@ -2832,7 +3062,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "listen"
+            "value" : "listening"
           }
         }
       }
@@ -2842,7 +3072,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "transmit"
+            "value" : "transmitting"
           }
         }
       }

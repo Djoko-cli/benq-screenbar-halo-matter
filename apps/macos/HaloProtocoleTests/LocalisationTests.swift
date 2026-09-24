@@ -270,12 +270,45 @@ struct SensDecodeTests {
         #expect(ErreurLigne.tropLongue(octets: 130, max: 127).description
                 == "Line too long: 130 bytes, 127 at most including the id= prefix.")
         #expect(PolitiqueCommandes.verdictConsole("reboot", transport: .usb)
-                == .confirmation("Restarts the board (the USB port will re-enumerate)."))
+                == .confirmation("Reboots the board (the USB port will re-enumerate)."))
         #expect(MoteurSession.Note.aucuneReponse.texte.hasPrefix("No response: wrong port"))
         #expect(ValeurScalaire.booleen(false).description == "no")
         // Termes techniques intacts : champs JSON, commandes, hexa, unites.
         #expect(Interpretation.etat(EtatLampe(marche: true, lum: 0xA5, niveau: 180, temp: 53, mired: 268))
                 == "on · lum A5 (level 180) · temp 53 (268 mireds)")
+    }
+
+    static let hello = #"{"v":1,"t":"hello","n":0,"ms":1,"bloc":"base","fw":"0.4.0","env":"esp32c6thread","boot":"3FA2C901","reset":"mise_sous_tension"}"#
+    static let intent = #"{"v":1,"t":"intent","n":1,"ms":1,"recu":{"a":true},"champs":[],"a":"refuse"}"#
+    static let etabli = #"{"v":1,"t":"abonnement","n":2,"ms":2,"quoi":"etabli","origine":"pont"}"#
+    static let reprise = #"{"v":1,"t":"abonnement","n":3,"ms":3,"quoi":"reprise","mode":"manuelle","verdict":"sans_stockage"}"#
+    static let repriseAbonne = #"{"v":1,"t":"abonnement","n":4,"ms":4,"quoi":"reprise_abonne","abonne":"0x1","verdict":"deja_servi"}"#
+
+    /// Valeurs du firmware a liste fermee (noms francais du protocole) : traduites.
+    @Test(.langue(.anglais)) func valeursDuFirmwareEnAnglais() throws {
+        #expect(Interpretation.resume(try Self.ligne(Self.hello))
+                == "Hello: firmware 0.4.0 · esp32c6thread · boot 3FA2C901 (power-on)")
+        #expect(Interpretation.resume(try Self.ligne(Self.intent)).hasSuffix(" · A: refused"))
+        #expect(Interpretation.resume(try Self.ligne(Self.etabli)) == "Subscription established (resumed by the bridge)")
+        #expect(Interpretation.resume(try Self.ligne(Self.reprise)) == "Subscription resumption (manual): no storage")
+        #expect(Interpretation.resume(try Self.ligne(Self.repriseAbonne)) == "Resumption for 0x1: already served")
+        #expect(ValeurFirmware.causeDemarrage("chien_tache") == "task watchdog")
+        #expect(ValeurFirmware.build("produit") == "production")
+        #expect(ValeurFirmware.boutonA("appui") == "pressed")
+        // Valeur inconnue (firmware plus recent) : brute.
+        #expect(ValeurFirmware.causeDemarrage("jtag") == "jtag")
+        #expect(ValeurFirmware.verdictReprise("nouveau_verdict") == "nouveau_verdict")
+    }
+
+    @Test(.langue(.francais)) func valeursDuFirmwareEnFrancais() throws {
+        #expect(Interpretation.resume(try Self.ligne(Self.hello))
+                == "Hello : firmware 0.4.0 · esp32c6thread · démarrage 3FA2C901 (mise sous tension)")
+        #expect(Interpretation.resume(try Self.ligne(Self.intent)).hasSuffix(" · A : refusé"))
+        #expect(Interpretation.resume(try Self.ligne(Self.etabli)) == "Abonnement établi (repris par le pont)")
+        #expect(Interpretation.resume(try Self.ligne(Self.reprise)) == "Reprise des abonnements (manuelle) : sans stockage")
+        #expect(Interpretation.resume(try Self.ligne(Self.repriseAbonne)) == "Reprise pour 0x1 : déjà servi")
+        #expect(ValeurFirmware.causeDemarrage("chien_tache") == "chien de garde (tâche)")
+        #expect(ValeurFirmware.build("diag") == "diag")
     }
 
     @Test(.langue(.anglais)) func plurielsAnglais() throws {
