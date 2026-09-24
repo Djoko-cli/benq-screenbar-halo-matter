@@ -1,0 +1,14 @@
+# Projet genere par xcodegen (project.yml fait foi)
+*.xcodeproj/
+*.xcworkspace/
+# Produits de compilation
+build/
+DerivedData/
+.build/
+*.xcresult
+# Fichiers propres a l'utilisateur
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+.DS_Store
+__pycache__/
