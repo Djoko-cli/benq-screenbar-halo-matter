@@ -1168,19 +1168,38 @@ bordure (RIO). Aucune dependance a Matter pour ce canal.
 
 - Le client doit avoir la route RIO vers le prefixe OMR. **Bug du noyau de
   macOS** (xnu, constate les 24 et 25/09, `route -n monitor` : suppression par
-  le noyau, pid 0, route `CONDEMNED`) : quand un routeur de bordure parait un
-  instant injoignable, le noyau supprime les routes qui passent par lui
-  (`nd6_free` -> `rt6_flush`) sans mettre a jour sa liste des routes
-  annoncees (commentaire du code : « XXX TDB Handle lists in route information
-  option as well »), qui la croit toujours installee : la route n'est plus
-  jamais remise. Tenue 37 min le 24/09 ; le 25/09, reinstallee via le Wi-Fi
-  puis supprimee dans la meme seconde. Debrancher l'interface ne suffit donc
-  pas toujours. Une route STATIQUE tient (`rt6_flush` ne touche jamais une
-  route statique) : `sudo route -n add -inet6 -prefixlen 64 <OMR>:: <lien
-  local d'un routeur de bordure>%<interface>`. Choisir soi-meme le routeur
-  de sortie (`IPV6_NEXTHOP`) exige d'etre root : une app ne peut pas
-  contourner seule. App macOS : un assistant systeme (privilegie, installe une
-  fois) maintient la route ; l'app traite EHOSTUNREACH en l'expliquant.
+  le noyau, pid 0, route `CONDEMNED`). Le noyau retire la route RIO d'un
+  prefixe par `defrouter_delreq` (RTM_DELETE du noyau, par prefixe et masque)
+  quand `defrouter_select` change de routeur pour ce prefixe : un routeur de
+  bordure parait un instant injoignable (echec de la detection
+  d'injoignabilite : `nd6_free` -> `nd6_router_select_rti_entries` ->
+  `defrouter_select`), ou son annonce expire (`defrtrlist_del`). Ce n'est pas
+  `rt6_flush`, qui ne retire que des routes d'hote non statiques. Une entree
+  de la liste des routes annoncees peut en outre etre marquee installee
+  (`NDDRF_INSTALLED`) sans route dans la table (constate le 25/09, `sysctl
+  net.inet6.icmp6.nd6_rtilist`) : si le noyau passe par elle,
+  `defrouter_addreq` la croit deja posee et ne pose rien, et
+  `defrouter_select` ne remet pas la route tant que ce routeur reste
+  joignable. Origine probable, lue dans le code : `nd6_ra_input` sert la meme `dr0` a
+  toutes les options RIO d'une annonce, et `defrtrlist_update_common` y
+  recopie les drapeaux d'une entree deja connue ; l'entree creee ensuite pour
+  un autre prefixe nait donc marquee installee (vu le 25/09 quand un routeur
+  a change de prefixe OMR). Tenue 37 min le 24/09 ; le 25/09, reinstallee via
+  le Wi-Fi puis supprimee dans la meme seconde. Debrancher l'interface ne
+  suffit donc pas toujours. Une route STATIQUE tient
+  mieux (`rt6_flush` l'ignore ; tant qu'elle est la, l'ajout du noyau echoue
+  et aucune nouvelle entree n'est marquee installee) : `sudo route -n add
+  -inet6 -prefixlen 64 <OMR>:: <lien local d'un routeur de
+  bordure>%<interface>`. Mais le noyau la retire aussi (prefixe et masque,
+  sans regarder la passerelle) quand il change de routeur ou qu'une annonce
+  expire alors qu'une entree est marquee installee, et pose alors en general
+  sa propre route via un autre routeur. Choisir soi-meme le routeur de sortie
+  (`IPV6_NEXTHOP`) exige d'etre root : une app ne peut pas contourner seule.
+  Sur le Mac, l'assistant systeme `tools/macos/halo-routes/` (demon launchd
+  root, installe une fois) garde la route : il relit la liste des routes
+  annoncees du noyau, pose une route statique pour chaque prefixe ULA `/64`
+  annonce qui n'en a plus, et la remet si le noyau la retire sans poser la
+  sienne. L'app traite EHOSTUNREACH en l'expliquant.
 - Le prefixe OMR peut venir d'un routeur de bordure tiers et changer (constate
   le 24/09) : le client resout un nom, jamais une adresse figee (10.3).
 
