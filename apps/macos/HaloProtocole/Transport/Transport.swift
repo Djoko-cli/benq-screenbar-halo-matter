@@ -25,6 +25,14 @@ public protocol Transport: AnyObject, Sendable {
     func envoyer(_ donnees: Data) throws
     /// Ferme sans toucher aux lignes de controle (DTR et RTS restent a 0).
     func fermer()
+    /// Ferme apres avoir laisse partir les octets deja confies a `envoyer`
+    /// (`json 0` avant de liberer le port), au plus quelques centaines de ms.
+    /// `synchrone` : ne rend la main qu'une fois le transport ferme (fin de l'app).
+    func fermerApresVidage(synchrone: Bool)
+}
+
+extension Transport {
+    public func fermerApresVidage(synchrone: Bool) { fermer() }
 }
 
 /// Erreur de transport lisible.

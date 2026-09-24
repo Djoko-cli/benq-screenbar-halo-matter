@@ -37,8 +37,10 @@ struct Graphiques: View {
 
     @ViewBuilder
     private func contenu(debut: Date, fin: Date) -> some View {
-        let dp = Courbes.differences(pont.pilote.elements, fenetre: fenetre).filter { $0.fin >= debut }
-        let dr = Courbes.differences(pont.radio.elements, fenetre: fenetre).filter { $0.fin >= debut }
+        // Un trou dans les echantillons (app suspendue) ouvre un segment : pas de difference geante.
+        let ecart = pont.ecartMaxCourbes
+        let dp = Courbes.differences(pont.pilote.elements, fenetre: fenetre, ecartMax: ecart).filter { $0.fin >= debut }
+        let dr = Courbes.differences(pont.radio.elements, fenetre: fenetre, ecartMax: ecart).filter { $0.fin >= debut }
         let seuils = pont.etat.config?.valeur.seuils
         let marques = pont.marqueurs.elements.filter { $0.date >= debut }
         ScrollView {
@@ -50,19 +52,19 @@ struct Graphiques: View {
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 460), spacing: 16, alignment: .top)], spacing: 16) {
                     Carte(titre: "Taux de perte TX", icone: "arrow.up.forward.circle") {
-                        graphePerte(dp, marques: marques.filter { $0.genre == .abandon }, debut: debut, fin: fin)
-                        legende("(Δ max_rt + Δ délais + Δ fifo) / Δ paquets ; pointillé : 1 − Δ accusés / Δ paquets. "
-                                + "Traits rouges : livraisons abandonnées.")
+                        graphePerte(dp, debut: debut, fin: fin)
+                        legende("(Δ max_rt + Δ délais + Δ fifo) / Δ paquets ; pointillé : 1 − Δ accusés / Δ paquets.")
                     }
                     Carte(titre: "Consignes abandonnées", icone: "xmark.octagon") {
-                        grapheBarres(points(dp, "abandons") { $0[.abandons].map(Double.init) }, debut: debut, fin: fin,
+                        grapheBarres(points(dp, "abandons") { $0[.abandons].map(Double.init) },
+                                     marques: marques.filter { $0.genre == .abandon }, debut: debut, fin: fin,
                                      couleur: .red, unite: "par fenêtre")
-                        legende("Δ tranches.abandons par fenêtre de \(Int(fenetre)) s.")
+                        legende("Δ tranches.abandons par fenêtre de \(Int(fenetre)) s ; traits : livraisons abandonnées.")
                     }
                     Carte(titre: "CRC faux", icone: "exclamationmark.bubble") {
                         grapheCrc(dp, seuils: seuils, debut: debut, fin: fin)
-                        legende("Δ rx.crc_faux par minute ; trait : seuil du déluge "
-                                + "(\(seuils?.delugeTrames ?? 100) trames sur \(Format.ms(seuils?.fenetreMs ?? 10000)), "
+                        legende("Δ rx.crc_faux par minute ; trait : seuil du déluge (\(seuils?.delugeTrames ?? 100) trames "
+                                + "dont \(seuils?.delugePct ?? 90) % de CRC faux sur \(Format.ms(seuils?.fenetreMs ?? 10000)), "
                                 + "ramené à la minute).")
                         grapheLignes(points(dp, "part CRC faux") { Courbes.partCrcFaux($0).map { $0 * 100 } },
                                      debut: debut, fin: fin, unite: "%",
@@ -130,7 +132,7 @@ struct Graphiques: View {
 
     // MARK: - Graphes
 
-    private func graphePerte(_ d: [Difference], marques: [Marqueur], debut: Date, fin: Date) -> some View {
+    private func graphePerte(_ d: [Difference], debut: Date, fin: Date) -> some View {
         let perte = points(d, "perte") { Courbes.tauxPerte($0).map { $0 * 100 } }
         let sansAccuse = points(d, "sans accusé") { Courbes.tauxSansAccuse($0).map { $0 * 100 } }
         return Chart {
@@ -146,10 +148,6 @@ struct Graphiques: View {
                     .foregroundStyle(.orange)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
-            ForEach(marques) { m in
-                RuleMark(x: .value("Heure", m.date))
-                    .foregroundStyle(.red.opacity(0.4))
-            }
         }
         .chartXScale(domain: echelle(debut, fin))
         .chartPlotStyle { $0.clipped() }
@@ -158,10 +156,19 @@ struct Graphiques: View {
         .frame(height: 170)
     }
 
-    private func grapheBarres(_ p: [Point], debut: Date, fin: Date, couleur: Color, unite: String) -> some View {
-        Chart(p.filter { $0.valeur > 0 }) { x in
-            BarMark(xStart: .value("Début", x.debut), xEnd: .value("Fin", x.fin), y: .value(unite, x.valeur))
-                .foregroundStyle(couleur)
+    private func grapheBarres(_ p: [Point], marques: [Marqueur], debut: Date, fin: Date, couleur: Color,
+                              unite: String) -> some View {
+        Chart {
+            ForEach(p.filter { $0.valeur > 0 }) { x in
+                BarMark(xStart: .value("Début", x.debut), xEnd: .value("Fin", x.fin), y: .value(unite, x.valeur))
+                    .foregroundStyle(couleur)
+            }
+            // Marqueurs des livraisons abandonnees (section 8).
+            ForEach(marques) { m in
+                RuleMark(x: .value("Heure", m.date))
+                    .foregroundStyle(couleur.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
         }
         .chartXScale(domain: echelle(debut, fin))
         .chartPlotStyle { $0.clipped() }
@@ -171,7 +178,8 @@ struct Graphiques: View {
 
     private func grapheCrc(_ d: [Difference], seuils: ConfigCarte.Seuils?, debut: Date, fin: Date) -> some View {
         let p = points(d, "crc") { Courbes.parMinute($0, .crcFaux) }
-        let seuil = Courbes.seuilDelugeParMinute(trames: seuils?.delugeTrames ?? 100, fenetreMs: seuils?.fenetreMs ?? 10000)
+        let seuil = Courbes.seuilDelugeParMinute(trames: seuils?.delugeTrames ?? 100, pct: seuils?.delugePct ?? 90,
+                                                 fenetreMs: seuils?.fenetreMs ?? 10000)
         return Chart {
             ForEach(p.filter { $0.valeur > 0 }) { x in
                 BarMark(xStart: .value("Début", x.debut), xEnd: .value("Fin", x.fin), y: .value("par min", x.valeur))
@@ -240,7 +248,7 @@ struct Graphiques: View {
         let echantillons = pont.radio.elements
         var pts: [Point] = []
         for (g, nom) in causes {
-            for (i, c) in Courbes.cumul(echantillons, g).enumerated() where c.date >= debut {
+            for (i, c) in Courbes.cumul(echantillons, g, ecartMax: pont.ecartMaxCourbes).enumerated() where c.date >= debut {
                 pts.append(Point(id: "\(nom)-\(i)", debut: c.date, fin: c.date, serie: nom, segment: c.segment,
                                  valeur: Double(c.valeur)))
             }

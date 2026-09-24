@@ -79,6 +79,10 @@ actor SimulateurDemo {
     private var ajoutsLivrees = 0
     private var ajoutsAbandons = 0
     private var raz = 0
+    /// Valeurs au dernier `lampe stats raz`, retranchees ensuite (5.4) : blocs
+    /// `pilote` et `radio` (sauf `tx.total`), et `etat.sante.surveil.relances`.
+    private var baseRaz: [String: [(cle: String, valeur: Int)]] = [:]
+    private var baseRelancesSante = 0
     private var idsEnAttente: [Int] = []
     private var idsPerdus = 0
     private var numeroTx = 1000
@@ -282,7 +286,19 @@ actor SimulateurDemo {
 
     /// Bloc periodique courant, avec les surcharges de l'app.
     private func emettreBloc(_ cle: String) {
-        guard let entree = blocs[cle] else { return }
+        guard let l = ligneBloc(cle) else { return }
+        emettre(l)
+    }
+
+    /// Champs jamais remis a zero par `lampe stats raz` (5.4), en plus de l'enveloppe.
+    private static let horsRaz: [String: Set<String>] = [
+        "compteurs.pilote": ["v", "n", "ms", "raz", "total"],
+        "compteurs.radio": ["v", "n", "ms", "raz"],
+    ]
+
+    /// Ligne d'un bloc, surcharges comprises ; `apresRaz` : valeurs du dernier raz retranchees.
+    private func ligneBloc(_ cle: String, apresRaz: Bool = true) -> String? {
+        guard let entree = blocs[cle] else { return nil }
         var l = entree.ligne
         let age = decalage.map { msCarte() - (entree.ms + $0) } ?? 0
         switch cle {
@@ -300,6 +316,14 @@ actor SimulateurDemo {
             l = LigneJSON.remplacerEntier(l, "dernier_a") { dernierA > 0 ? dernierA : $0 }
         case "etat.sante":
             l = LigneJSON.remplacerEntier(l, "il_y_a_s") { $0 + max(0, age) / 1000 }
+            if apresRaz, raz > 0 {
+                var relances = 0
+                l = LigneJSON.remplacerEntier(l, "relances") { v in
+                    relances = max(0, v - baseRelancesSante)
+                    return relances
+                }
+                if relances == 0 { l = LigneJSON.remplacerValeur(l, "derniere", par: "null") }
+            }
         case "compteurs.pilote":
             for (champ, ajout) in ajoutsPilote { l = LigneJSON.remplacerEntier(l, champ) { $0 + ajout } }
             l = LigneJSON.remplacerEntier(l, "raz") { $0 + raz }
@@ -315,7 +339,10 @@ actor SimulateurDemo {
         default:
             break
         }
-        emettre(l)
+        if apresRaz, let base = baseRaz[cle], let sauf = Self.horsRaz[cle] {
+            l = LigneJSON.soustraire(l, base: base, sauf: sauf)
+        }
+        return l
     }
 
     private func avecVersion(_ l: String) -> String {
@@ -701,6 +728,13 @@ actor SimulateurDemo {
                       "  led test|stop", "  json 1|0|etat|hello|ping|periode|compteurs|reseau|trames|log",
                       "  matter, reboot, help"] { texte(l) }
         case ("lampe", "stats") where m.count >= 3 && m[2] == "raz":
+            // Les compteurs du fichier restent cumulatifs : retenir leurs valeurs pour les retrancher.
+            for b in ["compteurs.pilote", "compteurs.radio"] {
+                baseRaz[b] = ligneBloc(b, apresRaz: false).map(LigneJSON.entiers)
+            }
+            if let s = ligneBloc("etat.sante", apresRaz: false), let v = LigneJSON.valeur(s, "relances").flatMap({ Int($0) }) {
+                baseRelancesSante = v
+            }
             raz += 1
             texte("  statistiques du pilote et de la radio remises a zero (raz \(raz))")
         case ("lampe", "stats"):

@@ -25,6 +25,10 @@ public enum EtatCommande: Sendable, Equatable {
     case annulee
     /// Pas de `reponse` sous 3 s, sans `debut` (pas de reemission).
     case sansReponse
+    /// `debut` recu, puis un bloc periodique avant la `fin` : la commande est
+    /// finie (la boucle de la carte n'emet rien pendant une commande), sa `fin`
+    /// s'est perdue.
+    case finPerdue
     /// Remplacee dans la file par une valeur plus recente (curseurs).
     case remplacee
     /// Connexion perdue avant la fin.
@@ -63,6 +67,8 @@ public struct SuiviCommande: Sendable, Identifiable, Equatable {
 public struct Correlateur: Sendable {
     public static let delaiReponse: TimeInterval = 3
     public static let historiqueMax = 300
+    /// Au plus 20 lignes par seconde vers la carte (6.5, refus `cadence`).
+    public static let intervalleMin: TimeInterval = 0.05
 
     public private(set) var suivis: [SuiviCommande] = []
     private var file: [UUID] = []
@@ -72,7 +78,10 @@ public struct Correlateur: Sendable {
 
     public init() {}
 
-    /// Nouvelle connexion : les numeros repartent a 1, tout ce qui attendait est perdu.
+    /// Nouvelle connexion : tout ce qui attendait est perdu. Les numeros ne
+    /// repartent PAS a 1 : la liste des id en attente de la carte (8 au plus)
+    /// survit a une reconnexion de l'app, et une `livraison` tardive ne doit
+    /// pas tomber sur une commande neuve de meme numero (6.1 : croissant).
     public mutating func reinitialiser(maintenant: TimeInterval) {
         for i in suivis.indices where !suivis[i].etat.estFinal {
             suivis[i].etat = .perdue
@@ -80,8 +89,21 @@ public struct Correlateur: Sendable {
         }
         file.removeAll()
         enVol = nil
-        prochainNumero = 1
         dernierEnvoiA = nil
+    }
+
+    /// Avant un `json 1` en cours de session (silence, bail echu,
+    /// redemarrage) : la commande en vol ne recevra plus sa `reponse` dans
+    /// cette session ; la file reste et repartira apres la reponse au `json 1`.
+    /// `redemarrage` : la carte a aussi oublie ses livraisons en attente.
+    public mutating func perdreEnVol(maintenant: TimeInterval, redemarrage: Bool = false) {
+        for i in suivis.indices {
+            let e = suivis[i].etat
+            guard e == .envoyee || e == .enCours || (redemarrage && e == .attenteLivraison) else { continue }
+            suivis[i].etat = .perdue
+            suivis[i].termineeA = maintenant
+        }
+        enVol = nil
     }
 
     /// Reserve un numero hors file (json 1, json 0 envoyes par la session).
@@ -100,12 +122,13 @@ public struct Correlateur: Sendable {
     }
 
     public var enFile: Int { file.count }
-    public var occupe: Bool { enVol != nil || !file.isEmpty }
+    public var occupe: Bool { enVol != nil || !file.isEmpty || commandeDeBanc != nil }
 
-    /// Commande historique en cours (`debut` recu, pas encore `fin`).
+    /// Commande historique en cours (`debut` recu, pas encore `fin`), y
+    /// compris un `debut` tardif, arrive apres le verdict "sans reponse" : la
+    /// boucle de la carte est bloquee dans la commande, rien d'autre ne part.
     public var commandeDeBanc: SuiviCommande? {
-        guard let id = enVol, let s = suivi(id), s.etat == .enCours else { return nil }
-        return s
+        suivis.last { $0.etat == .enCours }
     }
 
     @discardableResult
@@ -132,10 +155,12 @@ public struct Correlateur: Sendable {
         return s.id
     }
 
-    /// Prochaine ligne a envoyer si rien n'est en vol. Une ligne invalide
+    /// Prochaine ligne a envoyer si rien n'est en vol ni en cours, et pas
+    /// plus d'une ligne toutes les 50 ms (20 par seconde). Une ligne invalide
     /// (trop longue...) est retiree et marquee terminee.
     public mutating func prochainEnvoi(maintenant: TimeInterval) -> (id: UUID, numero: Int, octets: Data)? {
-        while enVol == nil, !file.isEmpty {
+        if let d = dernierEnvoiA, maintenant - d < Self.intervalleMin { return nil }
+        while enVol == nil, commandeDeBanc == nil, !file.isEmpty {
             let id = file.removeFirst()
             guard let i = index(id) else { continue }
             let numero = prochainNumero
@@ -179,11 +204,14 @@ public struct Correlateur: Sendable {
         }
         let id = suivis[i].id
         switch r.etape {
+        case .inconnu:
+            // Etape future (progression...) : ne clot rien, ne libere pas la place en vol.
+            return .inattendue
         case .debut:
             suivis[i].etat = .enCours
             suivis[i].debutA = maintenant
             return .debut(id)
-        case .fin, .inconnu:
+        case .fin:
             suivis[i].fin = r
             suivis[i].termineeA = maintenant
             let attend = r.ok && r.code == .accepte && r.suite == .livraison
@@ -215,14 +243,32 @@ public struct Correlateur: Sendable {
         return touches
     }
 
-    /// Texte recu : rattache a la commande en vol si elle a commence.
+    /// Texte recu : rattache a la commande de banc en cours (meme apres un
+    /// `debut` tardif), sinon a la commande en vol.
     @discardableResult
     public mutating func texte(_ ligne: String) -> UUID? {
-        guard let id = enVol, let i = index(id), suivis[i].etat == .enCours || suivis[i].etat == .envoyee
+        guard let id = commandeDeBanc?.id ?? enVol, let i = index(id),
+              suivis[i].etat == .enCours || suivis[i].etat == .envoyee
         else { return nil }
         suivis[i].texte.append(ligne)
         if suivis[i].texte.count > 400 { suivis[i].texte.removeFirst() }
         return id
+    }
+
+    /// Bloc periodique (`etat`, `hb`) recu : la boucle de la carte tourne de
+    /// nouveau, donc une commande historique encore "en cours" est finie et sa
+    /// `reponse fin` s'est perdue (ligne perdue ou abimee). Sans cela, la
+    /// place en vol resterait prise et plus rien ne partirait.
+    @discardableResult
+    public mutating func periodiqueRecu(maintenant: TimeInterval) -> [UUID] {
+        var touches: [UUID] = []
+        for i in suivis.indices where suivis[i].etat == .enCours {
+            suivis[i].etat = .finPerdue
+            suivis[i].termineeA = maintenant
+            if enVol == suivis[i].id { enVol = nil }
+            touches.append(suivis[i].id)
+        }
+        return touches
     }
 
     /// Commandes sans `reponse` sous 3 s (et sans `debut`) : marquees, pas reemises.

@@ -102,19 +102,38 @@ premières lignes égalent les exemples de 12.1 et que ses trames `brut`
   `HUPCL` retiré (la fermeture ne touche pas aux lignes), `cfmakeraw`, 8N1,
   `CLOCAL | CREAD`, 115200. Code : `HaloCompagnon/Serie/PortSerie.swift`.
 - À l'ouverture : tout ce qui précède le premier LF est jeté, puis `0x15 0x0A`
-  et `id=1 json 1`. Sans `hello` en 2 s : trois renvois, puis un essai toutes
+  et `id=<n> json 1`. Sans `hello` en 2 s : trois renvois, puis un essai toutes
   les 30 s (« mode téléchargement ? »). `Commande inconnue : "id=1"` : ancien
   firmware, console seule (lignes sans `id`).
-- `json ping` après 10 s sans autre commande ; silence de 3 × max(période, 2 s)
-  (hors commande de banc) : `json 1`, puis fermeture et réouverture sans `hello` sous 5 s.
+- La session s'établit au `hello` de cette tentative, et la file de commandes
+  ne repart qu'à la `reponse fin` du `json 1` (une seule commande en vol, 6.5).
+  Une réponse sans `hello` (hello perdu ou coupé par un log, `ok:false`,
+  `cadence`) n'établit rien : `json 1` repart 2 s après. Réponse perdue après
+  le `hello` : tenue pour perdue au bout de 3 s, la file repart.
+- `json ping` après 10 s sans autre commande, ou au tiers du bail s'il est plus
+  court (`json 1 bail 10` tapé dans la console) ; silence de 3 × max(période, 2 s)
+  (hors commande de banc) : `json 1`, puis fermeture et réouverture sans `hello`
+  sous 5 s. Avant tout `json 1` en cours de session (silence, bail échu,
+  redémarrage), la commande en vol est marquée perdue ; au redémarrage, les
+  livraisons attendues aussi.
 - Ré-énumération (redémarrage, `reboot`, câble) : IOKit signale le départ et
   l'arrivée des ports (`IOServiceAddMatchingNotification` sur `IOSerialBSDClient`) ;
   l'app rouvre après 300 ms, puis 1 s, 2 s, 5 s, et retrouve la même carte par
-  son numéro de série USB (sa MAC).
-- **Libérer le port** (⇧⌘L, bouton ⏏) : `json 0`, fermeture, pas de réouverture
-  avant « Reconnecter » : `pio run -t upload` peut flasher.
-- Une commande en vol à la fois ; sans `reponse` sous 3 s : « sans réponse »,
-  `json etat`, jamais de réémission. Curseurs : une commande toutes les 150 ms
+  son numéro de série USB (sa MAC). Après 40 essais minutés (~3 min), elle
+  cesse d'essayer à l'aveugle mais rouvre toujours au retour du port.
+- **Libérer le port** (⇧⌘L, bouton ⏏) : `json 0`, puis fermeture une fois la
+  file de sortie du tty vide (`TIOCOUTQ`, 300 ms au plus : le descripteur est
+  `O_NONBLOCK` et la fermeture jetterait le reste), pas de réouverture avant
+  « Reconnecter » : `pio run -t upload` peut flasher. « Déconnecter », le
+  changement de source et la fin de l'app envoient aussi `json 0`, sauf pendant
+  une commande de banc (la CLI ne lit plus).
+- Port ouvert : l'app tient une activité `ProcessInfo` (pas d'App Nap), sinon
+  le ping pourrait manquer le bail de 30 s fenêtre cachée.
+- Une commande en vol à la fois, 20 lignes par seconde au plus (50 ms entre
+  deux lignes, refus `cadence` de 6.5) ; sans `reponse` sous 3 s : « sans
+  réponse », `json etat`, jamais de réémission. Un `debut` (même arrivé après
+  ce verdict) fait une commande de banc : rien ne part, ni ping ni `json 1` de
+  silence, jusqu'à sa `fin`. Curseurs : une commande toutes les 150 ms
   au plus pendant le glissement (les valeurs en file sont fusionnées), la
   valeur finale au relâchement.
 - Console : 127 octets au plus préfixe compris (jugé avec le plus long `id`
@@ -123,7 +142,10 @@ premières lignes égalent les exemples de 12.1 et que ses trames `brut`
   `amble`, `aw`, `holtek`, `regcfg`, `lampe oublie`, `lampe adresse <x>`,
   `lampe stats raz`, `matter med|maxint|reprise auto`, `json cle nouvelle|efface` ;
   `json 0` refusé (passer par « Libérer le port ») ; la clé de `json cle` est
-  masquée dans la console et le journal.
+  masquée partout où elle pourrait s'afficher (console, journal, lignes
+  rejetées, commandes récentes ; casse et espaces quelconques, toute suite de
+  64 chiffres hexa) et n'entre jamais dans l'historique de saisie. Avant la
+  réponse au `json 1`, une ligne tapée attend en file avec son `id`.
 
 ### Bac à sable : oui, avec `com.apple.security.device.serial`
 
@@ -152,14 +174,14 @@ apps/macos/
 │   ├── Correspondances/         niveau Matter <-> brut (gamma), mireds <-> temp (portage de halo1_map.cpp)
 │   ├── Interpretation/          sens décodé et libellés français
 │   └── Transport/               protocole Transport (ouvrir, envoyer, fermer, flux d'octets)
-├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, corrélation, session, courbes, correspondances, fichier de démo
+├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, couverture des clés (aucun champ perdu), corrélation, session, courbes, correspondances, fichier de démo
 ├── HaloCompagnon/               l'app
 │   ├── Serie/                   PortSerie (POSIX, DTR/RTS), TransportSerie (DispatchSource), SurveillantUSB (IOKit)
 │   ├── Demo/                    ScriptDemo, SimulateurDemo (acteur), TransportDemo
 │   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux
 │   ├── Vues/                    les quatre écrans et leurs composants
 │   └── Ressources/demo-halo.jsonl
-├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage)
+├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage, changement de source)
 └── Outils/generer_demo.py       générateur de la chronologie de démo
 ```
 
@@ -184,6 +206,23 @@ plateformes de la cible `HaloProtocole` (elle n'importe que Foundation).
   précède reste du texte.
 - **Livraison** : elle couvre toutes les commandes acceptées dont l'`id` ne
   dépasse pas le plus grand de ses `ids` (fusion des consignes, `ids_perdus`).
+- **Numéros d'`id`** : croissants sur toute la vie de l'app, jamais remis à 1
+  à la reconnexion : la liste des id en attente de la carte survit à une
+  reconnexion, et une `livraison` tardive ne doit pas tomber sur une commande
+  neuve de même numéro.
+- **Fin perdue** : un bloc `etat` ou `hb` reçu après un `reponse debut` prouve
+  que la boucle de la carte tourne de nouveau (elle n'émet rien pendant une
+  commande) : la commande est close « fin perdue » et la file repart.
+- **Changement de source** (autre port, démo) : moteur, `boot`, états,
+  journal des trames et courbes repartent de zéro (pas de faux redémarrage).
+- **Courbes** : un écart de plus de max(30 s, 3 périodes `compteurs`) entre
+  deux blocs (app suspendue, veille) ouvre un segment, comme un `raz` ; le
+  seuil du déluge vaut `deluge_trames` × `deluge_pct` % CRC faux par
+  `fenetre_ms` (540 par minute aux valeurs par défaut), comme `halo1_watch.cpp`.
+- **Capacités** (`hello.caps`, 5.1) : test du voyant sans `led`, `json trames`
+  sans `trames`, `json log` sans `log` et cartes Thread et Matter sans
+  `matter` ne sont pas proposés ; sans `lampe_async`, l'écran Commandes
+  prévient que chaque commande `lampe` bloque la carte.
 - **Redémarrage** vu hors `hello` (`etat`, `hb`) : `json 1` renvoyé ; vu dans
   le `hello` d'une nouvelle connexion : états vidés seulement.
 - **Champs obligatoires** : l'enveloppe (`v`, `t`, `n`) et, par message, ce

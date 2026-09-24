@@ -89,14 +89,23 @@ struct TramesEnDirect: View {
             }
             .help("Figer l'affichage sans rien demander à la carte")
             Menu {
-                Button(pont.tramesCoupees ? "Reprendre rx/tx (json trames 1)" : "Couper rx/tx (json trames 0)") {
-                    pont.couperTrames(!pont.tramesCoupees)
+                // L'app se regle sur hello.caps, pas sur la version du firmware (5.1).
+                let caps = pont.etat.capacites
+                if caps.contains("trames") {
+                    Button(pont.tramesCoupees ? "Reprendre rx/tx (json trames 1)" : "Couper rx/tx (json trames 0)") {
+                        pont.couperTrames(!pont.tramesCoupees)
+                    }
+                    .disabled(!pont.peutCommander)
                 }
-                .disabled(!pont.peutCommander)
-                Button("Annonces en messages log (json log 1)") { pont.envoyer("json log 1") }
-                    .disabled(!pont.peutCommander)
-                Button("Annonces en texte (json log 0)") { pont.envoyer("json log 0") }
-                    .disabled(!pont.peutCommander)
+                if caps.contains("log") {
+                    Button("Annonces en messages log (json log 1)") { pont.envoyer("json log 1") }
+                        .disabled(!pont.peutCommander || pont.reglages?.log == true)
+                    Button("Annonces en texte (json log 0)") { pont.envoyer("json log 0") }
+                        .disabled(!pont.peutCommander || pont.reglages?.log == false)
+                }
+                if !caps.contains("trames") && !caps.contains("log") {
+                    Text(caps.isEmpty ? "Capacités de la carte pas encore reçues" : "Ni trames ni log dans ce build")
+                }
                 Divider()
                 Button("Écoute de fond active (lampe ecoute 1)") { pont.envoyer("lampe ecoute 1") }
                     .disabled(!pont.peutCommander)
@@ -120,7 +129,7 @@ struct TramesEnDirect: View {
             guard categories.contains(e.categorie) else { return false }
             if masquerAccuses, case .rx(let t) = e.message, t.type == .accuseLampe { return false }
             if seulementEchecs, !e.echec, !e.douteuse { return false }
-            if !r.isEmpty, !e.resume.lowercased().contains(r), !e.json.lowercased().contains(r) { return false }
+            if !r.isEmpty, !e.cleRecherche.contains(r) { return false }
             return true
         }
     }

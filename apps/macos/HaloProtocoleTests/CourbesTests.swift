@@ -47,6 +47,22 @@ struct CourbesTests {
         #expect(d.allSatisfy { ($0[.crcFaux] ?? 0) >= 0 })
     }
 
+    @Test func unTrouDEchantillonsOuvreUnSegment() {
+        // L'app ne lit plus pendant 590 s (veille, app suspendue), meme boot : sans rupture, une
+        // seule difference de 5900 rearmements serait tracee "par fenetre" contre le seuil de 1000.
+        let e = [ech(0, [.rearmHorsRx: 0]), ech(1, [.rearmHorsRx: 10]), ech(591, [.rearmHorsRx: 5910]),
+                 ech(592, [.rearmHorsRx: 5920])]
+        #expect(Courbes.segmenter(e).map(\.count) == [2, 2])
+        let d = Courbes.differences(e, fenetre: 10)
+        #expect(d.map { $0[.rearmHorsRx] } == [10, 10])
+        #expect(d.map(\.segment) == [0, 1])
+        // Periode compteurs lente (json compteurs 60000) : l'ecart tolere suit (3 periodes).
+        #expect(Courbes.ecartMax(compteursMs: 1000) == 30)
+        #expect(Courbes.ecartMax(compteursMs: 60000) == 180)
+        let lent = [ech(0, [.paquets: 0]), ech(60, [.paquets: 6]), ech(120, [.paquets: 12])]
+        #expect(Courbes.segmenter(lent, ecartMax: Courbes.ecartMax(compteursMs: 60000)).count == 1)
+    }
+
     @Test func tauxDePerte() {
         let d = Difference(debut: t0, fin: t0.addingTimeInterval(60), segment: 0,
                            deltas: [.paquets: 20, .accuses: 14, .maxRt: 4, .delais: 1, .fifo: 1])
@@ -61,7 +77,9 @@ struct CourbesTests {
                            deltas: [.trames: 50, .crcFaux: 5])
         #expect(Courbes.parMinute(d, .crcFaux) == 30)
         #expect(Courbes.partCrcFaux(d) == 0.1)
-        #expect(Courbes.seuilDelugeParMinute(trames: 100, fenetreMs: 10000) == 600)
+        // Le firmware declenche a 100 trames dont 90 % de CRC faux sur 10 s (halo1_watch.cpp) :
+        // au moins 90 CRC faux par fenetre, 540 par minute.
+        #expect(Courbes.seuilDelugeParMinute(trames: 100, pct: 90, fenetreMs: 10000) == 540)
         #expect(Courbes.seuilSurditeParMinute(horsRx: 1000) == 6000)
     }
 
@@ -189,5 +207,14 @@ struct PolitiqueTests {
         let m = PolitiqueCommandes.masquerCle(json)
         #expect(!m.contains(cle))
         #expect(m.contains("\"cle\":\"••••••••\""))
+        #expect(PolitiqueCommandes.masquerCle(m) == m, "idempotent")
+        // La CLI lit les mots sans casse ni espaces multiples : le masque aussi.
+        let tape = PolitiqueCommandes.masquerCle("JSON  Cle   NOUVELLE \(cle.lowercased())")
+        #expect(!tape.lowercased().contains(cle.lowercased()))
+        // Cle imprimee en texte (commande sans id), et deux champs cle dans une ligne.
+        #expect(!PolitiqueCommandes.masquerCle("  cle : \(cle)").contains(cle))
+        let deux = PolitiqueCommandes.masquerCle(#"{"cle":"\#(cle)","autre":{"cle":"\#(cle)"}}"#)
+        #expect(!deux.contains(cle))
+        #expect(PolitiqueCommandes.masquerCle("lampe niveau 200") == "lampe niveau 200")
     }
 }

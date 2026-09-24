@@ -60,11 +60,13 @@ struct DemoTests {
                 if case .compteursRadio(let c) = l.message { radio.append(.radio(c, date: date, boot: "B")) }
             }
         }
-        let d = Courbes.differences(pilote, fenetre: 10)
-        #expect(Courbes.segmenter(pilote).count == 1, "aucune rupture dans la demo")
+        // Le fichier ne garde un bloc compteurs que s'il change (la carte simulee les re-emet
+        // chaque seconde) : les ecarts entre lignes n'y sont pas des trous de lecture.
+        let d = Courbes.differences(pilote, fenetre: 10, ecartMax: .infinity)
+        #expect(Courbes.segmenter(pilote, ecartMax: .infinity).count == 1, "aucune rupture dans la demo")
         let pertes = d.compactMap(Courbes.tauxPerte)
         #expect(pertes.contains { $0 >= 0.99 }, "la commande en echec donne 100 % de pertes")
         #expect(pertes.contains { $0 == 0 })
-        #expect(Courbes.cumul(radio, .relances).last?.valeur == 4)
+        #expect(Courbes.cumul(radio, .relances, ecartMax: .infinity).last?.valeur == 4)
     }
 }

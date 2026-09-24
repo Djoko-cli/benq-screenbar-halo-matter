@@ -112,4 +112,30 @@ final class TransportSerie: Transport {
     func fermer() {
         file.async { [weak self] in self?.terminer("port fermé par l'app") }
     }
+
+    /// Le descripteur est `O_NONBLOCK` : a la fermeture, le tty jette ce qui
+    /// n'est pas encore parti (`ttylclose`). Attendre donc que la file de
+    /// sortie se vide (`TIOCOUTQ`, 300 ms au plus) avant de fermer.
+    func fermerApresVidage(synchrone: Bool) {
+        let travail: @Sendable () -> Void = { [weak self] in
+            guard let self else { return }
+            self.vider(delaiMax: .milliseconds(300))
+            self.terminer("port fermé par l'app")
+        }
+        if synchrone { file.sync(execute: travail) } else { file.async(execute: travail) }
+    }
+
+    /// Sur la file serie, derriere les ecritures deja en file.
+    private func vider(delaiMax: Duration) {
+        let fd = etat.withLock { $0.fd }
+        guard fd >= 0 else { return }
+        let limite = ContinuousClock.now + delaiMax
+        var reste: Int32 = 0
+        while ContinuousClock.now < limite {
+            guard withUnsafeMutablePointer(to: &reste, { ioctl(fd, PortSerie.tiocoutq, $0) }) != -1, reste > 0 else { break }
+            usleep(5_000)
+        }
+        // Apres la file du tty, le pilote USB a encore ses tampons : un court delai de plus.
+        usleep(20_000)
+    }
 }

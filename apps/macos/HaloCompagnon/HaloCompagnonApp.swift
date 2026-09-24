@@ -32,7 +32,7 @@ struct HaloCompagnonApp: App {
                 Divider()
                 Button("Libérer le port") { pont.libererPort() }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
-                    .disabled(pont.phase == .ferme)
+                    .disabled(pont.phase == .ferme || pont.estDemo)
             }
         }
     }

@@ -61,7 +61,7 @@ struct ContenuPrincipal: View {
                             couleur: .purple, icone: "play.rectangle.fill")
                 }
                 if let banc = pont.commandeDeBanc {
-                    Bandeau(texte: "Commande de banc en cours : « \(banc.commande) ». La carte ne lit plus la CLI "
+                    Bandeau(texte: "Commande de banc en cours : « \(PolitiqueCommandes.masquerCle(banc.commande)) ». La carte ne lit plus la CLI "
                             + "et n'émet plus d'état jusqu'à la fin.", couleur: .orange, icone: "hourglass")
                 }
                 Group {

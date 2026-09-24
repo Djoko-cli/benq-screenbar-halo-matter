@@ -23,8 +23,10 @@ struct TableauDeBord: View {
                     CarteModule()
                     CarteLiaison()
                     CarteVoyant()
-                    CarteThread()
-                    CarteAbonnements()
+                    if avecMatter {
+                        CarteThread()
+                        CarteAbonnements()
+                    }
                     CarteSanteLien()
                     CarteVersions()
                     CarteSysteme()
@@ -33,6 +35,14 @@ struct TableauDeBord: View {
             }
             .defaultScrollAnchor(.top)
         }
+    }
+
+    /// Cartes Thread et Matter : seulement si le build compile le pont Matter
+    /// (`caps`, 5.1) ; avant l'identite, d'apres les blocs deja recus.
+    private var avecMatter: Bool {
+        let caps = pont.etat.capacites
+        if !caps.isEmpty { return caps.contains("matter") }
+        return pont.etat.thread != nil || pont.etat.abonnements != nil || pont.etat.sante?.valeur.matter != nil
     }
 }
 
@@ -72,7 +82,9 @@ private struct CarteLampe: View {
                 if p == .reprise, let r = l?.repriseMs { s += " (dans \(Format.ms(r)))" }
                 return s
             }, couleur: l?.phase == .reprise ? .orange : nil)
-            LigneInfo("Tours ratés", l?.echecs.map { "\($0) / 2" })
+            LigneInfo("Tours ratés", l?.echecs.map { e in
+                "\(e) / \(pont.etat.config?.valeur.reglages?.reprises.map(String.init) ?? "?")"
+            })
             LigneInfo("Mémoire de sélection", l?.memoire?.libelle)
             LigneInfo("Bouton A", l.map { "dernier n° \($0.dernierA ?? 0), \($0.aEntendus ?? 0) entendus" })
             LigneInfo("Écoute de fond", Format.oui(l?.ecoute))
@@ -217,12 +229,17 @@ private struct CarteVoyant: View {
                     if pont.etat.ledTest { Pastille(texte: "led test en cours", couleur: .purple) }
                 }
             }
-            HStack {
-                Button("Tester le voyant") { pont.envoyer("led test") }
-                Button("Arrêter") { pont.envoyer("led stop") }
+            if pont.etat.capacites.contains("led") {
+                HStack {
+                    Button("Tester le voyant") { pont.envoyer("led test") }
+                    Button("Arrêter") { pont.envoyer("led stop") }
+                }
+                .controlSize(.small)
+                .disabled(!pont.peutCommander)
+            } else if !pont.etat.capacites.isEmpty {
+                Text("Pas de voyant d'état dans ce build (capacité led absente).")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .controlSize(.small)
-            .disabled(!pont.peutCommander)
         }
     }
 }
@@ -410,7 +427,8 @@ private struct CarteSysteme: View {
     var body: some View {
         let h = pont.etat.helloBase?.valeur
         let sys = pont.etat.sante?.valeur.sys
-        let session = h?.session
+        // Reglages du hello, suivis des json periode|compteurs|reseau acceptes.
+        let session = pont.reglages
         Carte(titre: "Démarrage et système", icone: "cpu") {
             LigneInfo("En marche depuis", Format.duree(secondes: pont.etat.upS))
             LigneInfo("Démarrage (boot)", pont.etat.boot, mono: true)

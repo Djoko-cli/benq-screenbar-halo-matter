@@ -35,6 +35,13 @@ private struct PanneauCommandes: View {
                     Bandeau(texte: "Pas de session machine : les commandes sont désactivées.", couleur: .secondary,
                             icone: "bolt.horizontal.circle")
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else if !pont.etat.capacites.isEmpty, !pont.etat.capacites.contains("lampe_async") {
+                    // L'app se regle sur caps (5.1) : sans lampe_async, une commande lampe avec id
+                    // reste historique (reponse debut, texte, fin) et bloque la boucle de la carte.
+                    Bandeau(texte: "Ce firmware n'a pas les commandes lampe asynchrones (capacité lampe_async) : "
+                            + "chaque commande lampe bloque la carte jusqu'à 6 s, sans livraison.",
+                            couleur: .orange, icone: "hourglass")
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 Carte(titre: "Marche et lampes", icone: "power") {
                     HStack {
@@ -160,13 +167,19 @@ private struct PanneauCommandes: View {
         .onChange(of: pont.etat.lampe?.valeur.consigne) { _, c in recopier(c) }
     }
 
-    /// Les curseurs suivent la consigne de la carte, sauf pendant le glissement.
+    /// Les curseurs suivent la consigne de la carte, sauf pendant le glissement
+    /// et tant que leur valeur finale n'est pas partie (sinon un `etat` qui porte
+    /// encore une valeur intermediaire ferait sauter le curseur en arriere).
     private func recopier(_ c: EtatLampe?) {
         guard let c else { return }
-        if !glisseNiveau, let n = c.niveau { niveau = Double(n) }
-        if !glisseMired, let m = c.mired { mired = Double(m) }
+        if !glisseNiveau, !enAttente("niveau"), let n = c.niveau { niveau = Double(n) }
+        if !glisseMired, !enAttente("mired"), let m = c.mired { mired = Double(m) }
         if let l = c.lum { lumHexa = Format.hexa(l) }
         if let t = c.temp { tempBrute = t }
+    }
+
+    private func enAttente(_ cle: String) -> Bool {
+        pont.suivis.contains { $0.fusion == cle && ($0.etat == .enFile || $0.etat == .envoyee) }
     }
 }
 
@@ -220,7 +233,7 @@ private struct LigneSuivi: View {
         HStack(alignment: .firstTextBaseline) {
             Text(suivi.numero.map { "id=\($0)" } ?? "–").font(.caption.monospaced()).foregroundStyle(.secondary)
                 .frame(width: 52, alignment: .leading)
-            Text(suivi.commande).font(.callout.monospaced()).lineLimit(1)
+            Text(PolitiqueCommandes.masquerCle(suivi.commande)).font(.callout.monospaced()).lineLimit(1)
             Spacer()
             Pastille(texte: libelle, couleur: couleur)
         }
@@ -239,13 +252,13 @@ private struct LigneSuivi: View {
         case .terminee: suivi.fin?.ok == false ? .red : .green
         case .abandonnee, .sansReponse, .perdue: .red
         case .attenteLivraison, .envoyee, .enCours: .orange
-        case .annulee, .remplacee: .secondary
+        case .annulee, .remplacee, .finPerdue: .secondary
         case .enFile: .blue
         }
     }
 
     private var aide: String {
-        var s = suivi.commande
+        var s = PolitiqueCommandes.masquerCle(suivi.commande)
         if let f = suivi.fin { s += "\n" + Interpretation.reponse(f) }
         if let l = suivi.livraison { s += "\n" + Interpretation.livraison(l) }
         return s
@@ -314,7 +327,7 @@ private struct ConsoleBrute: View {
     private var saisieVue: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(pont.phase.modeMachine ? "id=…" : "brut").font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(pont.consoleAvecId ? "id=…" : "brut").font(.caption.monospaced()).foregroundStyle(.secondary)
                 TextField("commande de la CLI (ex. lampe stats, help)", text: $saisie)
                     .textFieldStyle(.roundedBorder)
                     .font(.body.monospaced())
@@ -329,7 +342,7 @@ private struct ConsoleBrute: View {
             HStack {
                 if let erreur {
                     Text(erreur).foregroundStyle(.red)
-                } else if !pont.phase.modeMachine, pont.phase != .ferme {
+                } else if !pont.consoleAvecId, pont.phase != .ferme {
                     Text("Console seule (\(pont.phase.libelle)) : lignes envoyées sans id, sans corrélation.")
                         .foregroundStyle(.orange)
                 } else {
@@ -338,7 +351,7 @@ private struct ConsoleBrute: View {
                 }
                 Spacer()
                 // Prefixe "id=<n> " : 13 octets au plus (n <= 999999999).
-                let octets = saisie.utf8.count + (pont.phase.modeMachine ? 13 : 0)
+                let octets = saisie.utf8.count + (pont.consoleAvecId ? 13 : 0)
                 Text("\(octets) / \(LigneCommande.octetsMax) octets")
                     .foregroundStyle(octets > LigneCommande.octetsMax ? .red : .secondary)
                     .monospacedDigit()
@@ -368,7 +381,9 @@ private struct ConsoleBrute: View {
         switch r {
         case .envoyee:
             erreur = nil
-            if historique.last != ligne { historique.append(ligne) }
+            // Jamais de cle (json cle nouvelle <64 hexa>) dans l'historique de saisie (10.4).
+            let cle = LigneCommande.mots(ligne).prefix(2) == ["json", "cle"]
+            if !cle, historique.last != ligne { historique.append(ligne) }
             positionHistorique = nil
             saisie = ""
         case .confirmation(let raison):

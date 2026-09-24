@@ -3,6 +3,18 @@ import HaloProtocole
 import Testing
 @testable import HaloCompagnon
 
+/// Attend qu'une condition devienne vraie, au plus `delai` : pas de sommeil de
+/// duree fixe, qui casserait sur une machine chargee.
+@MainActor
+func attendre(_ delai: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {
+    let fin = ContinuousClock.now + delai
+    while ContinuousClock.now < fin {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return condition()
+}
+
 /// Bout en bout sans materiel : la carte simulee du mode demo, le tramage,
 /// le moteur de session et la correlation, comme dans l'app.
 @Suite("Mode demo, bout en bout", .serialized)
@@ -28,8 +40,10 @@ struct DemoBoutEnBoutTests {
             }
         }
 
-        /// Lit le flux jusqu'a sa fin ou jusqu'a `delai` ; `pendant` est appele apres chaque paquet d'octets.
-        func lire(delai: Duration, pendant: (Banc) throws -> Void = { _ in }) async throws {
+        /// Lit le flux jusqu'a sa fin, jusqu'a ce que `jusqua` soit vrai, ou au plus `delai`
+        /// (garde-fou) ; `pendant` est appele apres chaque paquet d'octets.
+        func lire(delai: Duration, jusqua: ((Banc) -> Bool)? = nil,
+                  pendant: (Banc) throws -> Void = { _ in }) async throws {
             let flux = try await transport.ouvrir()
             recepteur.resynchroniser()
             try executer(moteur.ouvert(maintenant: maintenant()))
@@ -48,6 +62,7 @@ struct DemoBoutEnBoutTests {
                 }
                 try executer(moteur.tic(maintenant: maintenant()))
                 try pendant(self)
+                if let jusqua, jusqua(self) { t.fermer() }
             }
         }
 
@@ -57,7 +72,9 @@ struct DemoBoutEnBoutTests {
     @Test func connexionPuisCommandeLivree() async throws {
         let banc = try Banc(vitesse: 1)
         var envoyee: UUID?
-        try await banc.lire(delai: .seconds(4)) { b in
+        try await banc.lire(delai: .seconds(20), jusqua: { b in
+            envoyee.flatMap { b.moteur.correlateur.suivi($0) }?.etat.estFinal == true
+        }) { b in
             if b.moteur.phase == .connecte, envoyee == nil {
                 let (id, effets) = b.moteur.soumettre("lampe niveau 200", origine: .interface, maintenant: b.maintenant())
                 envoyee = id
@@ -85,7 +102,9 @@ struct DemoBoutEnBoutTests {
     @Test func refusEtUsage() async throws {
         let banc = try Banc(vitesse: 1)
         var ids: [UUID] = []
-        try await banc.lire(delai: .seconds(3)) { b in
+        try await banc.lire(delai: .seconds(20), jusqua: { b in
+            !ids.isEmpty && ids.allSatisfy { b.moteur.correlateur.suivi($0)?.etat.estFinal == true }
+        }) { b in
             if b.moteur.phase == .connecte, ids.isEmpty {
                 for c in ["lampe lum 20", "lampe stats", "commande_inexistante"] {
                     let (id, effets) = b.moteur.soumettre(c, origine: .console, maintenant: b.maintenant())
@@ -106,12 +125,45 @@ struct DemoBoutEnBoutTests {
         #expect(banc.moteur.correlateur.suivi(ids[2])?.fin?.code == .commandeInconnue)
     }
 
+    @Test func razDesStatistiques() async throws {
+        // lampe stats raz (5.4) : blocs pilote et radio remis a zero, raz + 1, tx.total garde.
+        let banc = try Banc(vitesse: 1)
+        var envoye = false
+        func apres(_ b: Banc) -> (CompteursPilote, CompteursRadio)? {
+            var p: CompteursPilote?
+            var r: CompteursRadio?
+            for l in b.lignes {
+                if case .compteursPilote(let c) = l.message, c.raz == 1 { p = c }
+                if case .compteursRadio(let c) = l.message, c.raz == 1 { r = c }
+            }
+            guard let p, let r else { return nil }
+            return (p, r)
+        }
+        try await banc.lire(delai: .seconds(20), jusqua: { apres($0) != nil }) { b in
+            if b.moteur.phase == .connecte, !envoye {
+                envoye = true
+                let (_, e) = b.moteur.soumettre("lampe stats raz", origine: .console, maintenant: b.maintenant())
+                try b.executer(e)
+            }
+        }
+        let (p, r) = try #require(apres(banc))
+        #expect(p.tx?.paquets == 0)
+        #expect(p.rx?.trames == 0)
+        #expect(p.tx?.total == 21, "tx.total n'est jamais remis a zero")
+        #expect(r.radio?.configs == 0)
+        #expect(r.relances?.total == 0)
+        #expect(LigneJSON.soustraire(#"{"v":1,"n":5,"raz":1,"tx":{"paquets":30,"total":30}}"#,
+                                     base: LigneJSON.entiers(#"{"v":1,"n":2,"raz":0,"tx":{"paquets":21,"total":21}}"#),
+                                     sauf: ["v", "n", "ms", "raz", "total"])
+                == #"{"v":1,"n":5,"raz":1,"tx":{"paquets":9,"total":30}}"#)
+    }
+
     @Test func toutLaChronologieAccelereeJusquAuRedemarrage() async throws {
         // x25 : les 195 s de la demo en ~8 s, puis la carte "redemarre" (flux ferme).
         let banc = try Banc(vitesse: 25)
         let debut = ContinuousClock.now
-        try await banc.lire(delai: .seconds(30))
-        #expect(ContinuousClock.now - debut < .seconds(29), "la demo doit se fermer seule (re-enumeration simulee)")
+        try await banc.lire(delai: .seconds(60))
+        #expect(ContinuousClock.now - debut < .seconds(59), "la demo doit se fermer seule (re-enumeration simulee)")
         let types = banc.types()
         for t in ["rx", "tx", "livraison", "relance", "module", "intent", "abonnement", "thread", "led"] {
             #expect(types.contains(t), "\(t) jamais recu")
@@ -146,7 +198,10 @@ struct PontDemoTests {
     @Test func connexionEtatEtCommande() async throws {
         let pont = Pont()
         pont.connecter(.demo)
-        try await Task.sleep(for: .seconds(3))
+        let pret = await attendre {
+            pont.phase == .connecte && pont.etat.lampe != nil && pont.etat.identite != nil && !pont.pilote.elements.isEmpty
+        }
+        try #require(pret, "session demo etablie")
         #expect(pont.phase == .connecte)
         #expect(pont.etatTransport == .ouvert)
         #expect(pont.etat.lampe?.valeur.consigne.niveau == 180)
@@ -155,7 +210,7 @@ struct PontDemoTests {
         #expect(!pont.pilote.elements.isEmpty)
 
         pont.envoyer("lampe niveau 200")
-        try await Task.sleep(for: .seconds(1.5))
+        _ = await attendre { pont.suivis.last { $0.commande == "lampe niveau 200" }?.etat.estFinal == true }
         let suivi = try #require(pont.suivis.last { $0.commande == "lampe niveau 200" })
         #expect(suivi.etat == .livree)
         #expect(pont.console.elements.contains { $0.texte.contains("lampe niveau 200") })
@@ -175,7 +230,11 @@ struct PontDemoTests {
         let pont = Pont()
         pont.vitesseDemo = 25
         pont.connecter(.demo)
-        try await Task.sleep(for: .seconds(14))
+        let reconnectee = await attendre(.seconds(60)) {
+            pont.statistiques.redemarrages >= 1 && pont.statistiques.connexions >= 2 && pont.phase == .connecte
+                && pont.etat.helloBase != nil && Courbes.segmenter(pont.pilote.elements).count >= 2
+        }
+        try #require(reconnectee, "redemarrage simule puis reconnexion")
         #expect(pont.statistiques.redemarrages >= 1)
         #expect(pont.statistiques.connexions >= 2)
         #expect(pont.phase == .connecte)
@@ -184,5 +243,59 @@ struct PontDemoTests {
         #expect(pont.marqueurs.elements.contains { $0.genre == .redemarrage })
         #expect(Courbes.segmenter(pont.pilote.elements).count >= 2, "nouveau segment de courbes")
         pont.deconnecter()
+    }
+
+    @Test func changerDeSourceRemetTout() async throws {
+        let pont = Pont()
+        pont.connecter(.demo)
+        try #require(await attendre { pont.phase == .connecte && !pont.pilote.elements.isEmpty && !pont.trames.elements.isEmpty })
+        #expect(pont.reglages?.trames == true)
+        // Autre source (chemin inexistant : l'ouverture echoue, aucun port reel n'est touche).
+        pont.connecter(.serie(chemin: "/dev/cu.halo-test-inexistant", serie: nil))
+        #expect(pont.etat.lampe == nil && pont.etat.helloBase == nil, "rien de la demo ne reste affiche")
+        #expect(pont.pilote.elements.isEmpty && pont.trames.elements.isEmpty && pont.marqueurs.elements.isEmpty)
+        #expect(pont.statistiques == StatistiquesLien())
+        #expect(pont.reglages == nil)
+        #expect(pont.console.elements.contains { $0.texte.hasPrefix("Nouvelle source") })
+        _ = await attendre(.seconds(2)) { if case .attente = pont.etatTransport { true } else { false } }
+        if case .attente = pont.etatTransport {} else { Issue.record("reouverture programmee attendue : \(pont.etatTransport)") }
+        #expect(pont.statistiques.redemarrages == 0, "pas de faux redemarrage")
+        pont.deconnecter()
+    }
+}
+
+@Suite("Calendrier du voyant")
+struct HoraireVoyantTests {
+    let depuis = Date(timeIntervalSinceReferenceDate: 0)
+
+    func instants(_ m: MotifLed?, _ n: Int) -> [Double] {
+        HoraireVoyant(motif: m, depuis: depuis).entries(from: depuis, mode: .normal).prefix(n)
+            .map { $0.timeIntervalSince(depuis) }
+    }
+
+    @Test func motifFixeUneSeuleImage() {
+        #expect(instants(.panneRadio, 10) == [0])
+        #expect(instants(nil, 10) == [0])
+        #expect(instants(.inconnu, 10) == [0])
+    }
+
+    @Test func eclatPuisPlusRien() {
+        let t = instants(.livree, 10)
+        #expect(t.count <= 3 && (t.last ?? 1) < 0.2, "eclat vert de 150 ms, puis le calendrier s'arrete : \(t)")
+    }
+
+    @Test func clignementsAuxBasculesSeulement() {
+        #expect(instants(.nonAppaire, 4) == [0, 0.25, 0.5, 0.75])
+        #expect(instants(.horsReseau, 3) == [0, 1, 2])
+        #expect(instants(.injoignable, 20).count == 7, "3 clignements de 200 ms / 200 ms, puis noir")
+    }
+
+    @Test func lueurPuisAttenteDeDixSecondes() {
+        let t = instants(.operationnel, 40)
+        #expect(zip(t, t.dropFirst()).allSatisfy { $0 < $1 }, "strictement croissant")
+        let pendantLaLueur = t.filter { $0 < 0.7 }.count
+        #expect(pendantLaLueur >= 15 && pendantLaLueur <= 22, "~30 images/s pendant 600 ms")
+        #expect(t.contains(10), "rien entre la fin de la lueur et 10 s")
+        #expect(!t.contains { $0 > 0.7 && $0 < 10 })
     }
 }
