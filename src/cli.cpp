@@ -1108,7 +1108,7 @@ static void runLine(char *line, bool tooLong) {
     r.ok = known;
     r.code = known ? "execute" : "inconnue";
     r.durMs = millis() - t0;
-    jsonReply(r);
+    jsonReplyEnd(r);  // 'help' laisse le tampon d'emission plein : jamais perdue
   }
   jsonAfterCommand();
 }

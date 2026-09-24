@@ -516,7 +516,12 @@ bool Queue::push(Item item, uint32_t now, bool session, uint8_t arg) {
     for (uint8_t i = 0; i < n_; i++) {
       Queued &q = q_[(head_ + i) % kN];
       if (q.item != item) continue;
-      if (!session) q.session = false;  // demande explicite : survit a la fin du mode machine
+      // Demande explicite : survit a la fin du mode machine, et son retard
+      // part d'elle (la ligne est formatee a l'envoi : rien n'est perime).
+      if (!session) {
+        q.session = false;
+        q.at = now;
+      }
       return true;
     }
   }
@@ -532,6 +537,23 @@ void Queue::pop() {
   n_--;
 }
 
+uint8_t Queue::dropLate(uint32_t now) {
+  uint8_t dropped = 0;
+  while (n_) {
+    const Queued &q = q_[head_];
+    if (q.item == Item::Reply || now - q.at <= kLateMs) break;
+    pop();
+    dropped++;
+  }
+  return dropped;
+}
+
+bool Queue::frontReady(int room) const {
+  if (!n_) return false;
+  const size_t need = q_[head_].item == Item::Reply ? kLineMax : 2 * kLineMax;
+  return room >= 0 && (size_t)room >= need;
+}
+
 uint8_t Queue::dropSession() {
   Queued keep[kN];
   uint8_t k = 0, dropped = 0;
@@ -544,6 +566,68 @@ uint8_t Queue::dropSession() {
   head_ = 0;
   n_ = k;
   return dropped;
+}
+
+// ===========================================================================
+//  Bail
+// ===========================================================================
+
+bool leaseExpired(uint32_t now, uint32_t lastRx, uint32_t lastCmd, uint16_t leaseS) {
+  if (!leaseS) return false;
+  const uint32_t last = (int32_t)(lastRx - lastCmd) > 0 ? lastRx : lastCmd;
+  return now - last >= (uint32_t)leaseS * 1000u;
+}
+
+// ===========================================================================
+//  Observateur de livraison
+// ===========================================================================
+
+void DeliveryWatch::reset(uint32_t delivered, uint32_t giveUps) {
+  *this = DeliveryWatch();
+  seenDelivered_ = delivered;
+  seenGiveUps_ = giveUps;
+}
+
+void DeliveryWatch::pendingId(uint32_t id, uint32_t pendingSince) {
+  if (nIds_ == kIdsMax) {
+    memmove(ids_, ids_ + 1, sizeof(ids_[0]) * (kIdsMax - 1));
+    nIds_--;
+    idsLost_++;
+  }
+  ids_[nIds_++] = id;
+  wasBusy_ = sawTarget_ = true;
+  if (pendingSince) since_ = pendingSince;
+}
+
+bool DeliveryWatch::poll(const LampSample &s, uint32_t now, bool machine, Delivery *d) {
+  bool emit = false;
+  const bool gaveUp = s.giveUps != seenGiveUps_, delivered = s.delivered != seenDelivered_;
+  if (gaveUp || delivered || (!s.busy && wasBusy_)) {
+    if ((gaveUp || delivered || sawTarget_) && (machine || nIds_)) {
+      d->issue = gaveUp ? Issue::GaveUp : delivered ? Issue::Delivered : Issue::Cancelled;
+      d->ids = ids_;
+      d->nIds = nIds_;
+      d->idsLost = idsLost_;
+      d->hasWait = wasBusy_ && since_;  // periode pas vue : commande bloquante
+      d->waitMs = d->hasWait ? now - since_ : 0;
+      d->delivered = s.delivered;
+      d->giveUps = s.giveUps;
+      nIds_ = 0;  // ids_ reste lisible jusqu'au prochain pendingId
+      idsLost_ = 0;
+      emit = true;
+    }
+    seenDelivered_ = s.delivered;
+    seenGiveUps_ = s.giveUps;
+    wasBusy_ = sawTarget_ = false;
+    since_ = 0;
+  }
+  if (s.busy) {
+    wasBusy_ = true;
+    if (s.targetBusy) sawTarget_ = true;
+    // endBurst() et giveUp() le remettent a 0 avant le front : releve ici.
+    if (s.pendingSince) since_ = s.pendingSince;
+  }
+  return emit;
 }
 
 }  // namespace jsonp

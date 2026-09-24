@@ -383,11 +383,16 @@ humaine est inchangee.
   autres commandes gardent leur texte, entre `reponse debut` et `reponse fin`.
 - La carte n'attend jamais l'app : une ligne qui ne tient pas dans le tampon
   d'emission est perdue et comptee (`etat.sante.sys.json_perdus`), et `n`
-  saute. Au plus 20 lignes par seconde de l'hote (`cadence`).
+  saute. Seule exception, sans bloquer la boucle : une `reponse` differee
+  (apres l'instantane de `json 1`, `json etat`, `json hello`, ou la `fin`
+  d'une commande dont le texte a rempli le tampon, comme `help`) attend en
+  file la place d'une ligne entiere. Au plus 20 lignes par seconde de l'hote
+  (`cadence`).
 - Rien n'est persiste : chaque demarrage repart en mode humain. `json cle`
   (transport reseau, section 10) n'existe pas encore.
 - Au banc, `python3 tools/json_check.py <capture>` verifie une capture brute
-  du port (tramage, types, champs obligatoires, tailles, trous de `n`).
+  du port (tramage, types, champs obligatoires, tailles, trous de `n`) ; un
+  champ inconnu de la v1 n'est qu'un avertissement (`--strict` : une erreur).
 
 ## Protocole du Halo 1
 

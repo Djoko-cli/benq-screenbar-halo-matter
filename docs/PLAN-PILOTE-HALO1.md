@@ -1205,6 +1205,15 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
   sans avertissement ; tests hote (messages compares aux exemples de la
   section 12, pires cas sous le budget de 896 octets) ; `tools/json_check.py`
   valide les 43 exemples de la specification et les messages des tests.
+- Suites de revue (24/09) : la `reponse fin` d'une commande historique qui
+  remplit le tampon d'emission (`help`, ~7 Ko) et les reponses differees des
+  instantanes passent par la file sans jamais etre perdues pour retard ;
+  un id accepte recoit toujours sa `livraison` (`annulee` si la periode
+  occupee finit avant le tour suivant) ; `heap_bloc` relu au plus toutes les
+  10 s (parcours du tas en section critique) ; `boucle_max_ms` sans les tours
+  d'avant la session. Observateur de livraison, retards de la file et bail
+  purs et testes sur l'hote (`DeliveryWatch`, `Queue::dropLate`,
+  `leaseExpired`).
 - Restent au banc : U1 a U10 (PROTOCOLE-JSON.md, section 11), captures
   verifiees par `python3 tools/json_check.py <capture>`.
 

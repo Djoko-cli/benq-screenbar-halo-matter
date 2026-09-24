@@ -757,7 +757,7 @@ static void testQueue() {
   CHECK(q.push(Item::EtatSante, 4, false) && q.size() == 4, "doublon explicite");
   CHECK(q.dropSession() == 1 && q.size() == 3, "fin de session : %u restent", q.size());
   const Queued *f = q.front();
-  CHECK(f && f->item == Item::EtatSante && !f->session && f->at == 1, "sante promue, gardee a sa place");
+  CHECK(f && f->item == Item::EtatSante && !f->session && f->at == 4, "sante promue, gardee a sa place, retard depuis la demande");
   q.pop();
   f = q.front();
   CHECK(f && f->item == Item::Reply && f->arg == 1, "ordre garde");
@@ -780,6 +780,211 @@ static void testQueue() {
   CHECK(order, "ordre FIFO a travers le tour de l'anneau");
 }
 
+// Retard (500 ms) et place libre : les deux gardes de drain() (json_mode.cpp).
+static void testQueueDrain() {
+  Queue q;
+  CHECK(!q.frontReady(4096) && q.dropLate(1000) == 0, "file vide");
+  q.push(Item::EtatLampe, 0, true);
+  q.push(Item::EtatSante, 100, true);
+  q.push(Item::Reply, 200, false, 0);
+  q.push(Item::CptPilote, 250, true);
+  CHECK(q.dropLate(500) == 0 && q.size() == 4, "500 ms tout juste : rien de perdu");
+  CHECK(q.dropLate(700) == 2 && q.front()->item == Item::Reply, "deux periodiques perdues, la reponse arrete le balayage");
+  CHECK(q.dropLate(1000000) == 0 && q.size() == 2, "une reponse n'est jamais perdue pour retard");
+  CHECK(!q.frontReady(kLineMax - 1) && q.frontReady(kLineMax), "reponse : des qu'une ligne entiere tient");
+  CHECK(!q.frontReady(-1), "place inconnue (verrou pris) : on attend");
+  q.pop();
+  CHECK(q.front()->item == Item::CptPilote && q.dropLate(1000000) == 1 && !q.size(),
+        "derriere la reponse, la periodique en retard est perdue a son tour");
+  q.push(Item::CptRadio, 2000, true);
+  CHECK(!q.frontReady(2 * kLineMax - 1) && q.frontReady(2 * kLineMax), "periodique : une ligne, puis la place d'un evenement");
+  q.clear();
+  // Fusion : une demande explicite repart de maintenant, pas une periodique.
+  q.push(Item::EtatSante, 0, true);
+  q.push(Item::EtatSante, 450, false);
+  CHECK(q.size() == 1 && !q.front()->session && q.front()->at == 450, "json etat fondu dans une periodique");
+  CHECK(q.dropLate(950) == 0 && q.dropLate(951) == 1, "retard compte depuis la demande explicite");
+  q.push(Item::EtatLampe, 0, true);
+  q.push(Item::EtatLampe, 400, true);
+  CHECK(q.front()->at == 0 && q.dropLate(501) == 1, "periodique fondue : garde son retard");
+  q.clear();
+  q.push(Item::HelloBase, 0, false);
+  q.push(Item::HelloBase, 300, true);
+  CHECK(!q.front()->session && q.front()->at == 0, "periodique fondue dans une demande explicite : ni session, ni retard remis");
+}
+
+static void testLease() {
+  CHECK(!leaseExpired(1000000, 0, 0, 0), "sans bail : jamais");
+  CHECK(!leaseExpired(30999, 1000, 500, 30) && leaseExpired(31000, 1000, 500, 30), "30 s apres le dernier octet");
+  // Commande de banc de 60 s : le bail part de sa fin.
+  CHECK(!leaseExpired(90000, 1000, 70000, 30) && leaseExpired(100000, 1000, 70000, 30), "30 s apres la fin de la commande");
+  const uint32_t rx = 0xFFFFF000u;
+  CHECK(!leaseExpired(rx + 29999u, rx, rx - 0x1000u, 30) && leaseExpired(rx + 30000u, rx, rx - 0x1000u, 30),
+        "a travers le retour a zero de millis()");
+  CHECK(!leaseExpired(9999, 0, 0, 10) && leaseExpired(600000, 0, 0, 600), "bornes 10 et 600 s");
+}
+
+// Observateur de livraison : scenarios de 7.3, 12.2, 12.4 et U10.
+struct WatchRun {
+  DeliveryWatch w;
+  LampSample s;
+  Delivery d;
+  bool poll(uint32_t now, bool machine = true) {
+    d = Delivery();
+    return w.poll(s, now, machine, &d);
+  }
+};
+
+static void testDeliveryWatch() {
+  mapInit(2.0f);
+  const State st = mk(true, F_LAMPS, 186, 53);
+  // 12.2 : id=2 lampe niveau 200 accepte, trois paquets, livree 204 ms plus tard.
+  {
+    WatchRun r;
+    r.w.reset(4, 0);
+    r.s.delivered = 4;
+    CHECK(!r.poll(95000), "repos");
+    r.s.busy = r.s.targetBusy = true;
+    r.s.pendingSince = 95002;
+    r.w.pendingId(2, 95002);
+    CHECK(!r.poll(95003) && !r.poll(95104), "rafale en cours");
+    r.s = LampSample();
+    r.s.delivered = 5;  // complete() : delivered_++, pendingSince_ remis a 0
+    CHECK(r.poll(95206), "front de busy : livraison");
+    CHECK(r.d.issue == Issue::Delivered && r.d.nIds == 1 && r.d.ids[0] == 2 && r.d.hasWait && r.d.waitMs == 204 &&
+              r.d.delivered == 5 && r.d.giveUps == 0 && r.d.idsLost == 0,
+          "12.2 : issue %d, %u id, attente %u", (int)r.d.issue, r.d.nIds, r.d.waitMs);
+    r.d.last = EV_SLOT_BRIGHT;
+    r.d.version = 13;
+    r.d.target = r.d.believed = st;
+    delivery(gW, 76, 95206, r.d);
+    expectLine(gW,
+               "{\"v\":1,\"t\":\"livraison\",\"n\":76,\"ms\":95206,\"issue\":\"livree\",\"derniere\":\"lum\",\"version\":13,"
+               "\"consigne\":{\"marche\":true,\"lampes\":\"deux\",\"lum\":186,\"niveau\":200,\"temp\":53,\"mired\":268},"
+               "\"cru\":{\"marche\":true,\"lampes\":\"deux\",\"lum\":186,\"niveau\":200,\"temp\":53,\"mired\":268},"
+               "\"a_livrer\":[],\"ids\":[2],\"ids_perdus\":0,\"attente_ms\":204,\"livrees\":5,\"abandons\":0}",
+               "livraison de l'observateur (12.2)");
+    CHECK(!r.poll(95300) && r.w.pending() == 0, "une seule livraison, liste videe");
+  }
+  // 12.4 : lampe debranchee, trois tours, abandon ; reprise sans tranche active.
+  {
+    WatchRun r;
+    r.w.reset(5, 0);
+    r.s.busy = r.s.targetBusy = true;
+    r.s.delivered = 5;
+    r.s.pendingSince = 120450;
+    r.w.pendingId(7, 120450);
+    CHECK(!r.poll(120451), "premier tour");
+    r.s.targetBusy = false;  // attente de reprise : busy() seul
+    r.s.pendingSince = 0;    // endBurst()
+    CHECK(!r.poll(121000) && !r.poll(123500), "reprises");
+    r.s = LampSample();
+    r.s.delivered = 5;
+    r.s.giveUps = 1;
+    CHECK(r.poll(124970), "abandon");
+    CHECK(r.d.issue == Issue::GaveUp && r.d.nIds == 1 && r.d.ids[0] == 7 && r.d.hasWait && r.d.waitMs == 4520 &&
+              r.d.giveUps == 1,
+          "12.4 : issue %d, attente %u", (int)r.d.issue, r.d.waitMs);
+  }
+  // U10 : trame de la telecommande pendant la reprise, tranche retiree : annulee.
+  {
+    WatchRun r;
+    r.w.reset(0, 0);
+    r.s.busy = r.s.targetBusy = true;
+    r.s.pendingSince = 1000;
+    r.w.pendingId(3, 1000);
+    CHECK(!r.poll(1001), "rafale");
+    r.s.targetBusy = false;
+    CHECK(!r.poll(1500), "reprise");
+    r.s = LampSample();
+    CHECK(r.poll(2100) && r.d.issue == Issue::Cancelled && r.d.nIds == 1 && r.d.ids[0] == 3 && r.d.hasWait &&
+              r.d.waitMs == 1100,
+          "U10 : issue %d, %u id", (int)r.d.issue, r.d.nIds);
+  }
+  // Acceptee puis periode finie avant le tour suivant, sans compteur change
+  // ('lampe oublie' dans la meme lecture USB) : annulee, jamais reportee.
+  {
+    WatchRun r;
+    r.w.reset(9, 2);
+    r.s.delivered = 9;
+    r.s.giveUps = 2;
+    r.w.pendingId(3, 5000);
+    CHECK(r.poll(5002) && r.d.issue == Issue::Cancelled && r.d.nIds == 1 && r.d.ids[0] == 3 && r.d.hasWait &&
+              r.d.waitMs == 2,
+          "periode jamais vue : annulee avec l'id");
+    r.s.busy = r.s.targetBusy = true;
+    CHECK(!r.poll(6000), "consigne suivante (Matter)");
+    r.s.busy = r.s.targetBusy = false;
+    r.s.delivered = 10;
+    CHECK(r.poll(6300) && r.d.issue == Issue::Delivered && r.d.nIds == 0, "la suivante ne porte pas l'id 3");
+  }
+  // Commande bloquante (humaine, waitIdle) : pas de front vu, compteur change.
+  {
+    WatchRun r;
+    r.w.reset(1, 0);
+    r.s.delivered = 2;
+    CHECK(r.poll(100) && r.d.issue == Issue::Delivered && !r.d.hasWait && r.d.nIds == 0,
+          "bloquante : livree, attente_ms null");
+    CHECK(!r.poll(101), "compteurs repris : rien de plus");
+    // Deux consignes enchainees (lampe rampe) : abandon l'emporte.
+    r.s.delivered = 5;
+    r.s.giveUps = 1;
+    CHECK(r.poll(200) && r.d.issue == Issue::GaveUp, "abandon l'emporte sur livree");
+    // Mode humain sans id : l'etat avance, rien n'est emis.
+    r.s.delivered = 6;
+    CHECK(!r.poll(300, false) && !r.poll(301, true), "hors mode machine sans id : rien, puis rien de double");
+  }
+  // lampe brut : periode occupee par la seule tranche brute : rien.
+  {
+    WatchRun r;
+    r.w.reset(0, 0);
+    r.s.busy = true;
+    CHECK(!r.poll(10) && !r.poll(20), "brut en cours");
+    r.s.busy = false;
+    CHECK(!r.poll(30), "brut fini : aucune livraison");
+    // Une consigne pendant le brut : livraison a la fin.
+    r.s.busy = true;
+    CHECK(!r.poll(40), "brut");
+    r.s.targetBusy = true;
+    CHECK(!r.poll(50), "consigne");
+    r.s.busy = r.s.targetBusy = false;
+    CHECK(r.poll(60) && r.d.issue == Issue::Cancelled, "consigne vue puis retiree : annulee");
+  }
+  // Id en mode humain : livraison quand meme ; 10 id : les 8 derniers, 2 perdus.
+  {
+    WatchRun r;
+    r.w.reset(0, 0);
+    r.s.busy = r.s.targetBusy = true;
+    for (uint32_t i = 1; i <= 10; i++) r.w.pendingId(i, 700);
+    CHECK(r.w.pending() == kIdsMax, "8 id au plus");
+    CHECK(!r.poll(701, false), "occupe");
+    r.s.busy = r.s.targetBusy = false;
+    r.s.delivered = 1;
+    CHECK(r.poll(900, false) && r.d.nIds == kIdsMax && r.d.ids[0] == 3 && r.d.ids[7] == 10 && r.d.idsLost == 2,
+          "hors mode machine avec id : %u id, premier %u, %u perdus", r.d.nIds, r.d.nIds ? r.d.ids[0] : 0,
+          r.d.idsLost);
+    CHECK(!r.poll(901) && r.w.pending() == 0, "liste et pertes remises a zero");
+  }
+  // Livraison pendant que la suivante demarre (meme tour) : deux livraisons.
+  {
+    WatchRun r;
+    r.w.reset(0, 0);
+    r.s.busy = r.s.targetBusy = true;
+    r.s.pendingSince = 100;
+    r.w.pendingId(1, 100);
+    CHECK(!r.poll(101), "premiere consigne");
+    r.s.delivered = 1;
+    r.s.pendingSince = 400;  // nouvelle consigne posee dans le meme tour
+    CHECK(r.poll(400) && r.d.issue == Issue::Delivered && r.d.nIds == 1 && r.d.waitMs == 300, "premiere livree");
+    r.w.pendingId(2, 400);
+    r.s.busy = r.s.targetBusy = false;
+    r.s.delivered = 2;
+    r.s.pendingSince = 0;
+    CHECK(r.poll(650) && r.d.issue == Issue::Delivered && r.d.nIds == 1 && r.d.ids[0] == 2 && r.d.waitMs == 250,
+          "seconde livree, attente depuis sa propre demande : %u", r.d.waitMs);
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc > 1) gCapture = fopen(argv[1], "wb");
   mapInit(2.0f);
@@ -797,6 +1002,9 @@ int main(int argc, char **argv) {
   testAssembler();
   testRate();
   testQueue();
+  testQueueDrain();
+  testLease();
+  testDeliveryWatch();
   if (gCapture) fclose(gCapture);
   printf("%d verification(s) JSON, %d echec(s)\n", gChecks, gFails);
   return gFails ? 1 : 0;
