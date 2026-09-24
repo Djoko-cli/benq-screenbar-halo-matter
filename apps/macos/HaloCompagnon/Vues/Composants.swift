@@ -98,7 +98,9 @@ struct VoyantLed: View {
     var taille: CGFloat = 18
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { contexte in
+        // Redessine seulement quand le rendu change (clignements, lueur, arc-en-ciel),
+        // jamais pour un motif fixe : pas de 30 images/s permanentes dans la barre d'outils.
+        TimelineView(HoraireVoyant(motif: motif, depuis: depuis ?? .distantPast)) { contexte in
             let t = max(0, contexte.date.timeIntervalSince(depuis ?? .distantPast))
             let (couleur, intensite) = Self.rendu(motif, t: t)
             ZStack {
@@ -110,6 +112,30 @@ struct VoyantLed: View {
             .shadow(color: couleur.opacity(intensite * 0.9), radius: intensite * taille * 0.5)
         }
         .accessibilityLabel(motif?.libelle ?? "voyant inconnu")
+    }
+
+    /// Prochain instant (secondes depuis le debut du motif) ou le rendu change ;
+    /// nil : il ne changera plus (motif fixe, ou eclat termine).
+    nonisolated static func prochainChangement(_ motif: MotifLed?, t: Double) -> Double? {
+        let image = 1.0 / 30
+        let ms = t * 1000
+        switch motif {
+        case .identification:
+            return t + image
+        case .injoignable:
+            return ms < 1200 ? (floor(ms / 200) + 1) * 0.2 : nil
+        case .panneRadio, .inconnu, nil:
+            return nil
+        case .livree:
+            return ms < 150 ? 0.15 : nil
+        case .nonAppaire:
+            return (floor(ms / 250) + 1) * 0.25
+        case .horsReseau:
+            return floor(ms / 1000) + 1
+        case .operationnel:
+            let cycle = floor(ms / 10_000) * 10
+            return ms.truncatingRemainder(dividingBy: 10_000) < 600 ? t + image : cycle + 10
+        }
     }
 
     /// Couleur et intensite (0..1), `t` secondes apres le debut du motif.
@@ -139,6 +165,20 @@ struct VoyantLed: View {
             return (.white, 0.8 * (1 - abs(phase - 300) / 300))
         case .inconnu, nil:
             return (.gray, 0.2)
+        }
+    }
+}
+
+/// Calendrier du voyant : une date a chaque changement du rendu.
+struct HoraireVoyant: TimelineSchedule {
+    let motif: MotifLed?
+    let depuis: Date
+
+    func entries(from debut: Date, mode: TimelineScheduleMode) -> UnfoldFirstSequence<Date> {
+        sequence(first: debut) { d in
+            let t = max(0, d.timeIntervalSince(depuis))
+            guard let p = VoyantLed.prochainChangement(motif, t: t) else { return nil }
+            return depuis.addingTimeInterval(max(p, t + 1.0 / 60))
         }
     }
 }

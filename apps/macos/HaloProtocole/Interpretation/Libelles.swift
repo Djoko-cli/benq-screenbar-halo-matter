@@ -220,6 +220,7 @@ extension EtatCommande {
         case .abandonnee: "abandonnée"
         case .annulee: "annulée"
         case .sansReponse: "sans réponse"
+        case .finPerdue: "terminée (fin perdue)"
         case .remplacee: "remplacée"
         case .perdue: "connexion perdue"
         }

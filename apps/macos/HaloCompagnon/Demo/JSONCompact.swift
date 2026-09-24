@@ -83,6 +83,27 @@ enum LigneJSON {
         return ligne.replacingCharacters(in: debut..<fin, with: nouvelle)
     }
 
+    /// Champs entiers `"cle":<n>` de la ligne, dans l'ordre.
+    static func entiers(_ ligne: String) -> [(cle: String, valeur: Int)] {
+        ligne.matches(of: /"([a-z_0-9]+)":(-?[0-9]+)/).compactMap { m in
+            Int(m.output.2).map { (String(m.output.1), $0) }
+        }
+    }
+
+    /// Retranche `base` (relevee par `entiers` sur une ligne de meme forme) champ
+    /// par champ, dans l'ordre, sans descendre sous 0 ; `sauf` : champs gardes.
+    static func soustraire(_ ligne: String, base: [(cle: String, valeur: Int)], sauf: Set<String>) -> String {
+        var i = 0
+        return ligne.replacing(/"([a-z_0-9]+)":(-?[0-9]+)/) { m -> String in
+            defer { i += 1 }
+            let cle = String(m.output.1)
+            guard i < base.count, base[i].cle == cle, !sauf.contains(cle), let v = Int(m.output.2) else {
+                return String(m.output.0)
+            }
+            return "\"\(cle)\":\(max(0, v - base[i].valeur))"
+        }
+    }
+
     /// Valeur texte brute d'un champ (premiere occurrence), pour relire un bloc.
     static func valeur(_ ligne: String, _ cle: String) -> Substring? {
         let motif = "\"\(cle)\":"

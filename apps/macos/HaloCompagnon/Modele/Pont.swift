@@ -57,8 +57,9 @@ final class Pont {
     private(set) var derniereReception: Date?
     /// Commande de banc de plus de 20 min : proposer de fermer le port (6.5).
     var propositionFermeture = false
-    /// Flux `rx`/`tx` coupe par `json trames 0`.
-    private(set) var tramesCoupees = false
+    /// Reglages de session en vigueur (ceux du `hello`, suivis des commandes
+    /// `json periode|compteurs|reseau|trames|log` acceptees) ; nil avant le `hello`.
+    private(set) var reglages: HelloBase.ReglagesSession?
     /// Facteur de temps du mode demo (1 : temps reel ; les tests accelerent).
     @ObservationIgnored var vitesseDemo: Double = 1
 
@@ -79,6 +80,10 @@ final class Pont {
     @ObservationIgnored private let origine = ContinuousClock.now
     @ObservationIgnored private let surveillant = SurveillantUSB()
     @ObservationIgnored private var observateurReveil: (any NSObjectProtocol)?
+    @ObservationIgnored private var observateurFin: (any NSObjectProtocol)?
+    /// Session serie ouverte : pas de mise en sommeil de l'app (App Nap) qui
+    /// retarderait le ping au-dela du bail de 30 s.
+    @ObservationIgnored private var activite: (any NSObjectProtocol)?
 
     /// Delais de reouverture apres une fermeture : 300 ms, puis 1 s, 2 s, 5 s (3.1).
     static let delaisReconnexion: [Double] = [0.3, 1, 2, 5]
@@ -93,6 +98,14 @@ final class Pont {
             MainActor.assumeIsolated {
                 // Pause de lecture : la premiere ligne lue ensuite peut etre un fragment (2.4).
                 self?.recepteur.signalerPause()
+            }
+        }
+        observateurFin = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Rendre le mode humain a la carte avant de partir (sinon JSON jusqu'a la fin du bail).
+                self?.fermerProprement(synchrone: true)
             }
         }
         tacheTic = Task { [weak self] in
@@ -122,38 +135,97 @@ final class Pont {
     }
 
     func connecter(_ s: Source) {
-        fermerTransport()
+        let changement = s != source
+        if changement {
+            // Autre carte ou demo : la carte quittee retrouve le mode humain, et rien
+            // de l'ancienne source ne reste (ni etat, ni boot, ni courbes).
+            fermerProprement()
+            oublierSource()
+        } else {
+            fermerTransport()
+        }
         source = s
         alerte = nil
         reconnexionAuto = true
         essaisReconnexion = 0
+        if changement, let nom = nomSource {
+            note("Nouvelle source : \(nom). États, journal des trames et courbes remis à zéro.", grave: false)
+        }
         ouvrir()
     }
 
     func deconnecter() {
         reconnexionAuto = false
-        tacheReconnexion?.cancel()
-        fermerTransport()
+        fermerProprement()
         etatTransport = .ferme
     }
 
     /// "Liberer le port" (3.1, etape 7) : `json 0`, fermeture, pas de reouverture avant un clic.
     func libererPort() {
         reconnexionAuto = false
-        tacheReconnexion?.cancel()
-        executer(moteur.liberer(maintenant: maintenant()))
-        let t = transport
-        transport = nil
-        generation += 1
-        tacheLecture?.cancel()
-        // Laisser partir json 0 avant de fermer ; DTR et RTS restent a 0.
-        Task {
-            try? await Task.sleep(for: .milliseconds(150))
-            t?.fermer()
-        }
-        synchroniser()
+        let modeMachine = rendModeHumain
+        fermerProprement()
         etatTransport = .libere
-        note("Port libéré : json 0 envoyé, port fermé. Flasher est possible ; « Reconnecter » pour reprendre.", grave: false)
+        note("Port libéré : \(modeMachine ? "json 0 envoyé, " : "")port fermé. Flasher est possible ; "
+             + "« Reconnecter » pour reprendre.", grave: false)
+    }
+
+    /// Vrai si fermer doit d'abord rendre le mode humain a la carte (`json 0`) :
+    /// session machine ou tentative en cours, et pas de commande de banc (la CLI
+    /// ne lit plus : la ligne s'empilerait dans les 256 octets de reception).
+    private var rendModeHumain: Bool {
+        guard transport != nil, moteur.correlateur.commandeDeBanc == nil else { return false }
+        switch moteur.phase {
+        case .ferme, .ancienFirmware, .versionInconnue, .modeHumain: return false
+        default: return true
+        }
+    }
+
+    /// `json 0` si besoin, puis fermeture apres vidage de la file de sortie :
+    /// sans cela la carte emettrait du JSON jusqu'a l'echeance du bail (3.5),
+    /// et `pio device monitor` le recevrait.
+    private func fermerProprement(synchrone: Bool = false) {
+        tacheReconnexion?.cancel()
+        guard let t = transport else {
+            fermerTransport()
+            return
+        }
+        if rendModeHumain {
+            executer(moteur.liberer(maintenant: maintenant()))
+        } else if moteur.phase != .ferme {
+            moteur.ferme(maintenant: maintenant())
+        }
+        transport = nil
+        // La boucle de lecture se detache (generation) ; l'annuler fermerait le
+        // port tout de suite, avant que json 0 soit parti.
+        generation += 1
+        tacheLecture = nil
+        t.fermerApresVidage(synchrone: synchrone)
+        finActivite()
+        synchroniser()
+    }
+
+    /// Nouvelle source : moteur (boot, up_s, statistiques), recepteur, etats et series repartent de zero.
+    private func oublierSource() {
+        moteur = MoteurSession()
+        recepteur = RecepteurLignes()
+        etat = EtatPont()
+        demo = nil
+        trames.vider()
+        rejets.vider()
+        viderCourbes()
+        dernierCurseur = [:]
+        propositionFermeture = false
+        derniereReception = nil
+        synchroniser()
+    }
+
+    private var nomSource: String? {
+        switch source {
+        case .serie(let chemin, _): chemin
+        case .demo: "démo"
+        case nil: nil
+        }
     }
 
     func reconnecter() {
@@ -222,14 +294,28 @@ final class Pont {
         tacheLecture = nil
         transport?.fermer()
         transport = nil
+        finActivite()
         if moteur.phase != .ferme {
             moteur.ferme(maintenant: maintenant())
             synchroniser()
         }
     }
 
+    private func debutActivite() {
+        guard activite == nil else { return }
+        activite = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
+                                                         reason: "Session série Halo : ping du bail")
+    }
+
+    private func finActivite() {
+        guard let a = activite else { return }
+        ProcessInfo.processInfo.endActivity(a)
+        activite = nil
+    }
+
     private func transportOuvert() {
         etatTransport = .ouvert
+        debutActivite()
         recepteur.resynchroniser()
         note("Port ouvert : \(nomTransport) (DTR = RTS = 0).", grave: false)
         executer(moteur.ouvert(maintenant: maintenant()))
@@ -237,6 +323,7 @@ final class Pont {
 
     private func transportFerme(_ raison: String) {
         transport = nil
+        finActivite()
         moteur.ferme(maintenant: maintenant())
         synchroniser()
         note("Transport fermé : \(raison)", grave: false)
@@ -248,6 +335,9 @@ final class Pont {
         let texte = String(describing: erreur)
         if reconnexionAuto, essaisReconnexion < 40 {
             planifierReconnexion(texte)
+        } else if reconnexionAuto {
+            // Plus d'essais minutes (~3 min), mais le retour du port (IOKit) rouvre encore.
+            etatTransport = .erreur(texte + " — en attente du retour du port")
         } else {
             etatTransport = .erreur(texte)
         }
@@ -265,10 +355,15 @@ final class Pont {
         }
     }
 
-    /// Arrivee ou depart d'un port (IOKit) : on rouvre des que la carte revient.
+    /// Arrivee ou depart d'un port (IOKit) : on rouvre des que la carte revient,
+    /// meme apres l'abandon des essais minutes (etat `.erreur`).
     private func portsChanges(_ nouveaux: [PortUSB]) {
         ports = nouveaux
-        guard case .attente = etatTransport, case .serie(let chemin, let serie)? = source else { return }
+        guard reconnexionAuto, case .serie(let chemin, let serie)? = source else { return }
+        switch etatTransport {
+        case .attente, .erreur: break
+        default: return
+        }
         let revenu = nouveaux.contains { ($0.serie != nil && $0.serie == serie) || $0.chemin == chemin }
         if revenu {
             essaisReconnexion = 0
@@ -309,7 +404,9 @@ final class Pont {
         case .fragment(let s):
             ajouterConsole(.fragment, s)
         case .abimee(let raison, let brut):
-            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "abîmée : \(raison)", brut: brut))
+            // Une reponse abimee a json cle nouvelle porterait la cle en clair (10.4).
+            rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "abîmée : \(raison)",
+                                 brut: PolitiqueCommandes.masquerCle(brut)))
         case .versionInconnue(let v, let t):
             rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: "version \(v) inconnue", brut: t))
         case .invalide(let t, let raison):
@@ -362,10 +459,12 @@ final class Pont {
             break
         }
         if !l.message.estPeriodique {
+            let json = PolitiqueCommandes.masquerCle(l.json)
+            let resume = Interpretation.resume(l.message, correspondance: c)
             trames.ajouter(EntreeTrame(id: prochainId(), date: date, n: l.enveloppe.n, ms: l.enveloppe.ms,
                                        type: l.enveloppe.t, categorie: .de(l.message), message: l.message,
-                                       json: PolitiqueCommandes.masquerCle(l.json), historique: historique,
-                                       resume: Interpretation.resume(l.message, correspondance: c)))
+                                       json: json, historique: historique, resume: resume,
+                                       cleRecherche: (resume + "\n" + json).lowercased()))
         }
     }
 
@@ -420,15 +519,25 @@ final class Pont {
     private func synchroniser() {
         if phase != moteur.phase {
             phase = moteur.phase
-            if phase == .connecte { essaisReconnexion = 0 }
+            if phase == .connecte {
+                essaisReconnexion = 0
+                // Session retablie : l'alerte d'un echec passe (aucune reponse,
+                // ancien firmware depuis reflashe...) ne vaut plus.
+                alerte = nil
+            }
         }
+        let r = etat.helloBase != nil ? moteur.reglages : nil
+        if reglages != r { reglages = r }
         if suivis != moteur.correlateur.suivis { suivis = moteur.correlateur.suivis }
         if statistiques != moteur.statistiques { statistiques = moteur.statistiques }
         if reception != recepteur.compteurs { reception = recepteur.compteurs }
     }
 
+    /// Toute ligne de la console passe par le masque de la cle (10.4) : texte
+    /// recu, fragments, retours qui citent la commande, notes.
     private func ajouterConsole(_ genre: LigneConsole.Genre, _ texte: String, numero: Int? = nil) {
-        console.ajouter(LigneConsole(id: prochainId(), date: Date(), genre: genre, texte: texte, numero: numero))
+        console.ajouter(LigneConsole(id: prochainId(), date: Date(), genre: genre,
+                                     texte: PolitiqueCommandes.masquerCle(texte), numero: numero))
     }
 
     private func note(_ texte: String, grave: Bool) {
@@ -439,6 +548,15 @@ final class Pont {
     // MARK: - Commandes
 
     var peutCommander: Bool { phase.modeMachine && transport != nil }
+
+    /// La console envoie avec un `id` : session machine, ou `json 1` en attente
+    /// de son `hello` (la carte est sans doute deja en mode machine ; la ligne
+    /// attend en file). Sinon (ancien firmware, mode humain...) : ligne brute.
+    var consoleAvecId: Bool {
+        if phase.modeMachine { return true }
+        if case .attenteHello = phase { return true }
+        return false
+    }
 
     /// Commande d'un bouton ou d'un curseur, avec `id` et correlation.
     @discardableResult
@@ -474,7 +592,7 @@ final class Pont {
         }
         guard let transport else { return .refusee("Aucune carte connectée.") }
         let propre = ligne.trimmingCharacters(in: .whitespaces)
-        if moteur.phase.modeMachine {
+        if consoleAvecId {
             let (_, effets) = moteur.soumettre(propre, origine: .console, maintenant: maintenant())
             executer(effets)
         } else {
@@ -495,9 +613,16 @@ final class Pont {
 
     func rafraichir() { envoyer("json etat") }
 
+    /// L'etat suit la reponse de la carte (et le `hello` : `json 1` remet `trames` a 1).
     func couperTrames(_ coupees: Bool) {
-        if envoyer("json trames \(coupees ? 0 : 1)") != nil { tramesCoupees = coupees }
+        envoyer("json trames \(coupees ? 0 : 1)")
     }
+
+    /// Flux `rx`/`tx` coupe (`json trames 0`, depuis l'app ou la console).
+    var tramesCoupees: Bool { reglages?.trames == false }
+
+    /// Ecart maximal entre deux blocs `compteurs` d'un meme segment de courbe.
+    var ecartMaxCourbes: TimeInterval { Courbes.ecartMax(compteursMs: reglages?.compteursMs) }
 
     func viderJournal() {
         trames.vider()

@@ -181,25 +181,17 @@ public enum PolitiqueCommandes {
         }
     }
 
-    /// Masque une cle de 64 hexa dans une ligne affichee (10.4).
+    /// Masque une cle de 64 hexa dans une ligne affichee (10.4) : la commande
+    /// `json cle nouvelle <hexa>` (casse et espaces quelconques, comme la CLI
+    /// les lit), le champ `"cle":"..."` d'une reponse, et toute suite de 64
+    /// chiffres hexa (cle imprimee en texte par une commande sans `id`).
     public static func masquerCle(_ texte: String) -> String {
+        guard texte.utf8.count >= 64 || texte.range(of: "cle", options: .caseInsensitive) != nil else { return texte }
+        let masque = String(repeating: "•", count: 8)
         var s = texte
-        // Commande tapee : json cle nouvelle <64 hexa>
-        if let r = s.range(of: "json cle nouvelle ") {
-            let reste = s[r.upperBound...]
-            let hexa = reste.prefix { $0.isHexDigit }
-            if !hexa.isEmpty {
-                s.replaceSubrange(r.upperBound..<reste.index(reste.startIndex, offsetBy: hexa.count),
-                                  with: String(repeating: "•", count: 8))
-            }
-        }
-        // Reponse JSON : "cle":"<64 hexa>"
-        while let r = s.range(of: "\"cle\":\"") {
-            let reste = s[r.upperBound...]
-            guard let fin = reste.firstIndex(of: "\"") else { break }
-            if reste[reste.startIndex..<fin].allSatisfy({ $0 == "•" }) { break }
-            s.replaceSubrange(r.upperBound..<fin, with: String(repeating: "•", count: 8))
-        }
+        s.replace(/(?i)(json[ \t]+cle[ \t]+nouvelle[ \t]+)[0-9a-f]+/) { m in m.output.1 + masque }
+        s.replace(/("cle"[ ]*:[ ]*")[^"]*"/) { m in m.output.1 + masque + "\"" }
+        s.replace(/\b[0-9A-Fa-f]{64}\b/) { _ in masque }
         return s
     }
 }

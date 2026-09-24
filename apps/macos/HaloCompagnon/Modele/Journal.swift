@@ -49,6 +49,9 @@ struct EntreeTrame: Identifiable, Sendable {
     /// Ligne ancienne, restee dans le tampon avant le `hello` de la session.
     let historique: Bool
     let resume: String
+    /// `resume` et `json` en minuscules, calcules une fois : la recherche ne
+    /// refait pas 5000 conversions a chaque evenement recu.
+    let cleRecherche: String
 
     /// Trame a bits douteux (CRC faux) : affichee en gris.
     var douteuse: Bool {

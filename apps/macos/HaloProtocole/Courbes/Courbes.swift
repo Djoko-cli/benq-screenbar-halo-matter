@@ -71,15 +71,26 @@ public struct PointCumul: Sendable, Equatable {
 }
 
 /// Calculs de la section 8 : differences par fenetre de 10 s ou 1 min ; une
-/// difference negative, un `raz` ou un `boot` qui change ouvre un nouveau
-/// segment (pas de valeur aberrante).
+/// difference negative, un `raz`, un `boot` qui change ou un trou dans les
+/// echantillons (app suspendue, veille du Mac) ouvre un nouveau segment (pas
+/// de valeur aberrante).
 public enum Courbes {
+    /// Plus grand ecart tolere entre deux echantillons d'un meme segment.
+    public static let ecartMaxDefaut: TimeInterval = 30
+
+    /// Ecart maximal pour une periode `compteurs_ms` : 3 periodes, 30 s au moins.
+    public static func ecartMax(compteursMs: Int?) -> TimeInterval {
+        guard let p = compteursMs, p > 0 else { return ecartMaxDefaut }
+        return max(ecartMaxDefaut, 3 * Double(p) / 1000)
+    }
+
     /// Decoupe en segments continus.
-    public static func segmenter(_ echantillons: [Echantillon]) -> [[Echantillon]] {
+    public static func segmenter(_ echantillons: [Echantillon],
+                                 ecartMax: TimeInterval = ecartMaxDefaut) -> [[Echantillon]] {
         var segments: [[Echantillon]] = []
         var courant: [Echantillon] = []
         for e in echantillons {
-            if let p = courant.last, rupture(p, e) {
+            if let p = courant.last, rupture(p, e, ecartMax: ecartMax) {
                 segments.append(courant)
                 courant = []
             }
@@ -89,11 +100,14 @@ public enum Courbes {
         return segments
     }
 
-    /// Vrai si `b` ne peut pas suivre `a` dans un meme segment.
-    public static func rupture(_ a: Echantillon, _ b: Echantillon) -> Bool {
+    /// Vrai si `b` ne peut pas suivre `a` dans un meme segment. Un trou de
+    /// plus de `ecartMax` en ferait une seule difference geante, tracee comme
+    /// une valeur "par fenetre" (fausse surdite, abandons gonfles).
+    public static func rupture(_ a: Echantillon, _ b: Echantillon, ecartMax: TimeInterval = ecartMaxDefaut) -> Bool {
         if a.boot != nil, b.boot != nil, a.boot != b.boot { return true }
         if a.raz != b.raz { return true }
         if b.date < a.date { return true }
+        if b.date.timeIntervalSince(a.date) > ecartMax { return true }
         for (g, v) in b.valeurs {
             if let w = a.valeurs[g], v < w { return true }
         }
@@ -104,10 +118,11 @@ public enum Courbes {
     /// pour chaque fenetre, dernier echantillon de la fenetre moins dernier
     /// echantillon de la fenetre precedente du meme segment (ou le premier
     /// echantillon du segment).
-    public static func differences(_ echantillons: [Echantillon], fenetre: TimeInterval) -> [Difference] {
+    public static func differences(_ echantillons: [Echantillon], fenetre: TimeInterval,
+                                   ecartMax: TimeInterval = ecartMaxDefaut) -> [Difference] {
         precondition(fenetre > 0)
         var sortie: [Difference] = []
-        for (numero, segment) in segmenter(echantillons).enumerated() {
+        for (numero, segment) in segmenter(echantillons, ecartMax: ecartMax).enumerated() {
             guard var reference = segment.first else { continue }
             var i = 0
             while i < segment.count {
@@ -138,9 +153,10 @@ public enum Courbes {
     }
 
     /// Valeurs cumulatives brutes, avec leur segment.
-    public static func cumul(_ echantillons: [Echantillon], _ g: Grandeur) -> [PointCumul] {
+    public static func cumul(_ echantillons: [Echantillon], _ g: Grandeur,
+                             ecartMax: TimeInterval = ecartMaxDefaut) -> [PointCumul] {
         var sortie: [PointCumul] = []
-        for (numero, segment) in segmenter(echantillons).enumerated() {
+        for (numero, segment) in segmenter(echantillons, ecartMax: ecartMax).enumerated() {
             for e in segment {
                 if let v = e.valeurs[g] { sortie.append(PointCumul(date: e.date, segment: numero, valeur: v)) }
             }
@@ -175,11 +191,14 @@ public enum Courbes {
         return Double(c) / Double(t)
     }
 
-    /// Seuil du deluge (`seuils.deluge_trames`, `deluge_pct` sur `fenetre_ms`)
-    /// ramene a la minute, pour tracer la ligne de declenchement.
-    public static func seuilDelugeParMinute(trames: Int, fenetreMs: Int) -> Double? {
+    /// Seuil du deluge ramene a la minute, pour tracer la ligne de
+    /// declenchement sur la courbe des CRC faux : le firmware declenche a
+    /// `deluge_trames` trames dont `deluge_pct` % de CRC faux sur `fenetre_ms`
+    /// (`halo1_watch.cpp`), soit au moins trames x pct / 100 CRC faux par fenetre
+    /// (100 et 90 % sur 10 s : 540 par minute).
+    public static func seuilDelugeParMinute(trames: Int, pct: Int, fenetreMs: Int) -> Double? {
         guard fenetreMs > 0 else { return nil }
-        return Double(trames) * 60_000 / Double(fenetreMs)
+        return Double(trames) * Double(pct) / 100 * 60_000 / Double(fenetreMs)
     }
 
     /// Seuil de surdite (`sourd_hors_rx` sur 10 s) ramene a la minute.
