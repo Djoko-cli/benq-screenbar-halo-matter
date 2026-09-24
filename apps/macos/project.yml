@@ -57,7 +57,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         CODE_SIGN_ENTITLEMENTS: HaloCompagnon/HaloCompagnon.entitlements
         ENABLE_HARDENED_RUNTIME: YES
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   HaloProtocoleTests:
     type: bundle.unit-test
     platform: macOS
