@@ -4,6 +4,7 @@
 
 #include "driver/spi_slave.h"
 #include "halo1_radio.h"  // configStdAutoAck, et la declaration d'applyXoTrim
+#include "halo1_proto.h"  // decodeAir, airOrder (ecoute)
 #include "soc/gpio_reg.h"
 #include "soc/soc.h"
 
@@ -1284,7 +1285,7 @@ void BenqHalo::probePresence(Print &out, uint8_t cycles, uint32_t dwellMs) {
     const char *note;
   };
   const ChanDef chans[4] = {
-      {RF_CHANNEL_1, "canal du portage qui fonctionne"},
+      {RF_CHANNEL_1, "canal de la lampe (confirme)"},
       {RF_CHANNEL_2, "dossier FCC"},
       {RF_CHANNEL_3, "dossier FCC"},
       {80, "TEMOIN : balise BLE ambiante, ne doit PAS ressortir"},
@@ -1400,10 +1401,11 @@ void BenqHalo::measureBursts(Print &out, uint32_t seconds, uint8_t threshold) {
            (unsigned)channel_, (unsigned)(2400 + channel_), (unsigned)threshold,
            (unsigned long)seconds);
   out.println(line);
-  out.println("  Une trame fait 19 octets : 2 de preambule, 4 d'adresse, 1 de PCF,");
-  out.println("  10 de payload et 2 de CRC, soit 152 bits. Donc 1216 us a");
-  out.println("  125 kbps, 608 us a 250 kbps, 304 us a 500 kbps. La duree");
-  out.println("  mesuree tranche le debit sans avoir a le deviner.");
+  out.println("  Halo 1 : commande = preambule 8 + adresse 32 + PCF 9 + charge 16 +");
+  out.println("  CRC 16 = 81 bits, accuse vide = 65 bits. Soit 648/520 us a 125 kbps,");
+  out.println("  324/260 a 250, 162/130 a 500. Balise d'etalonnage (charge de 10");
+  out.println("  octets) : ~1100 a 1200 us a 125 kbps. L'instrument lit court (inertie");
+  out.println("  du RSSI, seuil qui rogne les bords) : jusqu'a un quart en moins.");
   out.println();
   out.println("  >>> Il faut une source qui emette pendant toute la mesure :");
   out.println("      soit la balise d'etalonnage sur l'autre carte, soit la");
@@ -1484,7 +1486,8 @@ void BenqHalo::measureBursts(Print &out, uint32_t seconds, uint8_t threshold) {
   snprintf(line, sizeof(line), "  signal le plus fort : %u dB", (unsigned)strongest);
   out.println(line);
 
-  // La bande la plus peuplee designe le debit, si la trame fait bien 19 octets.
+  // La bande la plus peuplee, lue avec les durees Halo 1 ci-dessus (commande
+  // et accuse tombent dans la meme bande a chaque debit).
   uint8_t top = 0;
   for (uint8_t b = 1; b < kBins; b++)
     if (bins[b] > bins[top]) top = b;
@@ -1492,17 +1495,17 @@ void BenqHalo::measureBursts(Print &out, uint32_t seconds, uint8_t threshold) {
   snprintf(line, sizeof(line), "  duree dominante : %s", binName[top]);
   out.println(line);
   if (top == 4)
-    out.println("  compatible avec 125 kbps sur une trame de 19 octets.");
+    out.println("  compatible avec la balise d'etalonnage a 125 kbps.");
   else if (top == 3)
-    out.println("  compatible avec 250 kbps sur une trame de 19 octets.");
+    out.println("  compatible avec le Halo 1 a 125 kbps (debit confirme).");
   else if (top == 2)
-    out.println("  compatible avec 500 kbps sur une trame de 19 octets.");
-  else
-    out.println("  ne correspond a aucun des trois debits sur une trame de 19");
-  if (top != 2 && top != 3 && top != 4)
-    out.println("  octets : soit la trame n'a pas cette longueur, soit ces rafales");
-  if (top != 2 && top != 3 && top != 4)
-    out.println("  ne sont pas la telecommande.");
+    out.println("  compatible avec le Halo 1 a 250 kbps.");
+  else if (top == 1)
+    out.println("  compatible avec le Halo 1 a 500 kbps.");
+  else {
+    out.println("  ne correspond ni au Halo 1 ni a la balise : ces rafales ne sont");
+    out.println("  pas la telecommande.");
+  }
   out.println();
 }
 
@@ -2761,7 +2764,8 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
 //      dynamique desactive, longueur statique de 13 octets. Une trame entre
 //      dans la FIFO meme si son CRC est faux.
 //
-//  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
+//  Le temoin de trafic reste GIO3S=14, detection de preambule ("en amont du
+//  correlateur" : infirme, voir PROTOCOL.md).
 // ---------------------------------------------------------------------------
 void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
                                   uint8_t payloadLen) {
@@ -2822,7 +2826,8 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
   out.println(line);
   Serial.flush();
 
-  // GIO3S=14 : temoin de detection de preambule, en amont du correlateur.
+  // GIO3S=14 : temoin de detection de preambule ("en amont du correlateur" :
+  // infirme, voir PROTOCOL.md).
   const uint8_t io2Base = radio.readRegister(REG_IO2 | CMD_READ_REGISTER) & 0xF0;
   radio.writeRegister(REG_IO2 | CMD_WRITE_REGISTER, (uint8_t)(io2Base | 14));
   pinMode(PIN_GIO3_TAP, INPUT);

@@ -85,8 +85,9 @@ Sans ça, la réception du BM5602 est désensibilisée à chaque émission Wi-Fi
 les trames de la télécommande passent à la trappe.
 
 **Longueur du bus SPI.** 1 MHz par défaut (`RF_SPI_HZ` dans
-[src/config.h](../src/config.h)). Inutile de monter plus haut : un payload fait
-10 octets. Si tu utilises une nappe longue, descends plutôt à 500 kHz.
+[src/config.h](../src/config.h)). Inutile de monter plus haut : une commande
+Halo 1 porte 2 octets de charge. Si tu utilises une nappe longue, descends
+plutôt à 500 kHz.
 
 **Antenne.** Le BM5602-60-1 embarque une antenne imprimée. Ne la colle pas
 contre une masse, un blindage ou un boîtier métallique.

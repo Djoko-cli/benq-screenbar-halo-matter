@@ -100,7 +100,7 @@ constexpr uint8_t RC1_FSYCK_EN = 0x02;
 // Datasheet / guide demo : 0 = 500 kbps, 1 = 250 kbps, 2 = 125 kbps.
 constexpr uint8_t DATARATE_500K = 0b00000000;
 constexpr uint8_t DATARATE_250K = 0b00000001;
-constexpr uint8_t DATARATE_125K = 0b00000010;  // valeur heritee du Halo 2
+constexpr uint8_t DATARATE_125K = 0b00000010;  // debit du Halo 1 (confirme le 23/09)
 constexpr uint8_t ADDR_LEN_3 = 0b01000000;
 constexpr uint8_t ADDR_LEN_4 = 0b10000000;
 

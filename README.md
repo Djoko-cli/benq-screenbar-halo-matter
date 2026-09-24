@@ -109,10 +109,14 @@ Concrètement :
 
 | Cible | Mise en service | Taille firmware |
 |---|---|---|
-| **ESP32-C6 SuperMini** ✅ | BLE : le contrôleur fournit le Wi-Fi | 2,41 Mo |
+| **ESP32-C6 SuperMini** ✅ | BLE : le contrôleur fournit le Wi-Fi | 2,48 Mo |
 | ESP32-C3 ✅ | BLE | 1,79 Mo |
 | ESP32-S3 ✅ | BLE | 1,97 Mo |
 | ESP32 classique ⚠️ | IP : Wi-Fi à donner avant (`wifi <ssid> <mdp>`) | 1,81 Mo |
+
+Taille C6 relevée le 24/09 (`esp32c6supermini`, 2 601 484 octets ; le pont
+Thread `esp32c6thread` fait 2 616 992 octets). Les trois autres cibles n'ont
+pas été recompilées depuis : ces chiffres sont plus anciens.
 
 L'ESP32 classique reste utilisable — la commande série `wifi` enregistre les
 identifiants en NVS, sans recompilation — mais c'est une étape en plus.
@@ -369,6 +373,8 @@ src/config.h              broches, reglages du pilote Halo 1, identite Matter
 src/fw_version.h          version du firmware (FW_VERSION + revision git)
 src/app_desc.c            descripteur d'application : version rapportee par Matter
 src/bc5602.{h,cpp}        pilote bas niveau du transceiver
+src/cc2500.{h,cpp}        pilote minimal du CC2500 : ecoute brute (commandes cc*)
+src/swd.{h,cpp}           SWD en bit-banging (commande swd)
 src/halo.{h,cpp}          demarrage du module (aussi relance du pilote), outils de banc
 src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
 src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
@@ -377,12 +383,17 @@ src/halo1_watch.{h,cpp}   quand relancer le module sur symptome de puce (logique
 src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telecommande
 src/cli_lampe.cpp         commandes 'lampe ...'
 src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne, Identify
+src/matter_resume.h       calendrier de relance des abonnements Matter (pont Thread)
 src/status_led.{h,cpp}    LED d'etat : motifs et priorites (logique pure, testee sur l'hote)
 src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
 src/cli.{h,cpp}           console série de rétro-ingénierie
 src/main.cpp              assemblage, bouton de decommissioning
 docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
 docs/WIRING.md            câblage et pièges matériels
+docs/AUDIT-2026-09-23.md  audit du format de trame et des bogues, avec leur statut
+docs/PLAN-PILOTE-HALO1.md plan du pilote Halo 1, etapes et resultats du banc
+docs/BRIEF-BOITIER.md     brief du boitier imprime 3D
+docs/PISTES-FUTURES.md    idees hors du perimetre actuel
 tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module et de la LED d'etat, sans carte
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 ```

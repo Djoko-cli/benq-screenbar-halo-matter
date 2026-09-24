@@ -113,6 +113,8 @@ balise.
 | « Le debit de la telecommande n'est pas 125 kbps » | 125 kbps, confirme par l'emission. |
 | GIO3 « en amont du correlateur », « voie RF close », « contradiction etablie » | Deja infirme plus bas dans ce document ; explique par l'adresse. |
 | « Premiere lecture de la charge » (lectures provisoires, « a confirmer ») | Tranche par la section « Semantique CONFIRMEE par emission » et par le tableau ci-dessus. |
+| « La piste de l'appairage est close » (« aucun echange d'appairage a capturer ») | Ecoute sur l'adresse d'appairage du Halo 2 (`E2 08 00 B0`) et a 250 kbps, debit refute. La balise d'appairage `59 01 00 B0` existe et la lampe en mode appairage l'accuse (section « Appairage Halo 1 »). |
+| « Pourquoi il faut un nRF52840 » | Depasse : le CC2500 a trouve l'adresse le 22/09 (vue decalee, corrigee par l'audit) et le BM5602 emet vers la lampe depuis le 23/09. Aucun nRF52840 n'est necessaire. |
 
 
 ## Statut des informations
@@ -345,7 +347,8 @@ Validé sur trois vecteurs, état intermédiaire compris :
 
 Après les 4 octets d'adresse `86 BB EA 9C`, l'état vaut `0x5042`.
 
-Implémenté dans `BenqHalo::frameCrc()` et `frameCrcFor()`.
+Implémenté dans `BenqHalo::frameCrc()` et `frameCrcFor()` (modèle Halo 2 ;
+fonctions supprimées à l'étape C6, 24/09).
 
 ## Contrainte sur l'adresse
 

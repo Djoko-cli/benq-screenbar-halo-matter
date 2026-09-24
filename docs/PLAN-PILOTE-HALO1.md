@@ -30,7 +30,7 @@ J'ai reverifie dans le code et les logs chaque point ou les juges divergeaient.
 - **`enterRxMode` ne rearme pas une puce deja en reception.** Il rend la main tout de suite si STA1 dit RX (bc5602.cpp:225-226). Le rearmement de sniffStd toutes les 100 ms se reduit donc a CE=0 plus une reecriture de MASK. C'est ce comportement qu'il faut reproduire, sans strobe force.
 - **Les trames de reveil demandent un accuse.** `FF/FE/FD 00` ont NO_ACK=0, et seule `FA xx` a NO_ACK=1 (btn-A*.log). Les trames de service se reconnaissent donc aux bits 3/4, pas a NO_ACK.
 - **Une trame A peut avoir le bit 7 a zero.** On a vu `60 01` (PROTOCOL.md:1328). Une trame A ne doit jamais modifier l'etat marche/lampes.
-- **L'ecart reel des essais tx-sem etait de 500 ms, pas 300.** La CLI force un ecart d'au moins 500 ms sur le canal 5 (cli.cpp:660-662). L'ecart de 100 ms n'a jamais ete essaye depuis l'ESP32.
+- **L'ecart reel des essais tx-sem etait de 500 ms, pas 300.** La CLI force un ecart d'au moins 500 ms sur le canal 5 (cli.cpp:660-662). L'ecart de 100 ms n'a jamais ete essaye depuis l'ESP32 (depuis : T1, 100 ms, 3/3 accuses).
 - **Les vecteurs de CRC sont bons.** Je les ai tous recalcules. L'accuse reel de la lampe a NO_ACK=1 : PID1, CRC 5C90, brut `01 AE 48 00 00 00 00 00`.
 - **Mettre a jour un attribut par `updateAttributeVal` garde le cache de la bibliotheque a jour.** L'appel passe par `attribute::update`, puis PRE_UPDATE, puis `attributeChangeCB`, qui met le cache a jour quand le callback renvoie true (MatterColorTemperatureLight.cpp).
 
@@ -1231,7 +1231,7 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 | # | Sujet | Traitement |
 |---|---|---|
 | 1 | Paquet seul ignore (reveil du MCU, ou doublon PID+CRC) | 3 paquets et ≥ 2 accuses ; T5 ; essai de reveil `FF 00` si besoin |
-| 2 | Ecart de 100 ms jamais essaye depuis l'ESP32 (500 ms prouve) | T1 et T4 ; repli `lampe ecart 300/500` |
+| 2 | Ecart de 100 ms jamais essaye depuis l'ESP32 (500 ms prouve) | T1 et T4 ; repli `lampe ecart 300/500`. Leve par T1 : 3/3 accuses a 100 ms |
 | 3 | Un accuse ne prouve pas que la trame est appliquee | plusieurs paquets accuses a PID distincts ; trames absolues, renvoi sans danger |
 | 4 | Surdite de l'ecoute, cause inconnue | reconfiguration prouvee a 500 ms (~8 % sourd) ; instantanes ; rearmement fort en T10 |
 | 5 | PID a travers une bascule PRM_RX | reset par defaut ; bascule legere seulement apres T10 |
