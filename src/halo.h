@@ -6,91 +6,39 @@
 #include "config.h"
 
 // ===========================================================================
-//  Couche protocole BenQ ScreenBar Halo
+//  Demarrage du module BM5602 et outils de banc
 //
-//  Payload de 10 octets, echange en Enhanced ShockBurst avec auto-ACK :
-//    [0] commande
-//    [1] registre de controle (bits, voir plus bas)
-//    [2] luminosite lampe avant   (0x01..0x64 = 1..100 %)
-//    [3] temperature de couleur   octet de poids fort (Kelvin, 0x0A8C..0x1964)
-//    [4] temperature de couleur   octet de poids faible
-//    [5] luminosite lampe arriere (0x01..0x64)
-//    [6] temperature de couleur arriere - poids fort (identique a l'avant)
-//    [7] temperature de couleur arriere - poids faible
-//    [8] octet de queue 0 (0x01 sur le Halo 2 observe)
-//    [9] octet de queue 1 (0x02 sur le Halo 2 observe)
+//  begin() est le demarrage prouve du module (une seule calibration du VCO) ;
+//  le pilote Halo 1 s'en sert aussi de relance complete (niveau L2). Le reste
+//  sert au banc et a la retro-ingenierie : emission et ecoute au format
+//  standard de la puce (txack, ecoute, prxack) et sondes de la puce, du
+//  spectre et de GIO3. Le protocole de la lampe est dans halo1_proto.*, son
+//  pilote dans halo1_lamp.*.
 //
-//  Registre de controle (octet 1) :
-//    bit 0  marche/arret general
-//    bit 1  mode Auto
-//    bit 2  Favori
-//    bit 3  \ 0 = avant seule, 1 = arriere seule, 2 = les deux
-//    bit 4  /
-//    bit 5  capteur (ultrason sur le Halo 2 - a confirmer sur le Halo 1)
-//    bits 6-7 inutilises
-//
-//  La lampe n'emet JAMAIS spontanement : elle ne repond que dans le slot ACK
-//  materiel. D'ou l'interrogation periodique + l'ecoute passive de la
-//  telecommande entre deux interrogations.
+//  La couche Halo 2 d'origine (charge de 10 octets, etat relu dans l'accuse,
+//  interrogation toutes les 5 s) a ete retiree a l'etape C6 : la lampe est un
+//  Halo 1, dont l'accuse est vide (docs/PROTOCOL.md).
 // ===========================================================================
-
-// Commandes (octet 0 du payload)
-enum : uint8_t {
-  HALO_CMD_HELLO = 0x00,    // la telecommande se reveille et contacte la lampe
-  HALO_CMD_ONOFF = 0x02,    // allumage / extinction general
-  HALO_CMD_SET = 0x03,      // luminosite + temperature de couleur
-  HALO_CMD_SYNC = 0x04,     // demande d'etat
-  HALO_CMD_SLEEP = 0x05,    // la telecommande s'endort
-  HALO_CMD_PAIRING = 0x0A,  // appairage
-  HALO_CMD_NONE = 0xFF,
-};
-
-// Adresse fixe utilisee pendant l'appairage (E2 08 00 B0 sur l'air),
-// en ordre d'ecriture registre.
-constexpr uint8_t HALO_PAIRING_ADDRESS[4] = {0xB0, 0x00, 0x08, 0xE2};
-
-struct HaloState {
-  bool power = true;
-  bool front = true;
-  bool back = false;
-  bool sensor = true;
-  uint8_t frontBrightness = 50;  // 1..100 %
-  uint8_t backBrightness = 50;   // 1..100 %
-  uint16_t colorTempK = 4000;    // 2700..6500 K
-
-  bool operator==(const HaloState &o) const {
-    return power == o.power && front == o.front && back == o.back && sensor == o.sensor &&
-           frontBrightness == o.frontBrightness && backBrightness == o.backBrightness &&
-           colorTempK == o.colorTempK;
-  }
-  bool operator!=(const HaloState &o) const { return !(*this == o); }
-};
-
-enum class HaloMode : uint8_t { Normal, Sniffer, Finder };
-enum class HaloPhase : uint8_t { Idle, Push, Verify };
 
 class BenqHalo {
  public:
   // --- cycle de vie ---
   bool begin();
-  void tick();  // a appeler depuis loop(), aucune operation ne bloque > ~15 ms
 
-  // --- configuration persistante (NVS) ---
+  // --- configuration persistante des outils (NVS benqhalo : addr, chan, rate) ---
+  // Le pilote Halo 1 a la sienne (NVS halo1, 'lampe adresse').
   void loadConfig();
   void saveConfig();
   bool addressConfigured() const;
   void setAddress(const uint8_t addr[4]);
   const uint8_t *address() const { return addr_; }
-  void setTail(uint8_t a, uint8_t b);
-  const uint8_t *tail() const { return tail_; }
   void setChannel(uint8_t ch);
   void setPreambleTwoBytes(bool two);
   bool preambleTwoBytes() const { return preambleTwoBytes_; }
 
-  // Debit radio. Mesure du 2026-09-22 : la telecommande du Halo 1 emet des
-  // rafales trop courtes pour 125 kbps sur une trame de 19 octets. Le debit
-  // ne doit donc plus etre code en dur, et il est persiste : le reoublier
-  // apres un flash rendrait toute chasse sourde sans le dire.
+  // Debit radio des outils, persiste : l'oublier apres un flash rendrait une
+  // ecoute sourde sans le dire. La lampe est a 125 kbps (confirme le 23/09) ;
+  // les autres debits ne servent qu'aux sondes.
   uint8_t dataRate() const { return dataRate_; }
   void setDataRate(uint8_t rate);
 
@@ -101,54 +49,11 @@ class BenqHalo {
   static const char *dataRateName(uint8_t rate);
   uint8_t channel() const { return channel_; }
 
-  // --- configuration radio ---
-  void prepareToTransfer();  // mode standard : auto-ACK + CRC + payload dynamique
-  void prepareToSniff();     // mode ecoute : ni ACK, ni CRC, ni payload dynamique
-  // Reset logiciel + reconfiguration complete. Mesure a l'appui : sans reset
-  // prealable la puce refuse d'entrer en RX, alors qu'avec elle y tient a 99 %.
-  void resetRadio();
+  // Base de tous les outils : la puce en ecoute passive (ni accuse, ni CRC)
+  // sur l'adresse et le canal enregistres. Sans effet si le module est absent.
+  void prepareForTool();
 
-  // --- echanges bruts ---
-  bool sendWithAck(const uint8_t payload[10]);
-  bool readAck(uint8_t out[10]);
-  bool sniffOnce(uint8_t payload[10], uint8_t *pcfLen = nullptr, uint8_t *pid = nullptr,
-                 uint8_t *noAck = nullptr);
-
-  // --- protocole ---
-  // CRC-CCITT (polynome 0x1021), etat initial 0xEFDF avant les quatre octets
-  // d'adresse EN ORDRE SUR L'AIR, couvrant adresse + PCF + payload.
-  // Modele valide sur les trois vecteurs publies par Termina1 :
-  //   PCF 54 -> 20B9 | PCF 50 -> E962 | PCF 50 -> 0241
-  uint16_t frameCrc(uint8_t pcf, const uint8_t payload[10]) const;
-  // Variante pour une adresse arbitraire, donnee EN ORDRE SUR L'AIR. Sert a
-  // valider une adresse candidate pendant la recherche.
-  static uint16_t frameCrcFor(const uint8_t airAddr[4], uint8_t pcf, const uint8_t payload[10]);
-  // Verifie le CRC d'une trame brute de 13 octets (PCF + payload + CRC).
-  bool frameCrcOk(const uint8_t frame13[13]) const;
-
-  void buildPayload(uint8_t cmd, uint8_t out[10], bool autoMode = false) const;
-  bool validate(const uint8_t p[10]) const;
-  void parseStatus(const uint8_t p[10]);
-
-  // --- haut niveau, non bloquant ---
-  void requestPush(uint8_t cmd = HALO_CMD_SET, bool autoMode = false);
-  void requestPushThen(uint8_t first, uint8_t second);
-  bool pollNow(uint8_t cmd = HALO_CMD_SYNC);
-  // true quand aucun envoi n'est en cours depuis assez longtemps pour que
-  // refleter l’etat vers Matter ne provoque pas de va-et-vient.
-  bool settled() const;
-
-  // --- modes de retro-ingenierie ---
-  void setMode(HaloMode mode);
-  HaloMode mode() const { return mode_; }
-  // addr = nullptr -> adresse configuree ; sinon ecoute sur une autre adresse
-  // (typiquement HALO_PAIRING_ADDRESS pendant un appairage).
-  void startSniffer(const uint8_t addr[4] = nullptr);
-  void findAddressBegin(const uint8_t sync3[3], uint32_t durationMs, bool sweepChannels = false);
-  // Nombre de trames brutes sorties de la FIFO depuis le debut du mode courant,
-  // sans aucun filtrage applicatif. C'est le seul indicateur qui distingue
-  // "la radio n'entend rien" de "elle entend mais le mot de synchro est faux".
-  uint32_t rxEvents() const { return rxEvents_; }
+  // --- outils de banc ---
   // Balaye toute la bande 2400-2483 MHz et releve le RSSI temps reel de chaque
   // canal. Ne depend d'AUCUNE hypothese de protocole : c'est le seul moyen de
   // savoir si l'etage de reception entend quoi que ce soit.
@@ -158,18 +63,6 @@ class BenqHalo {
   // ressort les canaux ou le signal monte. N'a de sens qu'avec AGC_EN.
   void sweepBand(Print &out, uint8_t cycles = 4);
 
-  // Capture sur l'adresse d'appairage, la seule que nous connaissions.
-  // Balaye les 3 canaux FCC et les deux ordres d'octets, a 125 kbps, et
-  // vide 32 octets par trame pour voir passer une eventuelle adresse de
-  // communication negociee pendant l'appairage.
-  void capturePairing(Print &out, uint32_t seconds = 180, uint8_t onlyChannel = 0);
-
-  // Cale le correlateur sur le PREAMBULE plutot que sur l'adresse. Avec une
-  // adresse de 3 octets valant 'AA AA X', il accroche les deux octets de
-  // preambule suivis du premier octet d'adresse : la puce livre alors les
-  // trois octets d'adresse restants. Un seul inconnu, X, sur 256 valeurs.
-  void huntByPreamble(Print &out, uint32_t dwellMs = 500);
-
   // Campe sur quelques canaux et compare la DISTRIBUTION du RSSI au repos
   // et molette en main. Un canal temoin, connu pour ne porter que du bruit
   // ambiant, sert de controle : s'il ressort comme les autres, la methode
@@ -177,7 +70,7 @@ class BenqHalo {
   void probePresence(Print &out, uint8_t cycles = 3, uint32_t dwellMs = 3000);
 
   // Mesure la DUREE des rafales sur un canal ou l'on entend la telecommande.
-  // Une trame fait 19 octets (2 preambule + 4 adresse + 1 PCF + 10 payload +
+  // Une trame Halo 2 fait 19 octets (2 preambule + 4 adresse + 1 PCF + 10 payload +
   // 2 CRC), soit 152 bits : 1216 us a 125 kbps, 608 a 250, 304 a 500. La
   // duree mesuree donne donc le debit, et recoupe la longueur de trame.
   void measureBursts(Print &out, uint32_t seconds = 20, uint8_t threshold = 60);
@@ -194,52 +87,21 @@ class BenqHalo {
   void calibrationListen(Print &out, uint32_t seconds = 15);
 
   // Verifie si le correlateur sait se caler au MILIEU d'une trame, sur trois
-  // octets de payload servant de pseudo-adresse. C'est le principe de la
-  // commande 'find', jamais valide : on le teste ici contre une balise dont
-  // le payload est connu, donc avec la reponse d'avance.
+  // octets de payload servant de pseudo-adresse. C'etait le principe de
+  // l'ancienne commande 'find' (Halo 2, retiree) : on le teste ici contre une
+  // balise dont le payload est connu, donc avec la reponse d'avance.
   void validatePayloadSync(Print &out, uint32_t dwellMs = 3000);
-
-  // Chasse a l'adresse par mot de synchro ANCRE. Le detecteur de preambule
-  // ne s'arme que sur une suite alternee : la fenetre visee doit donc etre
-  // precedee d'un octet 0x55 ou 0xAA. On enumere les reglages de lampe qui
-  // produisent une telle ancre, au lieu de balayer a l'aveugle.
-  void huntAnchored(Print &out, uint32_t seconds = 180, uint8_t group = 0,
-                    uint32_t dwellMs = 60, uint16_t fixedKelvin = 0,
-                    int16_t fixedBack = -1);
-
-  // Cherche un preambule puis une adresse dans une capture, aux huit
-  // decalages de bit, et ne retient que ce qui passe le CRC.
-  bool scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len,
-                             const char *context);
-
-  // Balaie les seize valeurs du selecteur GIO3 pendant que la balise emet,
-  // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
-  // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
-  // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
-  // Reception Halo 1 : 6 octets de charge utile, CRC verifie par le materiel.
-  void listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen = 32);
 
   // Format BC5602 standard, accuse automatique (audit du 23/09).
   void txAck(Print &out, const uint8_t addrReg[4], uint8_t channel, const uint8_t *payload,
              uint8_t len, uint8_t trials, uint16_t gapMs);
   void prxAck(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms);
-  // Ecoute passive, decodage logiciel du PCF et du CRC, jamais d'accuse.
+  // Ecoute passive, decodage logiciel du PCF et du CRC (halo1::decodeAir),
+  // jamais d'accuse.
   void sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms);
-
-  // Emettre des octets bruts apres l'adresse, CRC materiel coupe.
-  void txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t count, uint16_t gapMs);
-
-  // Emettre une trame Halo 1 (adresse enregistree + 6 octets + CRC materiel).
-  void txHalo1(Print &out, const uint8_t payload[6], uint16_t count, uint16_t gapMs);
 
   // Trim du quartz reapplique apres chaque reset logiciel ; -1 = ne pas toucher.
   void setXoTrim(int16_t trim);
-
-  // Ecart au-dela duquel deux trames appartiennent a des rafales distinctes.
-  static constexpr uint32_t kBurstGapMs = 40;
-  uint16_t halo1Crc(const uint8_t payload[6]) const;
-  void groupVerdict(Print &out, const uint8_t group[][8], uint8_t n, uint32_t &exact,
-                    uint32_t &repaired);
 
   // La sequence de reception du projet amont, sans reset logiciel.
   void listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
@@ -253,6 +115,10 @@ class BenqHalo {
 
   // Test electrique du fil GIO3, sans la radio.
   void checkGio3Wire(Print &out);
+  // Balaie les seize valeurs du selecteur GIO3 pendant que la balise emet,
+  // a la recherche d'une sortie de donnees ou d'horloge en RECEPTION. Le
+  // datasheet n'en documente que cinq, mais GIO3S=8 (TBCLK) prouve qu'il
+  // omet des fonctions reelles. Les valeurs 9 a 15 n'ont jamais ete testees.
   void sweepGio3(Print &out, uint32_t dwellMs = 1500);
 
   // Determine le DEBIT de la source sans connaitre son adresse. GIO3 ne
@@ -358,75 +224,31 @@ class BenqHalo {
   // Le depot tiers prouve que GIO2S=3 est DIRECT_TXD et GIO3S=8 TBCLK, deux
   // valeurs que le datasheet range dans 'Others: No function'.
   void probeDirectRx(Print &out, uint32_t windowMs = 2000);
-  void printFinderSummary(Print &out);
-  void printState(Print &out) const;
   void printInfo(Print &out);
 
-  HaloState desired;
-  HaloState reported;
-  bool debug = false;
   BC5602 radio;
   BC5602 radio2;  // second module, emetteur d'etalonnage
 
  private:
-  void tickNormal(uint32_t now);
-  void tickSniffer(uint32_t now);
-  void tickFinder(uint32_t now);
   void sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_t addrLen);
-  void checkTxFifo();
-  void adoptReported();
-  void noteFinderCandidate(const uint8_t addr[4]);
+  // Ecoute passive sur l'adresse enregistree, ni accuse ni CRC (base des outils).
+  void prepareToSniff();
+  // Reset logiciel + reconfiguration complete. Mesure a l'appui : sans reset
+  // prealable la puce refuse d'entrer en RX, alors qu'avec elle y tient a 99 %.
+  void resetRadio();
   void sweepRssi(uint8_t *out84, uint8_t passes);
 
   Preferences prefs_;
 
   uint8_t addr_[4] = {0, 0, 0, 0};
-  uint8_t tail_[2] = {0x01, 0x02};
   uint8_t channel_ = RF_CHANNEL_1;
 
-  uint8_t sniffAddr_[4] = {0, 0, 0, 0};
-  bool sniffOverride_ = false;
-
-  HaloMode mode_ = HaloMode::Normal;
-  HaloPhase phase_ = HaloPhase::Idle;
-  bool ackMode_ = false;
-  bool txBusy_ = false;
-
-  uint8_t pendingCmd_ = HALO_CMD_NONE;
-  uint8_t followUpCmd_ = HALO_CMD_NONE;
-  bool pendingAuto_ = false;
-  uint8_t verifyRef_[9] = {0};
-  uint8_t verifyTries_ = 0;
-
-  uint32_t dirtyAt_ = 0;
-  uint32_t lastOp_ = 0;
-  uint32_t lastPoll_ = 0;
-  uint32_t settledAt_ = 0;
-
-  uint32_t rxEvents_ = 0;
-  // Longueur de payload programmee dans RXPW0 pour le mode courant. En longueur
-  // statique, PKT4/RXDLEN n'est alimente que par le decodeur de payload
-  // dynamique : s'y fier ferait jeter des trames parfaitement recues.
-  uint8_t staticRxLen_ = 12;
-  bool sweepChannels_ = false;
-  uint8_t sweepIdx_ = 0;       // index combine : debit x canal
-  uint8_t addrLenBits_ = bc5602::ADDR_LEN_4;  // memorise pour pouvoir reecrire DM1
   // Longueur de preambule attendue. Doit etre REAPPLIQUEE apres chaque reset
   // logiciel : celui-ci remet tous les registres aux valeurs de mise sous
   // tension, ce qui effacait silencieusement le reglage.
   bool preambleTwoBytes_ = false;
   uint8_t dataRate_ = bc5602::DATARATE_125K;
   bool applyHoltekTuning_ = true;
-  uint32_t sweepAt_ = 0;
-
-  // mode Finder
-  static constexpr uint8_t kMaxCandidates = 8;
-  uint8_t candAddr_[kMaxCandidates][4] = {};
-  uint16_t candHits_[kMaxCandidates] = {};
-  uint8_t candCount_ = 0;
-  uint32_t finderDeadline_ = 0;
-  bool finderConfirmed_ = false;
-  uint8_t finderConfirmedAddr_[4] = {0};
 };
 
 extern BenqHalo halo;

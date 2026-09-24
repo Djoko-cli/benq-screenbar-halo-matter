@@ -1000,6 +1000,8 @@ Identify : arc-en-ciel sur la WS2812 (src/status_led.*), jamais la lampe, ce qui
 
 ### F.2 C6 : supprimer, une fois le pilote valide au banc
 
+Fait le 24/09/2026 ; ecarts dans H, C6.
+
 - **halo.h :**
   - l.8-50 : en-tete, `HALO_CMD_*`, `HALO_PAIRING_ADDRESS` ;
   - l.52-70 : `HaloState`, `HaloPhase` ;
@@ -1166,6 +1168,23 @@ On ne committe pas le `.pyc` modifie : `git checkout -- tools/audit/indep_pll/__
 **C6 « Retirer la couche Halo 2 et les outils refutes »**
 - Section F.2, `sniffStd` passe a `decodeAir`, docs (F.4).
 - Les deux builds et les tests, puis R0 rapide.
+- **Fait le 24/09/2026.** Builds thread, supermini et diag sans avertissement,
+  tests hote. `ecoute` decode par `halo1::decodeAir`, sortie identique
+  (5 millions de trames comparees a l'ancien decodeur, sur l'hote). Ecarts
+  avec F.2 :
+  - `resetRadio` est garde (prive) : quatre outils generiques s'en servent
+    (`gio`, `guet`, `direct`, `rxdirect`) ;
+  - l'appel a `frameCrcOk` etait dans `watchChannel` (`guet`), pas dans
+    `probeRxSequences` : `guet` affiche les octets bruts ;
+  - supprimes en plus, car ils reposaient sur le CRC Halo 2 et ne servaient
+    que la chasse Halo 2 : `capturePairing` (`appaire`), `huntByPreamble`
+    (`preambule`), `huntAnchored` et `scanCaptureForAddress` (`ancre`).
+    Devenus sans objet : `debug` (lu par la seule couche Halo 2), `normal`
+    (sortie des modes sniffer et finder) et les messages des commandes
+    retirees en C1 ;
+  - `setMode(HaloMode::Normal)` devient `prepareForTool()`, au meme effet
+    (`prepareToSniff` si le module repond) ;
+  - R0 reste a faire au banc : rien n'a ete flashe a cette etape.
 
 **C7 « Regler les valeurs par defaut d'apres le banc »**
 - Ecart, silence, rearmement fort, bascule legere, γ, numero A de depart.

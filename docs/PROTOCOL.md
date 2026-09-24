@@ -1,93 +1,128 @@
 # Protocole radio BenQ ScreenBar Halo
 
-## ETAT AU 23/09/2026 -- A LIRE AVANT TOUT LE RESTE
+## ETAT AU 24/09/2026 -- A LIRE AVANT TOUT LE RESTE
 
-Le reste de ce document est un journal chronologique : il contient des
-conclusions depuis REFUTEES. En cas de desaccord, ce bloc fait foi. Detail et
-preuves : [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md), scripts dans
-`tools/audit/` (modele unifie : `indep_pll/t3.py`, trames attendues :
-`synthese/chk.py`).
+Ce bloc fait foi. Le reste du document est le journal chronologique de la
+retro-ingenierie, Halo 2 puis Halo 1 : il contient des conclusions depuis
+refutees (liste en fin de bloc). Preuves : [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md)
+et `tools/audit/` (modele unifie `indep_pll/t3.py`, trames attendues
+`synthese/chk.py`) pour le format ; sections « Semantique CONFIRMEE par
+emission » et « Appairage Halo 1 » ci-dessous pour la charge ; resultats du
+banc a la fin de [PLAN-PILOTE-HALO1.md](PLAN-PILOTE-HALO1.md) pour le pilote.
 
-**Format de trame Halo 1 -- format BC5602 standard (type ShockBurst).**
-Valide sur environ 66 trames sur 68, par trois decodeurs independants et deux
-chaines de reception (CC2500 asynchrone, FIFO du BM5602) :
+**Lien radio : format BC5602 standard (type ShockBurst), etabli par l'audit
+puis verifie par emission sur la lampe.**
 
 ```
 preambule 01010101 | adresse 63 FD F0 4F | PCF 9 bits | charge | CRC-16
 ```
 
-- **Adresse sur l'air : `63 FD F0 4F`**, a ecrire **`4F F0 FD 63`** dans le
-  BM5602. Le motif `8F F7 C1 3C` utilise jusqu'au 22/09 n'est que cette
-  adresse vue avec deux bits de decalage : bon pour CORRELER en reception, faux
-  pour emettre. La regle du preambule le confirme sans passer par le CRC : une
-  adresse qui commence par 0 appelle le preambule 01010101, celui qu'emet la
-  telecommande.
+- Canal 5 (2405 MHz), 125 kbps, preambule d'un octet.
+- **Adresse sur l'air `63 FD F0 4F`, a ecrire `4F F0 FD 63`** dans le BM5602
+  (ordre inverse). Elle est propre a la paire telecommande/lampe et vient de
+  l'appairage ; `lampe adresse` la change. `8F F7 C1 3C`, utilise jusqu'au
+  22/09, n'en est qu'une vue decalee de deux bits : bon pour correler en
+  reception, faux pour emettre (0 accuse sur 10).
 - **PCF de 9 bits** : longueur de charge (6 bits), PID (2 bits), NO_ACK (1 bit).
-- **CRC-16/CCITT 0x1021, etat initial 0xFFFF**, sur adresse + PCF + charge --
-  exactement le CRC materiel du BC5602. Les etats initiaux 0xDFBE et 0xF55A
-  trouves dans la nuit ne sont que 0xFFFF avance de un ou deux bits : des
-  artefacts du decalage. Le 0xEFDF du projet Halo 2 est le meme artefact, avec
-  un bit de decalage.
-- **Commande (telecommande -> lampe)** : longueur 2, NO_ACK=0, charge de deux
-  octets, le plus souvent `C4 xx` (vus aussi : C5, 44, 85, C3 en tete). Sens des
-  octets : INCONNU.
-- **Accuse (lampe -> telecommande)** : longueur 0, meme PID que la commande
-  (9 paires sur 9), NO_ACK=1. **L'accuse du Halo 1 est vide** : contrairement au
-  Halo 2, on ne peut pas lire l'etat de la lampe en l'interrogeant.
-- Canal 5 (2405 MHz), 125 kbps.
+- **CRC-16/CCITT 0x1021, etat initial 0xFFFF**, sur adresse + PCF + charge :
+  le CRC materiel du BC5602. Les etats 0xDFBE, 0xF55A (Halo 1) et 0xEFDF
+  (projet Halo 2) ne sont que 0xFFFF avance d'un ou deux bits.
+- **Commande** (telecommande -> lampe) : longueur 2, NO_ACK=0.
+  **Accuse** (lampe -> telecommande) : longueur 0, meme PID, NO_ACK=1. L'accuse
+  est **vide** : l'etat de la lampe ne se lit pas. Le pilote suit ce qu'il
+  envoie et ce qu'il entend de la telecommande ; la lampe n'emet rien d'autre
+  que ses accuses.
+- Le PID avance apres chaque trame accusee (vu sur l'air, banc T1). D'apres le
+  datasheet, un recepteur ecarte une trame de meme PID et meme CRC que la
+  precedente, tout en l'accusant.
+- 23/09, telecommande sans piles : `txack` de `C4 FE` sur `4F F0 FD 63`,
+  10 accuses sur 10 et la lampe passe du minimum au quasi-maximum ; temoin sur
+  l'adresse decalee `3C C1 F7 8F`, 0 sur 10.
 
-**23/09 : LA LAMPE OBEIT.** Emission au format standard (`txack`), charge
-dynamique, CRC materiel, accuse automatique, canal 5, telecommande SANS piles :
+**Charge : deux octets, drapeaux puis valeur. Semantique confirmee par
+emission (23/09) et par le pilote au banc (T1-T3, T8).**
 
-| adresse | charge | accuses | effet sur la lampe |
-|---|---|---|---|
-| `3C C1 F7 8F` (ancienne, decalee) -- temoin | `C4 FE` | **0 / 10** | aucun |
-| `4F F0 FD 63` (vraie, sur l'air `63 FD F0 4F`) | `C4 FE` | **10 / 10**, 1,6 ms chacun | luminosite du minimum au quasi-maximum |
+| bit du 1er octet | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+|---|---|---|---|---|---|---|---|---|
+| sens | marche | lampe avant | bouton A | reserve | reserve | luminosite | temperature | lampe arriere |
 
-Adresse, format, CRC et chaine d'emission sont valides de bout en bout sur la
-vraie lampe. Premiere hypothese sur la charge, a verifier : `C4` = reglage de
-luminosite, octet suivant = `1` + niveau sur 7 bits (`FE` -> 126 sur 127).
+- Chaque trame d'etat est **absolue** : marche et lampes a chaque fois, plus
+  exactement un selecteur (bit 5, 2 ou 1) qui dit ce que porte le 2e octet.
+  Exemples : `C3 35` les deux lampes, temperature 35 ; `C2 35` avant seule ;
+  `83 35` arriere seule ; `C5 A5` les deux, luminosite A5 ; `42 64` eteinte.
+  Le bouton marche de la telecommande renvoie sa derniere trame d'etat, bit 7
+  inverse ; le switch de lampes, son dernier type de reglage avec les
+  nouveaux bits de lampe.
+- **Luminosite** (bit 2) : `4C` a `FE`. `4C` est le plancher reel de la
+  lampe (rien ne change en dessous) ; perception logarithmique. Changer de
+  lampes par une trame de luminosite marche (`C4 A5` = avant seule, T2).
+  Chaque lampe garde-t-elle sa propre luminosite : ouvert (banc T7).
+- **Temperature** (bit 1) : `00` le plus froid a `64` (100) le plus chaud.
+- **Bouton A** (bit 5) : le 2e octet est un numero d'appui (01, 02...). Un
+  numero deja traite est ignore, un nouveau relance l'effet : la lampe baisse
+  puis remonte (mode automatique ; bascule ou relance, non tranche). Une
+  trame A ne vaut pas etat (vu `60 01`, bit 7 a zero). `E1 01`, jamais emis
+  par la telecommande, est compris : c'est bien un champ de bits.
+- **Bits 3 et 4** : vus seulement dans le rappel du favori (`91 00`,
+  `89 xx`), sans effet visible a l'emission : jamais emis. Le favori rejoue un
+  etat complet (mode, luminosite, puis `91`, `89`).
+- **Trames de service** : `FF 00`, `FE 00`, `FD 00` (reveil, NO_ACK=0) et
+  `FA xx`, seule trame a NO_ACK=1 (`A8`, puis `F8` apres remise des piles).
+- Cadence : les boutons emettent chaque etat en 3 copies a ~100 ms, la
+  molette une trame isolee toutes les ~112 ms. Une trame seule n'a pas suffi
+  une fois (test 1), trois oui : le pilote emet chaque trame 3 fois a 100 ms
+  (T1). Les essais « `txack ... 3 300` » du 23/09 ont en fait tourne a
+  **500 ms** : la CLI borne l'ecart a 500 ms sur le canal 5.
+- Apres une coupure d'alimentation (USB debranche), la lampe reste eteinte et
+  garde ses reglages (T6).
 
-**Semantique de la charge -- premiers essais (telecommande sans piles).**
-| charge | etat de depart | effet observe |
-|---|---|---|
-| `C4 FE` x1 | minimum | quasi-maximum (une seule trame suffit : niveau ABSOLU) |
-| `C4 9C` x3 | maximum | legere baisse percue |
-| `C4 80` x1 | maximum | « a peu pres la moitie ou plus bas » |
+**Appairage.** La telecommande emet une balise sur `59 01 00 B0` (a ecrire
+`B0 00 01 59`), canal 5, 125 kbps, charges `5A 5A`, `F5 C3`, `CF 49` en
+cycle ; la lampe en mode appairage l'accuse (accuse vide). L'adresse de lien
+en derive par une fonction inconnue ; elle n'a pas change apres un
+re-appairage. Ne jamais emettre ni accuser sur une adresse d'appairage (Halo 1,
+ni Halo 2 `E2 08 00 B0`) : `txack`, `prxack`, `addr` et le pilote les
+refusent. Pour observer : `ecoute B0000159 5`.
 
-Hypothese la plus compatible : `C4` = luminosite, 2e octet = niveau sur 8 bits.
-L'hypothese d'un niveau sur 7 bits est ecartee (`C4 80` aurait donne le
-minimum). Observations a l'oeil, donc a confirmer par l'ecoute de la
-telecommande (`ecoute 4FF0FD63 5`).
+**Outils.** Produit : le pilote (`lampe ...`, `src/halo1_*`) et le pont
+Matter. Banc : `txack` (emission standard, accuse automatique, verdict
+TX_DS/MAX_RT), `ecoute` (reception passive qui n'accuse jamais, decodee par
+`halo1::decodeAir`, le decodeur du pilote), `prxack` (recepteur de banc qui
+accuse). La couche Halo 2 d'origine (charge de 10 octets, etat relu dans
+l'accuse, interrogation toutes les 5 s) et ses outils sont retires (etape C6,
+24/09) : `poll`, `send`, `find`, `pair`, `sniff`, `tail`, `debug`, `normal`,
+les chasses `appaire`, `preambule`, `ancre`, et `benq`, `tx6`, `txraw`,
+bases sur des modeles refutes.
 
-**Outils valides le 23/09** : `txack` (emission standard avec accuse, verdict
-TX_DS/MAX_RT, reconfiguration apres chaque echec), `ecoute` (reception
-passive qui n'accuse jamais, PCF et CRC decodes en logiciel ; valide sur banc,
-canal 40 : C4 FE et C4 80 decodes neuf fois chacun), `prxack` (recepteur de
-banc).
+**Questions ouvertes** : sens exact du bouton A et des bits 3/4 ; luminosite
+propre a chaque lampe (T7) ; pourquoi une trame seule a ete ignoree (reveil de
+la lampe ou doublon de PID) ; fonction qui derive l'adresse de lien de la
+balise.
 
-**Emission, avant le 23/09 : rien n'avait fonctionne, et on comprend pourquoi.** Les essais
-`tx6` (un accuse mal forme) puis `txraw` (bonne trame bit pour bit, mais avec
-l'adresse decalee, donc le mauvais preambule, et 1800 copies de meme PID que
-la lampe ecarte comme doublons) ne pouvaient pas marcher. Prochain essai :
-emission en mode materiel standard, charge dynamique et accuse automatique,
-adresse `4F F0 FD 63` ; la puce indique alors d'elle-meme si la lampe a accuse
-reception (TX_DS) ou non (MAX_RT). Plan detaille : section 4 de l'audit.
-
-**Passages de ce document INFIRMES par l'audit** (a ne plus citer) :
+**Passages du journal ci-dessous INFIRMES** (a ne plus citer) :
 
 | Passage | Ce qui est faux |
 |---|---|
+| « Statut des informations », « Couche radio », « Payload (10 octets) », « Appairage » (`E2 08 00 B0`), « Retrouver l'adresse » | Halo 2 : charge de 10 octets, etat lu dans l'accuse, octets de queue, capteur, interrogation toutes les 5 s. Rien de cela ne vaut pour le Halo 1 ; les commandes citees n'existent plus. |
 | « Structure de trame Halo 1, confirmee sans le CRC » (6 octets, 72 = 48+16+8) | La commande porte 2 octets, l'accuse aucun ; la deuxieme adresse est l'accuse de la lampe, pas une retransmission ; `7A FF` etait un faux positif. |
 | « Deux familles de trames : commandes et accuses » (en-tete [longueur 4][compteur 2][type 2], etats 0xDFBE / 0xF55A, « 19 commandes exactes ») | En-tete a cheval sur le PCF et la charge ; un seul etat initial 0xFFFF ; environ 31 commandes sur 32 sont exactes avec le bon modele. |
-| « Le verrou : obtenir une trame B exacte » | Faux : les trames etaient exactes, c'est notre decoupage qui etait decale. Le verrou est l'emission. |
+| « Le verrou : obtenir une trame B exacte » | Faux : les trames etaient exactes, c'est notre decoupage qui etait decale. Le verrou etait l'emission, levee le 23/09. |
 | « Biais d'erreur : 100 % des 1 lus comme 0 » | Observe sur 7 cas, contre une reference elle-meme decalee. Non etabli. |
 | Trim du quartz, valeurs analogiques, distance « elimines » | Chaque condition ne comptait que 7 a 9 trames, jugees avec un modele de CRC faux, et le bras « holtek 0 » tournait sans AGC (bogue B5). Seul un effet d'un facteur 3 ou plus est exclu. |
 | Tout passage sur le PCF « d'un octet plein » | Le PCF fait 9 bits ; l'« octet plein » venait de l'adresse decalee. |
+| « Le debit de la telecommande n'est pas 125 kbps » | 125 kbps, confirme par l'emission. |
 | GIO3 « en amont du correlateur », « voie RF close », « contradiction etablie » | Deja infirme plus bas dans ce document ; explique par l'adresse. |
+| « Premiere lecture de la charge » (lectures provisoires, « a confirmer ») | Tranche par la section « Semantique CONFIRMEE par emission » et par le tableau ci-dessus. |
 
 
 ## Statut des informations
+
+> **HISTORIQUE.** A partir d'ici, journal chronologique. Les sections qui
+> suivent, jusqu'a « Ce que la campagne de mesure du 21/09/2026 a etabli »,
+> decrivent le Halo 2 et l'ancien firmware : elles ne valent pas pour la
+> lampe (Halo 1), et les commandes CLI citees (`find`, `pair`, `sniff`,
+> `send`, `tail`, `benq`, `tx6`, `txraw`, `appaire`, `preambule`, `ancre`...)
+> n'existent plus. L'etat du 24/09 est le bloc d'en-tete.
 
 Tout ce document vient de la rétro-ingénierie du **ScreenBar Halo 2** par
 [kuzmin-no](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration),

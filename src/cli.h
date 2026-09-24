@@ -2,8 +2,8 @@
 
 #include <Arduino.h>
 
-// Petite console série de mise au point : mise en service radio, recherche
-// d'adresse, sniffer, envoi de trames brutes, état Matter.
+// Petite console serie de mise au point : pilote Halo 1 ('lampe'), outils de
+// banc radio (txack, ecoute, sondes BM5602 et CC2500), etat Matter.
 // `cliPoll()` est non bloquante et doit être appelée depuis loop().
 void cliBegin();
 

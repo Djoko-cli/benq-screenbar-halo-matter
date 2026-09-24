@@ -11,15 +11,9 @@ using namespace bc5602;
 
 BenqHalo halo;
 
-// Les trois canaux declares dans le dossier FCC. Le Halo 2 n'a ete observe que
-// sur le premier, mais rien ne garantit que le Halo 1 fasse pareil.
-static constexpr uint8_t kSweepChannels[3] = {RF_CHANNEL_1, RF_CHANNEL_2, RF_CHANNEL_3};
-// Le debit n'a jamais ete verifie sur le Halo 1 : il vient du Halo 2. Trois
-// valeurs seulement, autant les balayer plutot que de parier.
-static constexpr uint8_t kSweepRates[3] = {DATARATE_125K, DATARATE_250K, DATARATE_500K};
-static constexpr const char *kSweepRateNames[3] = {"125k", "250k", "500k"};
-static constexpr uint8_t kSweepCombos = 9;  // 3 debits x 3 canaux
-static constexpr uint32_t kSweepDwellMs = 3000;
+// Longueur lue par prepareToSniff (RXPW0), reprise par 'guet' quand PKT4, non
+// fiable en longueur statique, ne dit rien.
+static constexpr uint8_t kToolRxLen = 13;
 
 // ---------------------------------------------------------------------------
 //  Cycle de vie
@@ -37,8 +31,6 @@ bool BenqHalo::begin() {
     radio.calibrate();
     prepareToSniff();
   }
-  lastPoll_ = millis();
-  settledAt_ = millis();
   return ok;
 }
 
@@ -54,10 +46,9 @@ void BenqHalo::loadConfig() {
   // isKey() d'abord : interroger une cle absente logue une erreur NVS.
   if (!prefs_.isKey("addr") || prefs_.getBytes("addr", addr_, sizeof(addr_)) != sizeof(addr_))
     memset(addr_, 0, sizeof(addr_));
-  if (!prefs_.isKey("tail") || prefs_.getBytes("tail", tail_, sizeof(tail_)) != sizeof(tail_)) {
-    tail_[0] = 0x01;
-    tail_[1] = 0x02;
-  }
+  // Octets de queue de la couche Halo 2, retiree (etape C6) : la cle est
+  // effacee au premier demarrage qui la trouve, puis ne revient plus.
+  if (prefs_.isKey("tail")) prefs_.remove("tail");
   channel_ = prefs_.getUChar("chan", RF_CHANNEL_1);
   dataRate_ = prefs_.getUChar("rate", DATARATE_125K);
   prefs_.end();
@@ -66,7 +57,6 @@ void BenqHalo::loadConfig() {
 void BenqHalo::saveConfig() {
   prefs_.begin("benqhalo", false);
   prefs_.putBytes("addr", addr_, sizeof(addr_));
-  prefs_.putBytes("tail", tail_, sizeof(tail_));
   prefs_.putUChar("chan", channel_);
   prefs_.putUChar("rate", dataRate_);
   prefs_.end();
@@ -79,24 +69,18 @@ bool BenqHalo::addressConfigured() const {
 void BenqHalo::setAddress(const uint8_t addr[4]) {
   memcpy(addr_, addr, 4);
   saveConfig();
-  if (radio.present() && mode_ == HaloMode::Normal) prepareToSniff();
-}
-
-void BenqHalo::setTail(uint8_t a, uint8_t b) {
-  tail_[0] = a;
-  tail_[1] = b;
-  saveConfig();
+  if (radio.present()) prepareToSniff();
 }
 
 void BenqHalo::setPreambleTwoBytes(bool two) {
   preambleTwoBytes_ = two;
-  if (radio.present() && mode_ == HaloMode::Normal) prepareToSniff();
+  if (radio.present()) prepareToSniff();
 }
 
 void BenqHalo::setChannel(uint8_t ch) {
   channel_ = ch;
   saveConfig();
-  if (radio.present() && mode_ == HaloMode::Normal) prepareToSniff();
+  if (radio.present()) prepareToSniff();
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +110,6 @@ void BenqHalo::sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_
   cfg1 = (uint8_t)((cfg1 | CFG1_AGC_EN) & (uint8_t)~CFG1_DIR_EN);
   radio.writeRegister(REG_CFG1 | CMD_WRITE_REGISTER, cfg1);
   radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);
-  addrLenBits_ = addrLenBits;
   radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(dataRate_ | addrLenBits));
 
   // PAS de calibration ici. Mesure a l'appui (commande 'rxseq') : calibrer juste
@@ -145,26 +128,6 @@ void BenqHalo::sharedRadioConfig(uint8_t addrLenBits, const uint8_t *addr, size_
   radio.writeRegister(B0_CFO1 | CMD_WRITE_REGISTER, cfo1);
 }
 
-void BenqHalo::prepareToTransfer() {
-  sharedRadioConfig(ADDR_LEN_4, addr_, 4);
-
-  // PRM_RX = 0 : emetteur primaire.
-  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, mask & (uint8_t)~MASK_PRM_RX);
-
-  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0b00000001);  // payload dynamique
-  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0b00000100);
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, PKT1_CRC_ENABLE);
-  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, ENAA_ALL_PIPES);
-  radio.writeRegister(REG_RT1 | CMD_WRITE_REGISTER, 0x72);  // 2 ms de delai, 2 retransmissions
-
-  // CE = 1 : meme defaut que celui trouve a l'etalonnage. Sans lui la puce
-  // reste en Light Sleep, FIFO pleine, et n'emet jamais (ds.txt:711).
-  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x01);
-
-  ackMode_ = true;
-}
-
 void BenqHalo::resetRadio() {
   radio.softwareReset();
   radio.registerConfigure();  // le reset remet les registres aux valeurs de POR
@@ -173,522 +136,33 @@ void BenqHalo::resetRadio() {
 }
 
 void BenqHalo::prepareToSniff() {
-  // Sans auto-ACK, le materiel perd aussi le CRC et la longueur dynamique : le
-  // PCF de 9 bits reste dans le flux et decale tout d'un bit (corrige a la
-  // lecture de la FIFO). Indispensable : si on gardait l'auto-ACK, notre module
-  // acquitterait les trames de la telecommande en meme temps que la lampe.
-  sharedRadioConfig(ADDR_LEN_4, sniffOverride_ ? sniffAddr_ : addr_, 4);
+  // Reception passive sur l'adresse enregistree : ni accuse, ni CRC, ni charge
+  // dynamique. Sans accuse, le PCF de 9 bits reste dans le flux lu. Jamais
+  // d'auto-ACK ici : notre module acquitterait les trames de la telecommande
+  // en meme temps que la lampe.
+  sharedRadioConfig(ADDR_LEN_4, addr_, 4);
 
   uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
   radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, mask | MASK_PRM_RX);
 
   radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-  // 13 = PCF(1) + payload(10) + CRC(2). Le projet Halo 2 comptait 12 en
-  // supposant un PCF de 9 bits ; la trame reelle publiee par Termina1
-  // (54 04 10 0C 0F 55 5B 0F 55 01 02 20 B9) montre un PCF d'un octet plein
-  // suivi immediatement du payload, CRC inclus dans la FIFO.
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 13);
-  staticRxLen_ = 13;
+  // 13 octets lus apres l'adresse : longueur historique des outils de banc,
+  // gardee telle quelle. Elle venait du Halo 2 (PCF suppose d'un octet plein,
+  // 10 octets de charge, CRC), hypothese refutee : le PCF fait 9 bits et une
+  // commande Halo 1 porte 2 octets (docs/PROTOCOL.md).
+  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, kToolRxLen);
   radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
   radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
 
   radio.clearInterrupts();
   radio.command(CMD_FLUSH_RX_FIFO);
   radio.enterRxMode();
-
-  ackMode_ = false;
 }
 
 // ---------------------------------------------------------------------------
-//  Echanges bruts
+//  Outils de banc
 // ---------------------------------------------------------------------------
-
-bool BenqHalo::sendWithAck(const uint8_t payload[10]) {
-  radio.command(CMD_FLUSH_TX_FIFO);
-  delay(1);
-  radio.writeCommandData(CMD_WRITE_TX_FIFO_WITH_ACK, payload, 10);
-  radio.command(CMD_TX_MODE);
-  delay(5);
-
-  // La FIFO TX vide signale que la trame est partie et a ete acquittee.
-  if (!(radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_TX_FIFO_EMPTY)) {
-    radio.command(CMD_TX_MODE);
-    delay(5);
-  }
-  bool sent = radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_TX_FIFO_EMPTY;
-  if (debug) {
-    Serial.print(sent ? "TX  > " : "TX! > ");
-    for (int i = 0; i < 10; i++) Serial.printf("%02X ", payload[i]);
-    Serial.println();
-  }
-  return sent;
-}
-
-bool BenqHalo::readAck(uint8_t out[10]) {
-  radio.readFifo(out, 10, false);
-  if (debug) {
-    Serial.print("ACK < ");
-    for (int i = 0; i < 10; i++) Serial.printf("%02X ", out[i]);
-    Serial.println();
-  }
-  return true;
-}
-
-bool BenqHalo::sniffOnce(uint8_t payload[10], uint8_t *pcfLen, uint8_t *pid, uint8_t *noAck) {
-  if (txBusy_) return false;
-  if (ackMode_) prepareToSniff();
-  if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-
-  // Bit RX_DR actif a l'etat bas : 0 = des donnees attendent.
-  if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) return false;
-
-  // Compte des que le materiel signale une trame, AVANT tout filtrage : c'est
-  // le seul moyen que "0 trame" veuille vraiment dire "rien recu".
-  rxEvents_++;
-
-  uint8_t len = radio.readRegister(REG_PKT4 | CMD_READ_REGISTER);
-  if (len < 11 || len > 32) len = staticRxLen_;  // PKT4 non fiable en longueur statique
-
-  uint8_t buf[32];
-  // PAS de decalage d'un bit : le PCF occupe un octet plein et le payload suit
-  // immediatement. Le recalage herite du projet Halo 2 corrompait les donnees.
-  radio.readFifo(buf, len, false);
-  memcpy(payload, buf + 1, 10);
-
-  uint8_t pcf = buf[0];
-  if (pcfLen) *pcfLen = (pcf & 0b11111000) >> 3;
-  if (pid) *pid = (pcf & 0b00000110) >> 1;
-  if (noAck) *noAck = pcf & 0b00000001;
-
-  radio.clearInterrupts();
-  radio.command(CMD_FLUSH_TX_FIFO);
-  radio.command(CMD_FLUSH_RX_FIFO);
-  radio.enterRxMode();
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-//  Protocole
-// ---------------------------------------------------------------------------
-
-void BenqHalo::buildPayload(uint8_t cmd, uint8_t out[10], bool autoMode) const {
-  // 0 = avant seule, 1 = arriere seule, 2 = les deux
-  uint8_t lamps = 0;
-  if (desired.back) lamps = (uint8_t)(1 + (desired.front ? 1 : 0));
-
-  uint8_t control = 0;
-  if (desired.power) control |= 0b00000001;
-  if (autoMode) control |= 0b00000010;
-  control |= (uint8_t)(lamps << 3);
-  if (desired.sensor) control |= 0b00100000;
-
-  out[0] = cmd;
-  out[1] = control;
-  out[2] = constrain((int)desired.frontBrightness, HALO_BRIGHT_MIN, HALO_BRIGHT_MAX);
-  out[3] = (uint8_t)(desired.colorTempK >> 8);
-  out[4] = (uint8_t)(desired.colorTempK & 0xFF);
-  out[5] = constrain((int)desired.backBrightness, HALO_BRIGHT_MIN, HALO_BRIGHT_MAX);
-  out[6] = out[3];
-  out[7] = out[4];
-  out[8] = tail_[0];
-  out[9] = tail_[1];
-}
-
-uint16_t BenqHalo::frameCrcFor(const uint8_t airAddr[4], uint8_t pcf, const uint8_t payload[10]) {
-  auto feed = [](uint16_t crc, uint8_t b) {
-    crc ^= (uint16_t)b << 8;
-    for (uint8_t i = 0; i < 8; i++) crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-    return crc;
-  };
-  uint16_t crc = 0xEFDF;
-  for (uint8_t i = 0; i < 4; i++) crc = feed(crc, airAddr[i]);
-  crc = feed(crc, pcf);
-  for (uint8_t i = 0; i < 10; i++) crc = feed(crc, payload[i]);
-  return crc;
-}
-
-uint16_t BenqHalo::frameCrc(uint8_t pcf, const uint8_t payload[10]) const {
-  auto feed = [](uint16_t crc, uint8_t b) {
-    crc ^= (uint16_t)b << 8;
-    for (uint8_t i = 0; i < 8; i++) crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-    return crc;
-  };
-  uint16_t crc = 0xEFDF;
-  // addr_ est en ordre d'ecriture registre ; le CRC couvre l'ordre SUR L'AIR,
-  // qui en est l'inverse.
-  for (uint8_t i = 4; i > 0; i--) crc = feed(crc, addr_[i - 1]);
-  crc = feed(crc, pcf);
-  for (uint8_t i = 0; i < 10; i++) crc = feed(crc, payload[i]);
-  return crc;
-}
-
-bool BenqHalo::frameCrcOk(const uint8_t f[13]) const {
-  uint16_t expected = (uint16_t)((f[11] << 8) | f[12]);
-  return frameCrc(f[0], f + 1) == expected;
-}
-
-bool BenqHalo::validate(const uint8_t p[10]) const {
-  if (p[0] > HALO_CMD_SLEEP) return false;
-  // Seule la borne haute est controlee : rien ne garantit que la lampe ne
-  // rapporte pas 0 % quand elle est eteinte.
-  if (p[2] > HALO_BRIGHT_MAX || p[5] > HALO_BRIGHT_MAX) return false;
-
-  // 0xFF 0xFF = joker, utile tant que les octets de queue du Halo 1 ne sont pas
-  // confirmes (voir la commande CLI "tail").
-  if (!(tail_[0] == 0xFF && tail_[1] == 0xFF)) {
-    if (p[8] != tail_[0] || p[9] != tail_[1]) return false;
-  }
-
-  uint16_t ct = (uint16_t)(p[3] << 8) | p[4];
-  if (ct < HALO_CT_MIN_K || ct > HALO_CT_MAX_K) return false;
-  ct = (uint16_t)(p[6] << 8) | p[7];
-  if (ct < HALO_CT_MIN_K || ct > HALO_CT_MAX_K) return false;
-  return true;
-}
-
-void BenqHalo::parseStatus(const uint8_t p[10]) {
-  reported.power = p[1] & 0b00000001;
-  reported.sensor = (p[1] & 0b00100000) >> 5;
-  uint8_t lamps = (p[1] & 0b00011000) >> 3;
-  reported.front = (lamps == 0) || (lamps == 2);
-  reported.back = (lamps == 1) || (lamps == 2);
-  reported.frontBrightness = p[2];
-  reported.backBrightness = p[5];
-  reported.colorTempK = (uint16_t)(p[3] << 8) | p[4];
-}
-
-// ---------------------------------------------------------------------------
-//  Haut niveau
-// ---------------------------------------------------------------------------
-
-void BenqHalo::requestPush(uint8_t cmd, bool autoMode) {
-  pendingCmd_ = cmd;
-  pendingAuto_ = autoMode;
-  // Une nouvelle demande annule l'enchainement eventuellement en attente.
-  // requestPushThen() repositionne followUpCmd_ juste apres.
-  followUpCmd_ = HALO_CMD_NONE;
-  dirtyAt_ = millis();
-  phase_ = HaloPhase::Push;
-}
-
-void BenqHalo::requestPushThen(uint8_t first, uint8_t second) {
-  requestPush(first);
-  followUpCmd_ = second;
-}
-
-bool BenqHalo::pollNow(uint8_t cmd) {
-  if (!radio.present() || !addressConfigured()) return false;
-
-  txBusy_ = true;
-  uint8_t pkt[10], ack[10];
-  buildPayload(cmd, pkt);
-  prepareToTransfer();
-  sendWithAck(pkt);
-  bool ok = readAck(ack) && validate(ack);
-  if (ok) parseStatus(ack);
-  checkTxFifo();
-  txBusy_ = false;
-
-  // On repasse en ecoute : la lampe n'emet rien d'elle-meme, mais la
-  // telecommande physique, si.
-  prepareToSniff();
-  return ok;
-}
-
-bool BenqHalo::settled() const {
-  return phase_ == HaloPhase::Idle && (millis() - settledAt_) > HALO_SETTLE_MS;
-}
-
-void BenqHalo::checkTxFifo() {
-  uint8_t status = radio.readRegister(REG_STATUS | CMD_READ_REGISTER);
-  if (!(status & STATUS_TX_FIFO_EMPTY) || (status & STATUS_TX_FIFO_FULL)) {
-    radio.softwareReset();
-    prepareToTransfer();
-    if (debug) Serial.println("BC5602 : reset logiciel (FIFO TX bloquee)");
-  }
-}
-
-void BenqHalo::adoptReported() {
-  // La telecommande physique a peut-etre change l'etat : on aligne la consigne
-  // sur le reel, sinon la prochaine commande venue de Matter annulerait ce changement.
-  if ((millis() - settledAt_) < HALO_ADOPT_MS) return;
-  desired = reported;
-}
-
-// ---------------------------------------------------------------------------
-//  Boucle principale
-// ---------------------------------------------------------------------------
-
-void BenqHalo::tick() {
-  // Couche Halo 2 neutralisee dans TOUS les builds (plan du pilote Halo 1,
-  // etape C1) : AUCUNE activite radio de fond. Mesure a l'appui (audit du
-  // 23/09) : en mode normal, cette boucle appelait pollNow() toutes les 5 s,
-  // qui EMET une trame au format Halo 2 vers l'adresse enregistree -- elle a
-  // tourne toute la nuit en arriere-plan des mesures, et emettait vers la
-  // lampe sans qu'on l'ait demande. Or la lampe est un Halo 1 : ce protocole
-  // ne la concerne pas. La radio ne bouge plus que sur commande, jusqu'au
-  // pilote Halo 1 ; le code ci-dessous disparait a l'etape C6. Depuis C5, le
-  // pont Matter passe par ce pilote (lamp) et n'appelle plus requestPush.
-  return;
-  if (!radio.present()) return;
-  uint32_t now = millis();
-  switch (mode_) {
-    case HaloMode::Sniffer: tickSniffer(now); break;
-    case HaloMode::Finder: tickFinder(now); break;
-    default: tickNormal(now); break;
-  }
-}
-
-void BenqHalo::tickNormal(uint32_t now) {
-  if (!addressConfigured()) return;
-
-  switch (phase_) {
-    case HaloPhase::Push: {
-      // Regroupe les rafales : bouger un curseur dans une app genere des dizaines
-      // d'updates, la lampe n'en supporte pas le rythme.
-      if (now - dirtyAt_ < HALO_COALESCE_MS) return;
-
-      txBusy_ = true;
-      uint8_t pkt[10];
-      buildPayload(pendingCmd_ == HALO_CMD_NONE ? HALO_CMD_SET : pendingCmd_, pkt, pendingAuto_);
-      prepareToTransfer();
-      sendWithAck(pkt);
-      memcpy(verifyRef_, pkt + 1, 9);
-      pendingAuto_ = false;
-      verifyTries_ = 0;
-      lastOp_ = now;
-      lastPoll_ = now;
-      txBusy_ = false;
-      phase_ = HaloPhase::Verify;
-      return;
-    }
-
-    case HaloPhase::Verify: {
-      // La lampe applique les changements en fondu : on redemande l'etat
-      // jusqu'a convergence plutot que de bloquer sur un delai fixe.
-      if (now - lastOp_ < HALO_VERIFY_INTERVAL_MS) return;
-      lastOp_ = now;
-
-      txBusy_ = true;
-      uint8_t pkt[10], ack[10];
-      buildPayload(HALO_CMD_SYNC, pkt);
-      prepareToTransfer();
-      sendWithAck(pkt);
-      bool done = false;
-      if (readAck(ack) && validate(ack)) {
-        parseStatus(ack);
-        done = (memcmp(ack + 1, verifyRef_, 9) == 0);
-      }
-      checkTxFifo();
-      txBusy_ = false;
-
-      if (done || ++verifyTries_ >= HALO_VERIFY_MAX_TRIES) {
-        if (debug && !done) Serial.println("Halo : convergence non atteinte, on abandonne");
-        settledAt_ = now;
-        lastPoll_ = now;
-        if (followUpCmd_ != HALO_CMD_NONE) {
-          uint8_t next = followUpCmd_;
-          followUpCmd_ = HALO_CMD_NONE;
-          requestPush(next);
-        } else {
-          pendingCmd_ = HALO_CMD_NONE;
-          phase_ = HaloPhase::Idle;
-          prepareToSniff();
-        }
-      }
-      return;
-    }
-
-    case HaloPhase::Idle:
-    default: {
-      if (now - lastPoll_ >= HALO_POLL_INTERVAL_MS) {
-        lastPoll_ = now;
-        if (pollNow()) adoptReported();
-        return;
-      }
-      // Ecoute passive de la telecommande physique.
-      uint8_t pkt[10];
-      uint8_t noAck = 0;
-      if (sniffOnce(pkt, nullptr, nullptr, &noAck) && validate(pkt)) {
-        parseStatus(pkt);
-        adoptReported();
-        lastPoll_ = now;
-        if (debug) {
-          Serial.print("RC  < ");
-          for (int i = 0; i < 10; i++) Serial.printf("%02X ", pkt[i]);
-          Serial.println();
-        }
-      }
-      return;
-    }
-  }
-}
-
-void BenqHalo::tickSniffer(uint32_t now) {
-  (void)now;
-  uint8_t pkt[10], len = 0, pid = 0, noAck = 0;
-  if (!sniffOnce(pkt, &len, &pid, &noAck)) return;
-  Serial.printf("[sniff] len=%2u pid=%u noack=%u  ", len, pid, noAck);
-  for (int i = 0; i < 10; i++) Serial.printf("%02X ", pkt[i]);
-  Serial.printf(" %s\n", validate(pkt) ? "(format plausible)" : "");
-}
-
-// ---------------------------------------------------------------------------
-//  Recherche d'adresse
-//
-//  Principe (repris de find_halo2_address.py, generalise) : on regle une
-//  pseudo-adresse de 3 octets sur une sequence du PAYLOAD dont on connait la
-//  valeur, parce qu'on vient de la regler a la telecommande. Le recepteur se
-//  verrouille donc au milieu d'une trame, puis continue a echantillonner : les
-//  retransmissions automatiques font apparaitre le DEBUT de la trame suivante,
-//  c'est-a-dire le preambule 0xAA suivi de la vraie adresse.
-//
-//  Le script d'origine lisait l'adresse a un offset fixe. Ici on balaie les 8
-//  alignements de bits et toute la fenetre capturee, puis on compte les
-//  occurrences : le bon candidat ressort, le bruit non. Necessaire car le
-//  Halo 1 n'a aucune raison d'avoir exactement le meme timing inter-trames.
-// ---------------------------------------------------------------------------
-
-void BenqHalo::findAddressBegin(const uint8_t sync3[3], uint32_t durationMs, bool sweepChannels) {
-  resetRadio();  // sans cela la puce peut refuser d'entrer en RX pour toute la capture
-  candCount_ = 0;
-  memset(candHits_, 0, sizeof(candHits_));
-  finderDeadline_ = millis() + durationMs;
-  rxEvents_ = 0;
-  sweepChannels_ = sweepChannels;
-  sweepIdx_ = 0;
-  sweepAt_ = millis() + kSweepDwellMs;
-
-  sharedRadioConfig(ADDR_LEN_3, sync3, 3);
-
-  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, mask | MASK_PRM_RX);
-  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-  // 32 octets : de quoi contenir la fin de la trame accrochee, le preambule et
-  // l'adresse de la suivante, PUIS sa trame complete (PCF + payload + CRC).
-  // C'est ce qui permet de valider une adresse candidate par son CRC.
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
-  staticRxLen_ = 32;
-  finderConfirmed_ = false;
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
-  radio.command(CMD_FLUSH_RX_FIFO);
-  bool rx = radio.enterRxMode();
-  Serial.printf("  entree en reception : %s (OMST=%u)\n", rx ? "OK" : "ECHEC",
-                radio.operationMode());
-
-  ackMode_ = false;
-  mode_ = HaloMode::Finder;
-}
-
-void BenqHalo::noteFinderCandidate(const uint8_t addr[4]) {
-  for (uint8_t i = 0; i < candCount_; i++) {
-    if (memcmp(candAddr_[i], addr, 4) == 0) {
-      candHits_[i]++;
-      return;
-    }
-  }
-  if (candCount_ < kMaxCandidates) {
-    memcpy(candAddr_[candCount_], addr, 4);
-    candHits_[candCount_] = 1;
-    candCount_++;
-    return;
-  }
-  // Table pleine : on remplace le candidat le plus faible.
-  uint8_t weakest = 0;
-  for (uint8_t i = 1; i < candCount_; i++)
-    if (candHits_[i] < candHits_[weakest]) weakest = i;
-  if (candHits_[weakest] <= 1) {
-    memcpy(candAddr_[weakest], addr, 4);
-    candHits_[weakest] = 1;
-  }
-}
-
-void BenqHalo::tickFinder(uint32_t now) {
-  if ((int32_t)(now - finderDeadline_) >= 0) {
-    printFinderSummary(Serial);
-    setMode(HaloMode::Normal);
-    return;
-  }
-
-  // Le canal du Halo 1 n'est pas confirme : le dossier FCC en mentionne trois.
-  if (sweepChannels_ && (int32_t)(now - sweepAt_) >= 0) {
-    sweepIdx_ = (uint8_t)((sweepIdx_ + 1) % kSweepCombos);
-    uint8_t ch = kSweepChannels[sweepIdx_ % 3];
-    uint8_t rateIdx = (uint8_t)(sweepIdx_ / 3);
-    // Changer de frequence ou de debit invalide la courbe VCO : repasser en
-    // Light Sleep, regler, recalibrer, puis seulement revenir en reception.
-    radio.softwareReset();
-    radio.registerConfigure();
-    radio.clearInterrupts();
-    radio.command(CMD_LIGHT_SLEEP);
-    radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(kSweepRates[rateIdx] | addrLenBits_));
-    radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, ch);
-    radio.command(CMD_FLUSH_RX_FIFO);
-    bool rx = radio.enterRxMode();
-    sweepAt_ = now + kSweepDwellMs;
-    Serial.printf("  find : %s @ %u MHz, RX=%s, %lu trame(s) brute(s)\n", kSweepRateNames[rateIdx],
-                  2400 + ch, rx ? "ok" : "ECHEC", (unsigned long)rxEvents_);
-  }
-
-  // Rearmement permanent : sans lui la puce retombe en Light Sleep et on
-  // n'ecoute qu'une fraction du temps de capture.
-  if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-
-  if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) return;
-
-  rxEvents_++;  // compte avant tout filtrage, cf. sniffOnce()
-
-  uint8_t len = radio.readRegister(REG_PKT4 | CMD_READ_REGISTER);
-  if (len == 0 || len > 32) len = staticRxLen_;
-
-  uint8_t raw[32];
-  radio.readFifo(raw, len, false);
-
-  uint8_t buf[32];
-  for (uint8_t shift = 0; shift < 8; shift++) {
-    memcpy(buf, raw, len);
-    for (uint8_t s = 0; s < shift; s++) BC5602::shiftRightOneBit(buf, len);
-
-    for (uint8_t i = 0; i + 5 < len; i++) {
-      if (buf[i] != 0xAA) continue;
-      if (buf[i + 1] == 0xAA) continue;  // on veut la FIN du preambule
-      if (buf[i + 1] == 0x00 && buf[i + 2] == 0x00 && buf[i + 3] == 0x00 && buf[i + 4] == 0x00) continue;
-      // Ordre d'ecriture registre = inverse de l'ordre sur l'air.
-      uint8_t cand[4] = {buf[i + 4], buf[i + 3], buf[i + 2], buf[i + 1]};
-
-      // Verification decisive : si la trame qui suit l'adresse candidate tient
-      // dans la fenetre, son CRC ne peut tomber juste que pour la BONNE adresse.
-      if (!finderConfirmed_ && (uint16_t)(i + 18) < len) {
-        const uint8_t *air = &buf[i + 1];
-        uint8_t pcf = buf[i + 5];
-        const uint8_t *pl = &buf[i + 6];
-        uint16_t got = (uint16_t)((buf[i + 16] << 8) | buf[i + 17]);
-        if (frameCrcFor(air, pcf, pl) == got) {
-          finderConfirmed_ = true;
-          memcpy(finderConfirmedAddr_, cand, 4);
-          Serial.println();
-          Serial.printf("  *** ADRESSE CONFIRMEE PAR CRC : %02X %02X %02X %02X\n", cand[0], cand[1],
-                        cand[2], cand[3]);
-          Serial.printf("  *** applique-la avec :  addr %02X%02X%02X%02X\n", cand[0], cand[1], cand[2],
-                        cand[3]);
-          Serial.print("  *** trame :");
-          for (uint8_t k = 5; k < 18; k++) Serial.printf(" %02X", buf[i + k]);
-          Serial.println();
-          Serial.flush();
-        }
-      }
-
-      noteFinderCandidate(cand);
-    }
-  }
-
-  radio.clearInterrupts();
-  radio.command(CMD_FLUSH_RX_FIFO);
-  radio.enterRxMode();
-}
 
 static const char *omstName(uint8_t m) {
   switch (m) {
@@ -978,12 +452,14 @@ void BenqHalo::watchChannel(Print &out, uint8_t ch, uint32_t durationMs) {
       uint8_t irqNow = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
       if ((irqNow & IRQ_RX_DR) && dumped < kMaxDump) {
         uint8_t len = radio.readRegister(REG_PKT4 | CMD_READ_REGISTER);
-        if (len == 0 || len > 32) len = staticRxLen_;
+        if (len == 0 || len > 32) len = kToolRxLen;
         uint8_t buf[32];
         radio.readFifo(buf, len, false);
+        // Octets bruts seulement : le controle de CRC d'ici supposait la trame
+        // Halo 2 (PCF d'un octet, 10 octets de charge), refutee. Une trame
+        // Halo 1 se decode avec 'ecoute'.
         out.printf("    trame %2u (len=%2u) :", dumped + 1, len);
         for (uint8_t i = 0; i < len && i < 20; i++) out.printf(" %02X", buf[i]);
-        if (len >= 13 && frameCrcOk(buf)) out.print("   <<< CRC VALIDE : trame BenQ authentique");
         out.println();
         Serial.flush();
         dumped++;
@@ -1151,86 +627,12 @@ void BenqHalo::scanSpectrum(Print &out, uint8_t passes) {
   prepareToSniff();  // remet la radio dans un etat connu
 }
 
-void BenqHalo::printFinderSummary(Print &out) {
-  out.println();
-  out.println("=== Recherche d'adresse : resultats ===");
-  if (finderConfirmed_) {
-    out.printf("ADRESSE CONFIRMEE PAR CRC : %02X %02X %02X %02X  ->  addr %02X%02X%02X%02X\n",
-               finderConfirmedAddr_[0], finderConfirmedAddr_[1], finderConfirmedAddr_[2],
-               finderConfirmedAddr_[3], finderConfirmedAddr_[0], finderConfirmedAddr_[1],
-               finderConfirmedAddr_[2], finderConfirmedAddr_[3]);
-  }
-  out.printf("Trames brutes recues : %lu\n", (unsigned long)rxEvents_);
-  if (candCount_ == 0) {
-    if (rxEvents_ == 0) {
-      out.println("Aucune trame recue du tout : le recepteur ne s'est jamais accroche.");
-      out.println("Le mot de synchro, le canal ou le debit sont faux -- ou l'etage RF");
-      out.println("n'entend rien. Teste 'pair' : l'adresse d'appairage E2 08 00 B0 est");
-      out.println("fixe et connue, donc une capture qui reste vide la-bas innocente");
-      out.println("definitivement le mot de synchro et accuse le materiel ou le canal.");
-    } else {
-      out.println("Des trames sont bien arrivees, mais aucune n'expose de preambule 0xAA");
-      out.println("suivi d'une adresse plausible. Le recepteur entend donc quelque chose :");
-      out.println("c'est la fenetre de capture ou l'alignement qu'il faut ajuster.");
-    }
-    return;
-  }
-  for (uint8_t pass = 0; pass < candCount_; pass++) {
-    int best = -1;
-    for (uint8_t i = 0; i < candCount_; i++) {
-      if (candHits_[i] == 0xFFFF) continue;
-      if (best < 0 || candHits_[i] > candHits_[best]) best = i;
-    }
-    if (best < 0) break;
-    out.printf("  %2u occurrence(s)  adresse = %02X %02X %02X %02X   ->  addr %02X%02X%02X%02X\n",
-               candHits_[best], candAddr_[best][0], candAddr_[best][1], candAddr_[best][2],
-               candAddr_[best][3], candAddr_[best][0], candAddr_[best][1], candAddr_[best][2],
-               candAddr_[best][3]);
-    candHits_[best] = 0xFFFF;  // marque comme deja affiche
-  }
-  out.println("Le bon candidat est celui qui revient le plus souvent.");
-  out.println("Applique-le avec 'addr <hex8>', puis verifie avec 'poll'.");
-  candCount_ = 0;
-}
-
 // ---------------------------------------------------------------------------
-//  Modes et affichage
+//  Base des outils et affichage
 // ---------------------------------------------------------------------------
 
-void BenqHalo::startSniffer(const uint8_t addr[4]) {
-  if (addr) {
-    memcpy(sniffAddr_, addr, 4);
-    sniffOverride_ = true;
-  } else {
-    sniffOverride_ = false;
-  }
-  mode_ = HaloMode::Sniffer;
-  phase_ = HaloPhase::Idle;
-  rxEvents_ = 0;
-  sweepChannels_ = false;
+void BenqHalo::prepareForTool() {
   if (radio.present()) prepareToSniff();
-}
-
-void BenqHalo::setMode(HaloMode mode) {
-  if (mode != HaloMode::Sniffer) sniffOverride_ = false;
-  mode_ = mode;
-  phase_ = HaloPhase::Idle;
-  followUpCmd_ = HALO_CMD_NONE;
-  pendingCmd_ = HALO_CMD_NONE;
-  settledAt_ = millis();
-  lastPoll_ = millis();
-  if (!radio.present()) return;
-  if (mode == HaloMode::Normal || mode == HaloMode::Sniffer) prepareToSniff();
-}
-
-void BenqHalo::printState(Print &out) const {
-  auto dump = [&out](const char *label, const HaloState &s) {
-    out.printf("%s general=%s  avant=%s %3u%%  arriere=%s %3u%%  %4u K  capteur=%s\n", label,
-               s.power ? "ON " : "OFF", s.front ? "ON " : "OFF", s.frontBrightness,
-               s.back ? "ON " : "OFF", s.backBrightness, s.colorTempK, s.sensor ? "ON" : "OFF");
-  };
-  dump("  lampe   :", reported);
-  dump("  consigne:", desired);
 }
 
 void BenqHalo::printInfo(Print &out) {
@@ -1251,17 +653,11 @@ void BenqHalo::printInfo(Print &out) {
   }
   out.printf("  broches SPI   : SCK=%d MISO=%d MOSI=%d CSN=%d @ %lu Hz\n", PIN_RF_SCK, PIN_RF_MISO,
              PIN_RF_MOSI, PIN_RF_CSN, (unsigned long)RF_SPI_HZ);
-  out.printf("  canal         : %u (%u MHz)\n", channel_, 2400 + channel_);
-  out.printf("  adresse       : %02X %02X %02X %02X %s\n", addr_[0], addr_[1], addr_[2], addr_[3],
+  // Reglages des outils de banc (NVS benqhalo) ; ceux du pilote : 'lampe'.
+  out.printf("  canal outils  : %u (%u MHz), %s\n", channel_, 2400 + channel_, dataRateName(dataRate_));
+  out.printf("  adresse outils: %02X %02X %02X %02X%s\n", addr_[0], addr_[1], addr_[2], addr_[3],
              addressConfigured() ? "" : "  (non configuree)");
   out.printf("  sur l'air     : %02X %02X %02X %02X\n", addr_[3], addr_[2], addr_[1], addr_[0]);
-  out.printf("  octets queue  : %02X %02X%s\n", tail_[0], tail_[1],
-             (tail_[0] == 0xFF && tail_[1] == 0xFF) ? "  (joker : controle desactive)" : "");
-  out.printf("  mode          : %s\n", mode_ == HaloMode::Normal    ? "normal"
-                                       : mode_ == HaloMode::Sniffer ? "sniffer"
-                                                                    : "recherche d'adresse");
-  out.printf("  debug         : %s\n", debug ? "on" : "off");
-  out.printf("  trames brutes : %lu (depuis le debut du mode courant)\n", (unsigned long)rxEvents_);
   if (radio.present()) {
     uint8_t rc1 = radio.readRegister(REG_RC1 | CMD_READ_REGISTER);
     out.printf("  registres RF  : valeurs Holtek chargees, %u ecart(s) de relecture\n",
@@ -1273,7 +669,6 @@ void BenqHalo::printInfo(Print &out) {
                (rc1 & RC1_PWRON) ? 1 : 0, (rc1 & RC1_XCLK_RDY) ? 1 : 0, (rc1 & RC1_XCLK_EN) ? 1 : 0,
                (rc1 & RC1_FSYCK_RDY) ? 1 : 0);
   }
-  printState(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -1865,302 +1260,6 @@ void BenqHalo::sweepBand(Print &out, uint8_t cycles) {
       score[bestCh] = 0;
       Serial.flush();
     }
-  }
-  out.println();
-}
-
-// Les trois vecteurs de validation du CRC partagent tous la MEME adresse, donc
-// la contribution de celle-ci s'y reduit a une constante : deux modeles sont
-// indiscernables sur ces donnees. Modele A, l'adresse est couverte et l'etat
-// initial vaut 0xEFDF ; modele B, elle ne l'est pas et l'etat initial vaut
-// 0x5042, qui n'est autre que crc(adresse Halo 2, 0xEFDF). Tant que le doute
-// n'est pas leve, on teste les deux -- croire le seul modele A ferait rejeter
-// une trame authentique du Halo 1.
-static uint16_t crcOverFrame(uint16_t init, uint8_t pcf, const uint8_t *payload) {
-  auto feed = [](uint16_t crc, uint8_t b) {
-    crc ^= (uint16_t)b << 8;
-    for (uint8_t i = 0; i < 8; i++)
-      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-    return crc;
-  };
-  uint16_t crc = feed(init, pcf);
-  for (uint8_t i = 0; i < 10; i++) crc = feed(crc, payload[i]);
-  return crc;
-}
-
-// ---------------------------------------------------------------------------
-//  Capture pendant l'appairage
-// ---------------------------------------------------------------------------
-
-void BenqHalo::capturePairing(Print &out, uint32_t seconds, uint8_t onlyChannel) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-
-  char line[128];
-
-  // Ordre d'ecriture dans le registre ; sur l'air c'est l'inverse.
-  const uint8_t addrA[4] = {0xB0, 0x00, 0x08, 0xE2};  // sur l'air : E2 08 00 B0
-  const uint8_t addrB[4] = {0xE2, 0x08, 0x00, 0xB0};  // sur l'air : B0 00 08 E2
-  const uint8_t channels[3] = {RF_CHANNEL_1, RF_CHANNEL_2, RF_CHANNEL_3};
-
-  struct Combo {
-    const uint8_t *addr;
-    const char *addrName;
-    uint8_t channel;
-  };
-  // En campant sur un seul canal on multiplie par trois le temps passe sur la
-  // combinaison la plus probable -- et le canal 5 n'est pas une supposition,
-  // il a ete mesure (commande 'presence').
-  Combo combos[6];
-  uint8_t comboCount = 0;
-  for (uint8_t i = 0; i < 3; i++) {
-    if (onlyChannel && channels[i] != onlyChannel) continue;
-    combos[comboCount++] = {addrA, "E2 08 00 B0", channels[i]};
-    combos[comboCount++] = {addrB, "B0 00 08 E2", channels[i]};
-  }
-  if (comboCount == 0) {  // canal demande hors du dossier FCC : on le prend tel quel
-    combos[comboCount++] = {addrA, "E2 08 00 B0", onlyChannel};
-    combos[comboCount++] = {addrB, "B0 00 08 E2", onlyChannel};
-  }
-
-  out.println();
-  out.println("=== Capture pendant l'appairage ===");
-  out.println("  L'adresse d'appairage est la seule que nous connaissions. Si la");
-  out.println("  telecommande et la lampe negocient une adresse de communication,");
-  out.println("  c'est forcement la qu'elle transite : c'est le seul moment ou");
-  out.println("  elles se parlent sans deja se connaitre.");
-  out.println();
-  snprintf(line, sizeof(line), "  Debit %s, adresse de 4 octets.", dataRateName(dataRate_));
-  out.println(line);
-  int n = snprintf(line, sizeof(line), "  %u combinaison(s) de 3 s en boucle, canal/canaux :",
-                   (unsigned)comboCount);
-  for (uint8_t i = 0; i < comboCount; i += 2)
-    n += snprintf(line + n, sizeof(line) - n, " %u", (unsigned)combos[i].channel);
-  out.println(line);
-  out.println("  32 octets vides par trame, sans filtrage de CRC materiel.");
-  out.println();
-  out.println("  MANIP A FAIRE, en boucle pendant toute la capture :");
-  out.println("   1. debranche l'USB de la lampe");
-  out.println("   2. appuie sur Favori + bouton de selection de lampe ~5 s");
-  out.println("   3. couvre le capteur de lumiere au dos");
-  out.println("   4. rebranche dans les 15 s");
-  out.println("   5. recommence tant que la capture tourne");
-  out.print("  Duree : ");
-  out.print(seconds);
-  out.println(" s. Chaque trame recue est affichee telle quelle.");
-  Serial.flush();
-
-  const uint32_t deadline = millis() + seconds * 1000UL;
-  uint32_t frames = 0, valid = 0;
-  uint8_t comboIdx = 0;
-
-  while ((int32_t)(millis() - deadline) < 0) {
-    const Combo &cb = combos[comboIdx];
-
-    channel_ = cb.channel;
-    sharedRadioConfig(ADDR_LEN_4, cb.addr, 4);
-
-    uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-    radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
-    radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-    radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-    radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
-    radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
-    radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
-    radio.clearInterrupts();
-    radio.command(CMD_FLUSH_RX_FIFO);
-    radio.enterRxMode();
-
-    // L'adresse telle qu'elle circule sur l'air, pour le calcul de CRC.
-    uint8_t airAddr[4];
-    for (uint8_t i = 0; i < 4; i++) airAddr[i] = cb.addr[3 - i];
-
-    const uint32_t until = millis() + 3000;
-    while ((int32_t)(millis() - until) < 0) {
-      if ((int32_t)(millis() - deadline) >= 0) break;
-
-      if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-
-      // RX_DR actif a l'etat bas dans STATUS : 0 = une trame attend.
-      if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) {
-        delayMicroseconds(200);
-        continue;
-      }
-
-      uint8_t buf[32];
-      radio.readFifo(buf, 32, false);
-      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
-      radio.command(CMD_FLUSH_RX_FIFO);
-      frames++;
-
-      // Chaque ligne est composee en memoire puis ecrite d'un seul bloc : le
-      // filtre 'time' du moniteur horodate chaque morceau recu, et une ligne
-      // ecrite en plusieurs print() ressort eclatee. Sur un vidage hexadecimal
-      // ce serait illisible, donc dangereux.
-      snprintf(line, sizeof(line), "  trame %lu [%u MHz, air %s]", (unsigned long)frames,
-               (unsigned)(2400 + cb.channel), cb.addrName);
-      out.println(line);
-
-      for (uint8_t half = 0; half < 2; half++) {
-        int n = snprintf(line, sizeof(line), "   ");
-        for (uint8_t i = 0; i < 16; i++)
-          n += snprintf(line + n, sizeof(line) - n, "%02X ", buf[half * 16 + i]);
-        out.println(line);
-      }
-
-      // Verification : le premier octet est le PCF, les dix suivants le
-      // payload, les deux d'apres le CRC. Si ca colle, la trame est authentique
-      // et l'adresse d'appairage est la bonne.
-      const uint16_t wantA = frameCrcFor(airAddr, buf[0], buf + 1);
-      const uint16_t wantB = crcOverFrame(0x5042, buf[0], buf + 1);
-      const uint16_t got = (uint16_t)((buf[11] << 8) | buf[12]);
-      const bool okA = (wantA == got), okB = (wantB == got);
-      if (okA || okB) valid++;
-      snprintf(line, sizeof(line), "   CRC lu %04X | modele A %04X%s | modele B %04X%s", got,
-               wantA, okA ? " <<< VALIDE" : "", wantB, okB ? " <<< VALIDE" : "");
-      out.println(line);
-      Serial.flush();
-    }
-
-    comboIdx = (uint8_t)((comboIdx + 1) % comboCount);
-    delay(1);  // rendre la main : le chien de garde veille
-  }
-
-  channel_ = RF_CHANNEL_1;
-  out.println();
-  out.print("  Termine : ");
-  out.print(frames);
-  out.print(" trame(s) brute(s), dont ");
-  out.print(valid);
-  out.println(" avec un CRC valide.");
-  if (frames == 0) {
-    out.println("  Aucune trame sur l'adresse d'appairage, sur aucune des six");
-    out.println("  combinaisons. Soit l'appairage n'utilise pas cette adresse sur");
-    out.println("  le Halo 1, soit il n'emet pas pendant la fenetre couverte.");
-  }
-  out.println();
-}
-
-// ---------------------------------------------------------------------------
-//  Accrochage sur le preambule
-// ---------------------------------------------------------------------------
-
-void BenqHalo::huntByPreamble(Print &out, uint32_t dwellMs) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-
-  char line[160];
-
-  out.println();
-  out.println("=== Chasse a l'adresse par le preambule ===");
-  out.println("  Sur l'air : [preambule] [adresse 4 o.] [PCF] [payload] [CRC].");
-  out.println("  Le preambule est connu -- c'est AA repete. Le correlateur");
-  out.println("  accepte une adresse de 3 octets : on lui donne 'AA AA X', il se");
-  out.println("  cale sur le preambule plus le PREMIER octet d'adresse, et nous");
-  out.println("  livre les trois octets suivants, qui sont le reste de l'adresse.");
-  out.println("  Un seul inconnu : X, sur 256 valeurs. Les deux polarites de");
-  out.println("  preambule sont essayees, AA puis 55.");
-  out.println("  Canal 5 et 125 kbps, confirmes par le portage qui fonctionne.");
-  out.println();
-  out.println("  >>> TOURNE LA MOLETTE SANS T'ARRETER PENDANT TOUT LE BALAYAGE.");
-  snprintf(line, sizeof(line), "  Duree : environ %lu s.",
-           (unsigned long)((512UL * dwellMs) / 1000UL));
-  out.println(line);
-  Serial.flush();
-
-  const uint8_t polarities[2] = {0xAA, 0x55};
-  uint32_t hits = 0, confirmed = 0;
-
-  channel_ = RF_CHANNEL_1;
-
-  for (uint8_t pol = 0; pol < 2; pol++) {
-    const uint8_t P = polarities[pol];
-
-    for (uint16_t x = 0; x < 256; x++) {
-      // Sur l'air on veut P P X ; le registre se remplit dans l'ordre inverse.
-      const uint8_t reg3[3] = {(uint8_t)x, P, P};
-      sharedRadioConfig(ADDR_LEN_3, reg3, 3);
-
-      uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-      radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
-      radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-      radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-      radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
-      radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
-      radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
-      radio.clearInterrupts();
-      radio.command(CMD_FLUSH_RX_FIFO);
-      radio.enterRxMode();
-
-      const uint32_t until = millis() + dwellMs;
-      while ((int32_t)(millis() - until) < 0) {
-        if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-
-        // RX_DR est actif a l'etat bas dans STATUS : 0 = une trame attend.
-        if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) {
-          delayMicroseconds(200);
-          continue;
-        }
-
-        uint8_t buf[32];
-        radio.readFifo(buf, 32, false);
-        radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
-        radio.command(CMD_FLUSH_RX_FIFO);
-        hits++;
-
-        // Accroche sur P P X : la FIFO commence donc au DEUXIEME octet de
-        // l'adresse. L'adresse complete sur l'air est X puis les trois suivants.
-        const uint8_t airAddr[4] = {(uint8_t)x, buf[0], buf[1], buf[2]};
-        const uint8_t pcf = buf[3];
-        const uint8_t *payload = buf + 4;
-        const uint16_t wantA = frameCrcFor(airAddr, pcf, payload);
-        const uint16_t wantB = crcOverFrame(0x5042, pcf, payload);
-        const uint16_t got = (uint16_t)((buf[14] << 8) | buf[15]);
-        const bool okA = (wantA == got), okB = (wantB == got);
-
-        snprintf(line, sizeof(line), "  accroche sur preambule %02X, X=%02X", P, (unsigned)x);
-        out.println(line);
-        int n = snprintf(line, sizeof(line), "   FIFO ");
-        for (uint8_t i = 0; i < 16; i++)
-          n += snprintf(line + n, sizeof(line) - n, "%02X ", buf[i]);
-        out.println(line);
-        snprintf(line, sizeof(line), "   adresse supposee (sur l'air) %02X %02X %02X %02X",
-                 airAddr[0], airAddr[1], airAddr[2], airAddr[3]);
-        out.println(line);
-        snprintf(line, sizeof(line), "   PCF %02X, CRC lu %04X | A %04X%s | B %04X%s", pcf, got,
-                 wantA, okA ? " <<< CONFIRME" : "", wantB, okB ? " <<< CONFIRME" : "");
-        out.println(line);
-        if (okA || okB) {
-          confirmed++;
-          snprintf(line, sizeof(line),
-                   "   *** ADRESSE TROUVEE : ecris-la avec 'addr %02X%02X%02X%02X'",
-                   airAddr[3], airAddr[2], airAddr[1], airAddr[0]);
-          out.println(line);
-        }
-        Serial.flush();
-      }
-
-      // Rendre la main : le chien de garde veille.
-      if ((x & 0x07) == 0x07) delay(1);
-    }
-
-    snprintf(line, sizeof(line), "  polarite %02X terminee.", P);
-    out.println(line);
-    Serial.flush();
-  }
-
-  out.println();
-  snprintf(line, sizeof(line), "  Termine : %lu accroche(s), dont %lu confirmee(s) par CRC.",
-           (unsigned long)hits, (unsigned long)confirmed);
-  out.println(line);
-  if (hits == 0) {
-    out.println("  Aucune accroche. Cela invalide l'hypothese d'un preambule de");
-    out.println("  deux octets : avec un preambule d'un seul octet il faudrait");
-    out.println("  chercher 'AA X Y', soit 65536 combinaisons, hors de portee.");
   }
   out.println();
 }
@@ -3313,8 +2412,8 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
 
   out.println();
   out.println("=== Accrochage sur le payload : le procede marche-t-il ? ===");
-  out.println("  La commande 'find' donne au correlateur trois octets pris dans");
-  out.println("  le payload, en esperant qu'il s'y cale et livre la suite. Ce");
+  out.println("  L'ancienne commande 'find' (Halo 2, retiree) donnait au correlateur");
+  out.println("  trois octets du payload, en esperant qu'il s'y cale et livre la suite. Ce");
   out.println("  principe n'a jamais ete verifie -- seulement lance contre la");
   out.println("  lampe, sans jamais savoir s'il pouvait fonctionner.");
   out.println();
@@ -3394,7 +2493,7 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
   out.println();
   if (hits) {
     out.println("  Le correlateur SAIT se caler en plein payload, pourvu qu'un");
-    out.println("  octet d'ancrage le precede. Le procede de 'find' est donc");
+    out.println("  octet d'ancrage le precede. Le procede de l'ancien 'find' est donc");
     out.println("  valide : il n'a jamais echoue que faute d'ancre ou de debit.");
   } else {
     out.println("  Meme la fenetre ancree n'accroche pas. Verifie d'abord que la");
@@ -3403,361 +2502,6 @@ void BenqHalo::validatePayloadSync(Print &out, uint32_t dwellMs) {
   }
   out.println();
 }
-
-// ---------------------------------------------------------------------------
-//  Les fonctions cachees de GIO3
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//  Le fil GIO3 fait-il contact ? Test purement electrique, sans la radio.
-//  On tire la broche vers le haut puis vers le bas avec les resistances
-//  internes de l'ESP32 (~45 kOhm). Si rien n'est branche, la broche suit
-//  docilement les deux. Si la pastille du module la pilote, elle resiste a au
-//  moins une des deux tractions. Ce test ne peut pas etre trompe par l'absence
-//  de signal radio, contrairement a un comptage de fronts.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//  Ce qu'on entend sur le canal 5, est-ce la telecommande ou le Wi-Fi ?
-//  Le canal 5 (2405 MHz) tombe dans le Wi-Fi 1, large de 20 MHz (2401-2423).
-//  Un emetteur Wi-Fi depose donc autant d'energie a 2420 qu'a 2405. La
-//  telecommande, elle, ne fait que 0,43 MHz de large (dossier FCC) : elle ne
-//  peut etre qu'a UN de ces deux endroits.
-//    canal  5 = 2405 MHz : cible presumee, dans le Wi-Fi 1
-//    canal 20 = 2420 MHz : dans le Wi-Fi 1, hors de la cible
-//    canal 78 = 2478 MHz : hors de tout canal Wi-Fi, bruit de fond
-//  On alterne les trois toutes les quelques millisecondes : une rafale Wi-Fi
-//  ne peut pas favoriser l'un plutot que l'autre a cette echelle de temps.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//  Polarite et longueur du preambule : les deux dimensions que les sondes GIO3
-//  n'avaient jamais balayees. configForLoopback ecrit une adresse fixe et ne
-//  touche pas a CFO1, or le BC5602 deduit la POLARITE du preambule du premier
-//  bit d'adresse emis (ds.txt:1414) : un 0 donne 01010101, un 1 donne 10101010.
-//  L'adresse est ecrite a l'envers de l'ordre sur l'air, donc c'est le DERNIER
-//  octet du tableau qui part en premier. Toutes nos chasses ont donc tourne
-//  avec une seule des deux polarites, et une seule des deux longueurs.
-//  L'adresse elle-meme n'importe pas ici : GIO3S=14 s'anime des la detection du
-//  preambule, avant toute comparaison d'adresse.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//  La sequence de reception du projet amont, reproduite a l'identique.
-//  Termina1/benq-screenbar-halo2-esphome, fonction prepare_halo_receive().
-//  Deux differences de fond avec tout ce qu'on a essaye jusqu'ici :
-//
-//   1. AUCUN RESET LOGICIEL. Son commentaire est explicite : "Literal Pico
-//      lifecycle: no software reset during normal initialization. Hidden
-//      packet/PID/RF state is allowed to continue from hardware POR." Nos deux
-//      chemins de configuration commencent au contraire par un reset -- et on a
-//      mesure ce matin (commande 'survie') qu'il efface 15 des 19 valeurs
-//      recommandees Holtek. Sans reset, celles ecrites par begin() survivent.
-//   2. Reception PASSIVE : CRC desactive, auto-ACK desactive, payload
-//      dynamique desactive, longueur statique de 13 octets. Une trame entre
-//      dans la FIFO meme si son CRC est faux.
-//
-//  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//  Reception Halo 1, structure de trame etablie.
-//
-//  Trame : adresse 4 octets + charge utile 6 octets + CRC-16/CCITT (0x1021,
-//  init 0xFFFF) couvrant l'adresse ET la charge utile. Etabli le 2026-09-22 sur
-//  une trame recue a la fois par le CC2500 en flux brut et par le moteur de
-//  paquets du BM5602 : 06 B9 21 BB 98 FF suivi de 7A FF.
-//
-//  Le Halo 2 utilise dix octets de charge utile ; le Halo 1 en utilise six.
-//  C'est pourquoi les lectures a treize octets debordaient sur la retransmission
-//  suivante -- on y lisait son preambule et son adresse, decales d'un bit.
-//
-//  Le CRC est verifie PAR LE MATERIEL : toute trame rendue ici est exacte, ce
-//  qui evite d'avoir a filtrer les erreurs binaires en logiciel.
-// ---------------------------------------------------------------------------
-void BenqHalo::listenHalo1(Print &out, uint32_t dwellMs, uint8_t rxLen) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-  char line[176];
-  out.println();
-  out.println("=== Reception Halo 1 avec vote majoritaire ===");
-  snprintf(line, sizeof(line), "  Canal %u, %s, adresse %02X %02X %02X %02X, lecture de %u octets.",
-           (unsigned)channel_, dataRateName(dataRate_), addr_[0], addr_[1], addr_[2], addr_[3],
-           (unsigned)rxLen);
-  out.println(line);
-  out.println("  La telecommande RETRANSMET chaque trame plusieurs fois d'affilee.");
-  out.println("  On lit donc 32 octets d'un coup -- le maximum de la FIFO -- pour");
-  out.println("  capturer la premiere copie ET les suivantes sans rearmer entre");
-  out.println("  elles, puis on les retrouve en cherchant l'adresse bit a bit.");
-  out.println("  Les erreurs binaires ne tombant pas");
-  out.println("  au meme endroit d'une copie a l'autre, un vote bit a bit sur");
-  out.println("  les copies d'une meme rafale reconstitue la trame exacte --");
-  out.println("  sans gagner un seul decibel.");
-  out.println("  >>> AGIS SUR LA TELECOMMANDE : molette, boutons, allumage.");
-  out.println();
-  Serial.flush();
-
-  // Chemin sans reset logiciel : le reset efface 15 des 19 valeurs recommandees.
-  // Valeurs analogiques : recommandees Holtek (ecrites par begin()), ou valeurs
-  // par defaut de la puce. Le projet Termina1, le seul qui recoive une vraie
-  // telecommande BenQ, ne fait ni reset ni ecriture de ces valeurs : il tourne
-  // sur les valeurs de mise sous tension. Le reset logiciel est ce qui s'en
-  // approche le plus -- on ne peut pas couper l'alimentation du module.
-  if (!applyHoltekTuning_) {
-    radio.softwareReset();
-    out.println("  Valeurs analogiques PAR DEFAUT (reset logiciel, rien de reecrit).");
-  } else {
-    // Reecrites ICI et non laissees a begin() : une passe precedente en mode
-    // par defaut les a effacees par son reset, et l'alternance serait faussee.
-    radio.registerConfigure(nullptr);
-    out.println("  Valeurs analogiques RECOMMANDEES Holtek (reecrites a l'instant).");
-  }
-  radio.command(CMD_LIGHT_SLEEP);
-  radio.writeRegister(REG_IO1 | CMD_WRITE_REGISTER, IO1_4WIRE_SPI);
-  applyXoTrim(radio);
-  radio.setBank(0);
-  radio.writeRegister(REG_RFCH | CMD_WRITE_REGISTER, channel_);
-  radio.writeRegister(REG_DM1 | CMD_WRITE_REGISTER, (uint8_t)(ADDR_LEN_4 | dataRate_));
-  radio.writeCommandData(CMD_WRITE_PTX_ADDRESS, addr_, 4);
-  uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-  radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
-  radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-  // 8 octets : 6 de charge utile plus les 2 du CRC, qui passent dans la FIFO
-  // quand le CRC materiel est desactive. Mesure a l'appui : avec le CRC
-  // materiel actif la puce rejette TOUTES les trames alors que le modele
-  // logiciel en valide -- son moteur de paquets ne couvre donc pas le meme
-  // champ. On verifie nous-memes, ce qui laisse en outre voir les rejets.
-  // 32 octets, le maximum de la FIFO. Mesure a l'appui : la puce accroche la
-  // PREMIERE trame d'une rafale, et pendant qu'on la lit et qu'on rearme, les
-  // retransmissions passent -- elles se suivent a quelques centaines de
-  // microsecondes. En lisant large, on capture la premiere trame ET les
-  // suivantes dans la meme lecture, sans aucun rearmement entre elles. On les
-  // retrouve ensuite en cherchant l'adresse dans le flux de bits.
-  // Longueur de lecture pilotable, pour un test A/B : une trame a valide son
-  // CRC en lecture courte, aucune en lecture de 32 octets. Hypothese a
-  // verifier, pas un fait : les deux trames comparees n'etaient peut-etre pas
-  // la meme commande.
-  if (rxLen < 8) rxLen = 8;
-  if (rxLen > 32) rxLen = 32;
-  radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, rxLen);
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
-  radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
-  radio.clearInterrupts();
-  radio.command(CMD_FLUSH_RX_FIFO);
-  radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
-  radio.command(CMD_RX_MODE);
-
-  uint8_t total = 0;
-  const uint8_t regOk = radio.registerVerify(&total);
-  radio.setBank(0);
-  snprintf(line, sizeof(line), "  Reglages analogiques en place : %u sur %u. OMST %u.", regOk, total,
-           (unsigned)radio.operationMode());
-  out.println(line);
-  Serial.flush();
-
-  static uint8_t group[12][8];
-  uint8_t nGroup = 0;
-  uint32_t lastFrameMs = 0;
-  uint32_t seen = 0, exact = 0, repaired = 0, groups = 0, strong = 0, checks = 0;
-
-  const uint32_t until = millis() + dwellMs;
-  uint32_t spin = 0;
-  while ((int32_t)(millis() - until) < 0) {
-    // Boucle serree : les retransmissions se suivent de pres, et toute lecture
-    // superflue entre deux armements en fait rater.
-    const uint8_t irq = radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER);
-    if (irq & IRQ_RX_DR) {
-      uint8_t buf[32];
-      memset(buf, 0, sizeof(buf));
-      radio.readFifo(buf, rxLen, false);
-      radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, 0x40);
-      radio.command(CMD_FLUSH_RX_FIFO);
-      radio.command(CMD_RX_MODE);
-
-      // Vidage brut des 32 octets vers l'ordinateur. L'analyse embarquee
-      // suppose une charge utile de 6 octets ; rien ne garantit qu'elle soit
-      // constante, et sur le Mac on peut essayer toutes les longueurs sans
-      // refaire la manipulation.
-      {
-        char raw[100];
-        size_t w = (size_t)snprintf(raw, sizeof(raw), "BRUT ");
-        for (uint8_t k = 0; k < rxLen; k++)
-          w += (size_t)snprintf(raw + w, sizeof(raw) - w, "%02X", buf[k]);
-        out.println(raw);
-        Serial.flush();
-      }
-
-      // La premiere copie commence juste apres l'adresse, deja consommee par
-      // le correlateur.
-      nGroup = 0;
-      memcpy(group[nGroup++], buf, 8);
-      seen++;
-
-      // Les copies suivantes sont quelque part dans les 24 octets restants,
-      // precedees de leur propre adresse. On la cherche bit a bit : rien ne
-      // garantit qu'une retransmission tombe sur une frontiere d'octet.
-      const uint8_t air[4] = {addr_[3], addr_[2], addr_[1], addr_[0]};
-      for (uint16_t bit = 64; bit + 32 + 64 <= (uint16_t)rxLen * 8 && nGroup < 12;) {
-        bool match = true;
-        for (uint8_t k = 0; k < 32 && match; k++) {
-          const uint16_t b = bit + k;
-          const uint8_t got = (buf[b >> 3] >> (7 - (b & 7))) & 1;
-          const uint8_t want = (air[k >> 3] >> (7 - (k & 7))) & 1;
-          if (got != want) match = false;
-        }
-        if (!match) {
-          bit++;
-          continue;
-        }
-        uint8_t copy[8];
-        for (uint8_t q = 0; q < 8; q++) {
-          uint8_t v = 0;
-          for (uint8_t k = 0; k < 8; k++) {
-            const uint16_t b = bit + 32 + q * 8 + k;
-            v = (uint8_t)((v << 1) | ((buf[b >> 3] >> (7 - (b & 7))) & 1));
-          }
-          copy[q] = v;
-        }
-        memcpy(group[nGroup++], copy, 8);
-        seen++;
-        bit += 32 + 64;
-      }
-
-      groupVerdict(out, group, nGroup, exact, repaired);
-      groups++;
-      nGroup = 0;
-      lastFrameMs = millis();
-      continue;
-    }
-
-    if ((spin++ & 0xFF) == 0) {
-      if (radio.operationMode() != OMST_RX) radio.command(CMD_RX_MODE);
-      if (radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER) < 70) strong++;
-      checks++;
-      delay(1);
-    }
-  }
-  out.println();
-  snprintf(line, sizeof(line),
-           "  %lu rafale(s), %lu trame(s) recue(s), %lu exacte(s) d'emblee, %lu reparee(s).",
-           (unsigned long)groups, (unsigned long)seen, (unsigned long)exact,
-           (unsigned long)repaired);
-  out.println(line);
-  snprintf(line, sizeof(line), "  Signal fort %lu/%lu.", (unsigned long)strong,
-           (unsigned long)checks);
-  out.println(line);
-}
-
-// CRC-16/CCITT 0x1021, init 0xFFFF, sur l'adresse SUR L'AIR puis la charge
-// utile. L'adresse est stockee a l'envers de son ordre d'emission.
-// ---------------------------------------------------------------------------
-//  Emettre une trame Halo 1 : adresse enregistree + 6 octets + CRC materiel.
-//
-//  Chemin de la balise d'etalonnage, qui marche : moteur de paquets, charge
-//  utile statique, ecriture FIFO sans acquittement, CRC produit par la puce.
-//  Mesure a l'appui, ce CRC materiel est EXACTEMENT le modele observe sur la
-//  telecommande -- CRC-16/CCITT 0x1021, init 0xFFFF, couvrant adresse et
-//  charge utile : la balise produisait C2BA, et le calcul logiciel aussi.
-//
-//  Seule difference connue avec la telecommande : la polarite du preambule.
-//  Le moteur de paquets la deduit du premier bit d'adresse (1 -> 10101010),
-//  alors que la telecommande emet ...0101 1 juste avant l'adresse.
-// ---------------------------------------------------------------------------
-void BenqHalo::txHalo1(Print &out, const uint8_t payload[6], uint16_t count, uint16_t gapMs) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-  char line[176];
-  const uint16_t crc = halo1Crc(payload);
-  snprintf(line, sizeof(line),
-           "  Trame attendue sur l'air : %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X | %02X %02X",
-           addr_[3], addr_[2], addr_[1], addr_[0], payload[0], payload[1], payload[2], payload[3],
-           payload[4], payload[5], (unsigned)(crc >> 8), (unsigned)(crc & 0xFF));
-  out.println(line);
-  snprintf(line, sizeof(line), "  Canal %u, %s, %u emission(s), %u ms d'intervalle.",
-           (unsigned)channel_, dataRateName(dataRate_), count, gapMs);
-  out.println(line);
-  Serial.flush();
-
-  configForLoopback(radio, channel_, addr_, false, dataRate_);
-
-  uint16_t sent = 0, confirmed = 0;
-  for (uint16_t i = 0; i < count; i++) {
-    radio.command(CMD_FLUSH_TX_FIFO);
-    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
-    radio.writeCommandData(CMD_WRITE_TX_FIFO_NO_ACK, payload, 6);
-    sent++;
-    // Seul TX_DS atteste que la puce a reellement emis.
-    const uint32_t until = micros() + 5000;
-    while ((int32_t)(micros() - until) < 0) {
-      if (radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER) & IRQ_TX_DS) {
-        confirmed++;
-        break;
-      }
-      delayMicroseconds(10);
-    }
-    if (gapMs) delay(gapMs);
-    if ((i & 0x3F) == 0x3F) delay(1);
-  }
-  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
-  radio.command(CMD_LIGHT_SLEEP);
-  snprintf(line, sizeof(line), "  %u emise(s), %u confirmee(s) par TX_DS.", sent, confirmed);
-  out.println(line);
-}
-
-
-// ---------------------------------------------------------------------------
-//  Emettre des octets BRUTS apres l'adresse, CRC materiel desactive.
-//
-//  Structure etablie le 2026-09-23 par la linearite du CRC, sur des captures
-//  asynchrones du CC2500 :
-//    commande (telecommande -> lampe) : adresse | en-tete | 2 octets | CRC
-//    accuse   (lampe -> telecommande) : adresse | en-tete | CRC
-//  en-tete = [longueur 4 bits][compteur 2 bits][type 2 bits].
-//  CRC-16/CCITT 0x1021 couvrant adresse + en-tete + charge, etat initial
-//  0xDFBE pour la telecommande et 0xF55A pour la lampe.
-//
-//  Le CRC materiel du BC5602 ne calcule pas avec ces etats initiaux : on le
-//  coupe et on fournit les deux octets de CRC nous-memes, en fin de charge.
-// ---------------------------------------------------------------------------
-void BenqHalo::txRaw(Print &out, const uint8_t *bytes, uint8_t len, uint16_t count,
-                     uint16_t gapMs) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-  char line[176];
-  size_t w = (size_t)snprintf(line, sizeof(line), "  Sur l'air : %02X %02X %02X %02X |", addr_[3],
-                              addr_[2], addr_[1], addr_[0]);
-  for (uint8_t i = 0; i < len && w + 4 < sizeof(line); i++)
-    w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", bytes[i]);
-  out.println(line);
-  Serial.flush();
-
-  configForLoopback(radio, channel_, addr_, false, dataRate_);
-  radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);  // CRC materiel coupe
-
-  uint16_t confirmed = 0;
-  for (uint16_t i = 0; i < count; i++) {
-    radio.command(CMD_FLUSH_TX_FIFO);
-    radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_CLEAR_ALL);
-    radio.writeCommandData(CMD_WRITE_TX_FIFO_NO_ACK, bytes, len);
-    const uint32_t until = micros() + 5000;
-    while ((int32_t)(micros() - until) < 0) {
-      if (radio.readRegister(REG_IRQ1 | CMD_READ_REGISTER) & IRQ_TX_DS) {
-        confirmed++;
-        break;
-      }
-      delayMicroseconds(10);
-    }
-    if (gapMs) delay(gapMs);
-  }
-  radio.writeRegister(REG_CE | CMD_WRITE_REGISTER, 0x00);
-  radio.command(CMD_LIGHT_SLEEP);
-  snprintf(line, sizeof(line), "  %u emise(s), %u confirmee(s) par TX_DS.", count, confirmed);
-  out.println(line);
-}
-
 
 // ---------------------------------------------------------------------------
 //  Emission et reception au FORMAT BC5602 STANDARD, accuse automatique.
@@ -3902,9 +2646,8 @@ void BenqHalo::prxAck(Print &out, const uint8_t addrReg[4], uint8_t channel, uin
 //  une longueur fixe apres l'adresse et on decode en logiciel, bit a bit :
 //    PCF 9 bits (longueur 6, PID 2, NO_ACK 1) | charge | CRC-16
 //  CRC-16/CCITT 0x1021, init 0xFFFF, sur adresse + PCF + charge (audit 23/09).
+//  Decodeur unique : halo1::decodeAir, celui du pilote (halo1_proto.cpp).
 // ---------------------------------------------------------------------------
-static inline uint8_t bitAt(const uint8_t *b, uint16_t i) { return (b[i >> 3] >> (7 - (i & 7))) & 1; }
-
 void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, uint32_t ms) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
@@ -3924,7 +2667,8 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
   armer();
 
   // Adresse sur l'air : ordre inverse de l'ecriture.
-  const uint8_t air[4] = {addrReg[3], addrReg[2], addrReg[1], addrReg[0]};
+  uint8_t air[4];
+  halo1::airOrder(addrReg, air);
   uint32_t cmds = 0, acks = 0, bad = 0, spin = 0;
   uint32_t lastArm = millis(), lastFrame = millis(), lastBeat = millis(), lastFull = millis();
   uint32_t rearms = 0;
@@ -3939,39 +2683,22 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
       radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
       radio.command(CMD_FLUSH_RX_FIFO);
 
-      uint8_t len = 0;
-      for (uint8_t k = 0; k < 6; k++) len = (uint8_t)((len << 1) | bitAt(b, k));
-      const uint8_t pid = (uint8_t)((bitAt(b, 6) << 1) | bitAt(b, 7));
-      const uint8_t noAck = bitAt(b, 8);
-      if (len > 4) {  // 64 bits lus : au plus 4 octets de charge + CRC
+      const halo1::AirFrame f = halo1::decodeAir(b, air);
+      if (f.len > 4) {  // 64 bits lus : au plus 4 octets de charge + CRC
         bad++;
       } else {
-        uint16_t crc = 0xFFFF;
-        auto feed = [&](uint8_t bit) {
-          crc ^= (uint16_t)(bit << 15);
-          crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-        };
-        for (uint8_t i = 0; i < 32; i++) feed((air[i >> 3] >> (7 - (i & 7))) & 1);
-        const uint16_t n = (uint16_t)(9 + 8 * len);
-        for (uint16_t i = 0; i < n; i++) feed(bitAt(b, i));
-        uint16_t got = 0;
-        for (uint16_t i = 0; i < 16; i++) got = (uint16_t)((got << 1) | bitAt(b, n + i));
-        uint8_t pay[4] = {0, 0, 0, 0};
-        for (uint8_t q = 0; q < len; q++)
-          for (uint8_t k = 0; k < 8; k++) pay[q] = (uint8_t)((pay[q] << 1) | bitAt(b, 9 + q * 8 + k));
-        const bool ok = (crc == got);
-        if (!ok) {
+        if (!f.crcOk) {
           bad++;
-        } else if (len == 0) {
+        } else if (f.len == 0) {
           acks++;
           snprintf(line, sizeof(line), "  %6lu ms  accuse   PID %u  NO_ACK %u",
-                   (unsigned long)(lastFrame - start), pid, noAck);
+                   (unsigned long)(lastFrame - start), f.pid, f.noAck);
           out.println(line);
         } else {
           cmds++;
           size_t w = (size_t)snprintf(line, sizeof(line), "  %6lu ms  COMMANDE PID %u  NO_ACK %u  charge",
-                                      (unsigned long)(lastFrame - start), pid, noAck);
-          for (uint8_t q = 0; q < len; q++) w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", pay[q]);
+                                      (unsigned long)(lastFrame - start), f.pid, f.noAck);
+          for (uint8_t q = 0; q < f.len; q++) w += (size_t)snprintf(line + w, sizeof(line) - w, " %02X", f.pay[q]);
           out.println(line);
         }
         Serial.flush();
@@ -4019,67 +2746,23 @@ void BenqHalo::sniffStd(Print &out, const uint8_t addrReg[4], uint8_t channel, u
   out.println(line);
 }
 
-
-uint16_t BenqHalo::halo1Crc(const uint8_t payload[6]) const {
-  uint16_t crc = 0xFFFF;
-  for (uint8_t i = 0; i < 10; i++) {
-    const uint8_t b = (i < 4) ? addr_[3 - i] : payload[i - 4];
-    for (int8_t k = 7; k >= 0; k--) {
-      crc ^= (uint16_t)(((b >> k) & 1) << 15);
-      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-    }
-  }
-  return crc;
-}
-
-// Verdict d'une rafale : d'abord chercher une copie deja exacte, sinon voter
-// bit a bit. Les erreurs ne tombant pas au meme endroit d'une copie a l'autre,
-// la majorite reconstitue l'original des trois copies environ.
-void BenqHalo::groupVerdict(Print &out, const uint8_t group[][8], uint8_t n, uint32_t &exact,
-                            uint32_t &repaired) {
-  char line[176];
-  for (uint8_t i = 0; i < n; i++) {
-    const uint16_t got = (uint16_t)((group[i][6] << 8) | group[i][7]);
-    if (halo1Crc(group[i]) == got) {
-      exact++;
-      snprintf(line, sizeof(line),
-               "  TRAME (copie exacte, rafale de %u) : %02X %02X %02X %02X %02X %02X", n,
-               group[i][0], group[i][1], group[i][2], group[i][3], group[i][4], group[i][5]);
-      out.println(line);
-      Serial.flush();
-      return;
-    }
-  }
-  if (n < 3) {
-    snprintf(line, sizeof(line), "  rafale de %u copie(s) : trop peu pour voter", n);
-    out.println(line);
-    Serial.flush();
-    return;
-  }
-
-  uint8_t voted[8];
-  for (uint8_t b = 0; b < 8; b++) {
-    voted[b] = 0;
-    for (int8_t k = 7; k >= 0; k--) {
-      uint8_t ones = 0;
-      for (uint8_t i = 0; i < n; i++) ones = (uint8_t)(ones + ((group[i][b] >> k) & 1));
-      if (ones * 2 > n) voted[b] |= (uint8_t)(1 << k);
-    }
-  }
-  const uint16_t got = (uint16_t)((voted[6] << 8) | voted[7]);
-  if (halo1Crc(voted) == got) {
-    repaired++;
-    snprintf(line, sizeof(line), "  TRAME (reparee par vote sur %u copies) : %02X %02X %02X %02X %02X %02X",
-             n, voted[0], voted[1], voted[2], voted[3], voted[4], voted[5]);
-  } else {
-    snprintf(line, sizeof(line), "  rafale de %u : vote insuffisant (%02X %02X %02X %02X %02X %02X)",
-             n, voted[0], voted[1], voted[2], voted[3], voted[4], voted[5]);
-  }
-  out.println(line);
-  Serial.flush();
-}
-
-
+// ---------------------------------------------------------------------------
+//  La sequence de reception du projet amont, reproduite a l'identique.
+//  Termina1/benq-screenbar-halo2-esphome, fonction prepare_halo_receive().
+//  Deux differences de fond avec tout ce qu'on a essaye jusqu'ici :
+//
+//   1. AUCUN RESET LOGICIEL. Son commentaire est explicite : "Literal Pico
+//      lifecycle: no software reset during normal initialization. Hidden
+//      packet/PID/RF state is allowed to continue from hardware POR." Nos deux
+//      chemins de configuration commencent au contraire par un reset -- et on a
+//      mesure ce matin (commande 'survie') qu'il efface 15 des 19 valeurs
+//      recommandees Holtek. Sans reset, celles ecrites par begin() survivent.
+//   2. Reception PASSIVE : CRC desactive, auto-ACK desactive, payload
+//      dynamique desactive, longueur statique de 13 octets. Une trame entre
+//      dans la FIFO meme si son CRC est faux.
+//
+//  Le temoin de trafic reste GIO3S=14, prouve en amont du correlateur.
+// ---------------------------------------------------------------------------
 void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t addr[4],
                                   uint8_t payloadLen) {
   if (!radio.present()) {
@@ -4197,7 +2880,17 @@ void BenqHalo::listenLikeUpstream(Print &out, uint32_t dwellMs, const uint8_t ad
   else out.println("  Aucun preambule, mais le temoin de trafic est faible : refaire.");
 }
 
-
+// ---------------------------------------------------------------------------
+//  Polarite et longueur du preambule : les deux dimensions que les sondes GIO3
+//  n'avaient jamais balayees. configForLoopback ecrit une adresse fixe et ne
+//  touche pas a CFO1, or le BC5602 deduit la POLARITE du preambule du premier
+//  bit d'adresse emis (ds.txt:1414) : un 0 donne 01010101, un 1 donne 10101010.
+//  L'adresse est ecrite a l'envers de l'ordre sur l'air, donc c'est le DERNIER
+//  octet du tableau qui part en premier. Toutes nos chasses ont donc tourne
+//  avec une seule des deux polarites, et une seule des deux longueurs.
+//  L'adresse elle-meme n'importe pas ici : GIO3S=14 s'anime des la detection du
+//  preambule, avant toute comparaison d'adresse.
+// ---------------------------------------------------------------------------
 void BenqHalo::probePreambleShape(Print &out, uint32_t dwellMs) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
@@ -4285,7 +2978,18 @@ void BenqHalo::probePreambleShape(Print &out, uint32_t dwellMs) {
   }
 }
 
-
+// ---------------------------------------------------------------------------
+//  Ce qu'on entend sur le canal 5, est-ce la telecommande ou le Wi-Fi ?
+//  Le canal 5 (2405 MHz) tombe dans le Wi-Fi 1, large de 20 MHz (2401-2423).
+//  Un emetteur Wi-Fi depose donc autant d'energie a 2420 qu'a 2405. La
+//  telecommande, elle, ne fait que 0,43 MHz de large (dossier FCC) : elle ne
+//  peut etre qu'a UN de ces deux endroits.
+//    canal  5 = 2405 MHz : cible presumee, dans le Wi-Fi 1
+//    canal 20 = 2420 MHz : dans le Wi-Fi 1, hors de la cible
+//    canal 78 = 2478 MHz : hors de tout canal Wi-Fi, bruit de fond
+//  On alterne les trois toutes les quelques millisecondes : une rafale Wi-Fi
+//  ne peut pas favoriser l'un plutot que l'autre a cette echelle de temps.
+// ---------------------------------------------------------------------------
 void BenqHalo::discriminateWifi(Print &out, uint32_t phaseMs) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
@@ -4376,7 +3080,14 @@ void BenqHalo::discriminateWifi(Print &out, uint32_t phaseMs) {
   }
 }
 
-
+// ---------------------------------------------------------------------------
+//  Le fil GIO3 fait-il contact ? Test purement electrique, sans la radio.
+//  On tire la broche vers le haut puis vers le bas avec les resistances
+//  internes de l'ESP32 (~45 kOhm). Si rien n'est branche, la broche suit
+//  docilement les deux. Si la pastille du module la pilote, elle resiste a au
+//  moins une des deux tractions. Ce test ne peut pas etre trompe par l'absence
+//  de signal radio, contrairement a un comptage de fronts.
+// ---------------------------------------------------------------------------
 void BenqHalo::checkGio3Wire(Print &out) {
   char line[168];
   out.println();
@@ -4430,6 +3141,9 @@ void BenqHalo::checkGio3Wire(Print &out) {
   }
 }
 
+// ---------------------------------------------------------------------------
+//  Les fonctions cachees de GIO3
+// ---------------------------------------------------------------------------
 void BenqHalo::sweepGio3(Print &out, uint32_t dwellMs) {
   if (!radio.present()) {
     out.println("BM5602 absent.");
@@ -4872,287 +3586,6 @@ void BenqHalo::captureGio3Bits(Print &out, uint8_t selector, uint32_t attempts) 
     out.println();
     out.println("  Un candidat qui revient trois fois ou plus merite d'etre");
     out.println("  essaye : 'ecoute <adresse dans l'ordre inverse> 5'.");
-  }
-  out.println();
-}
-
-// ---------------------------------------------------------------------------
-//  Chasse a l'adresse par mot de synchro ancre
-// ---------------------------------------------------------------------------
-
-// Examine une capture et tente d'y lire une adresse. Apres un accrochage en
-// plein payload, la FIFO contient la fin de la trame courante, puis le silence,
-// puis le PREAMBULE et l'ADRESSE de la suivante -- qui ne tombent pas sur la
-// grille d'octets. On balaie donc les huit decalages de bit.
-bool BenqHalo::scanCaptureForAddress(Print &out, const uint8_t *buf, uint8_t len,
-                                     const char *context) {
-  char line[176];
-  bool found = false;
-
-  for (uint8_t shift = 0; shift < 8; shift++) {
-    uint8_t s[32];
-    for (uint8_t i = 0; i < len; i++) {
-      const uint8_t hi = (uint8_t)(buf[i] << shift);
-      const uint8_t lo = (i + 1 < len) ? (uint8_t)(buf[i + 1] >> (8 - shift)) : 0;
-      s[i] = shift ? (uint8_t)(hi | lo) : buf[i];
-    }
-
-    // La longueur du payload n'est pas connue. Le rapport FCC donne une trame
-    // d'environ onze octets pour le Halo 1, contre dix-neuf pour le Halo 2 :
-    // il ne reste donc que deux a quatre octets de payload. On essaie ces
-    // longueurs-la en plus de celle du Halo 2.
-    const uint8_t lengths[5] = {2, 3, 4, 6, 10};
-
-    for (uint8_t p = 0; p < len; p++) {
-      if (s[p] != 0xAA && s[p] != 0x55) continue;
-
-      for (uint8_t li = 0; li < 5; li++) {
-        const uint8_t plen = lengths[li];
-        // preambule(1) + adresse(4) + PCF(1) + payload + CRC(2)
-        if ((uint16_t)p + 8 + plen > len) continue;
-
-        const uint8_t *air = &s[p + 1];  // les quatre octets d'adresse, sur l'air
-        const uint8_t pcf = s[p + 5];
-        const uint8_t *payload = &s[p + 6];
-        const uint16_t got = (uint16_t)((s[p + 6 + plen] << 8) | s[p + 7 + plen]);
-
-        uint16_t wantA = frameCrcFor(air, pcf, payload);
-        uint16_t wantB = crcOverFrame(0x5042, pcf, payload);
-        if (plen != 10) {
-          // Recalculer sur la longueur reelle plutot que sur dix octets.
-          auto feed = [](uint16_t crc, uint8_t b) {
-            crc ^= (uint16_t)b << 8;
-            for (uint8_t i = 0; i < 8; i++)
-              crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-            return crc;
-          };
-          uint16_t a = 0xEFDF;
-          for (uint8_t i = 0; i < 4; i++) a = feed(a, air[i]);
-          a = feed(a, pcf);
-          uint16_t b = feed(0x5042, pcf);
-          for (uint8_t i = 0; i < plen; i++) {
-            a = feed(a, payload[i]);
-            b = feed(b, payload[i]);
-          }
-          wantA = a;
-          wantB = b;
-        }
-        if (got != wantA && got != wantB) continue;
-
-        snprintf(line, sizeof(line), "      payload de %u octet(s)", (unsigned)plen);
-        out.println(line);
-        found = true;
-      snprintf(line, sizeof(line), "  *** ADRESSE CONFIRMEE PAR CRC  (%s)", context);
-      out.println(line);
-      snprintf(line, sizeof(line), "      sur l'air        : %02X %02X %02X %02X", air[0], air[1],
-               air[2], air[3]);
-      out.println(line);
-      snprintf(line, sizeof(line), "      a saisir         : addr %02X%02X%02X%02X", air[3], air[2],
-               air[1], air[0]);
-      out.println(line);
-        int n = snprintf(line, sizeof(line), "      PCF %02X, payload", pcf);
-        for (uint8_t i = 0; i < plen; i++)
-          n += snprintf(line + n, sizeof(line) - n, " %02X", payload[i]);
-        out.println(line);
-        snprintf(line, sizeof(line), "      CRC %04X, modele %s", got,
-                 (got == wantA) ? "A (adresse couverte)" : "B (adresse non couverte)");
-        out.println(line);
-        Serial.flush();
-        return true;
-      }
-    }
-  }
-  return found;
-}
-
-void BenqHalo::huntAnchored(Print &out, uint32_t seconds, uint8_t group, uint32_t dwellMs,
-                            uint16_t fixedKelvin, int16_t fixedBack) {
-  if (!radio.present()) {
-    out.println("BM5602 absent.");
-    return;
-  }
-
-  char line[176];
-
-  out.println();
-  out.println("=== Chasse a l'adresse par mot de synchro ancre ===");
-  out.println("  Le detecteur de preambule ne s'arme que sur une suite alternee :");
-  out.println("  la fenetre visee doit etre precedee d'un octet 0x55 ou 0xAA.");
-  out.println("  Payload suppose, repris du Halo 2 :");
-  out.println("    [cmd][ctrl][lum_avant][ct_hi][ct_lo][lum_arriere][ct_hi][ct_lo][01][02]");
-  out.println();
-  if (group == 0) {
-    out.println("  GROUPE 1 -- ancre sur la LUMINOSITE ARRIERE a 85 % (=0x55).");
-    out.println("  Fenetre visee : [ct_hi][ct_lo][01]. Une seule inconnue, la");
-    out.println("  temperature, balayee OCTET PAR OCTET sans presumer d'un pas :");
-    out.println("  4096 candidats couvrant 2560 a 6655 K.");
-    out.println("  >>> Regle la lampe ARRIERE au maximum puis redescends d'un ou");
-    out.println("      deux crans, et tourne lentement la molette de TEMPERATURE.");
-  } else {
-    out.println("  GROUPE 2 -- ancre sur la TEMPERATURE dont l'octet bas vaut");
-    out.println("  0x55 ou 0xAA. Fenetre : [lum_arriere][ct_hi][ct_lo].");
-    if (fixedBack >= 0) {
-      snprintf(line, sizeof(line), "  Luminosite arriere IMPOSEE a %d %% : le balayage tombe a",
-               (int)fixedBack);
-      out.println(line);
-      out.println("  32 candidats, soit un passage complet toutes les 2 secondes.");
-      out.println("  >>> ETEINS LA LAMPE ARRIERE (elle vaut alors 0) et tourne la");
-      out.println("      molette de luminosite AVANT sans t'arreter.");
-    } else {
-      out.println("  32 octets hauts x 2 ancres x 101 luminosites = 3232 candidats.");
-    }
-    out.println();
-    out.println("  >>> ETEINS LA LAMPE ARRIERE et ne garde que l'avant allumee.");
-    out.println("  >>> Puis tourne la molette de LUMINOSITE sans t'arreter.");
-    out.println("  La luminosite AVANT ne figure pas dans la fenetre visee : elle");
-    out.println("  fournit donc du trafic en continu pendant que la temperature et");
-    out.println("  la luminosite arriere, elles, restent FIGEES. C'est ce qui rend");
-    out.println("  le balayage utile : sans cela, la cible bouge en meme temps que");
-    out.println("  les hypotheses et les deux ne se croisent jamais.");
-    out.println("  Si rien ne sort, decale la temperature d'un cran et recommence :");
-    out.println("  une valeur sur cinq environ produit une ancre.");
-  }
-  snprintf(line, sizeof(line), "  Duree : %lu s, %lu ms par candidat, debit %s, canal %u.",
-           (unsigned long)seconds, (unsigned long)dwellMs, dataRateName(dataRate_),
-           (unsigned)channel_);
-  out.println(line);
-  out.println("  La molette doit tourner SANS ARRET : c'est la seule source de");
-  out.println("  trafic, et chaque candidat n'a que quelques dizaines de ms.");
-  Serial.flush();
-
-  const uint32_t deadline = millis() + seconds * 1000UL;
-  uint32_t tried = 0, frames = 0, passes = 0;
-  uint32_t strongSamples = 0, rssiSamples = 0;
-  uint8_t bestRssi = 0xFF;
-  bool solved = false;
-
-  while (!solved && (int32_t)(millis() - deadline) < 0) {
-    passes++;
-
-    // On balaie les OCTETS de temperature, sans presumer d'un pas. Generer les
-    // candidats par pas de 25 K etait une hypothese heritee du Halo 2, et elle
-    // etait ruineuse : sur cette grille, une seule valeur de toute la plage a
-    // un octet bas valant 0x55 ou 0xAA. Le groupe 2 ne testait donc qu'une
-    // temperature sur les trente-et-une possibles.
-    // 2700 a 6500 K couvre 0x0A8C a 0x1964 : l'octet haut va de 0x0A a 0x19.
-    // Une temperature imposee concentre tout le temps de mesure sur une seule
-    // hypothese, au lieu de le diluer sur trente-deux. A utiliser des qu'un
-    // indice designe une valeur precise.
-    const uint16_t hiFrom = fixedKelvin ? (uint16_t)(fixedKelvin >> 8) : 0x0A;
-    const uint16_t hiTo = fixedKelvin ? (uint16_t)(fixedKelvin >> 8) : 0x19;
-
-    for (uint16_t ctHi = hiFrom; ctHi <= hiTo && !solved; ctHi++) {
-      const uint16_t loStep = (group == 0) ? 1 : 85;  // groupe 2 : 0x55 puis 0xAA
-      const uint16_t loFrom = fixedKelvin ? (uint16_t)(fixedKelvin & 0xFF)
-                                          : ((group == 0) ? 0 : 85);
-      const uint16_t loTo = fixedKelvin ? (uint16_t)(fixedKelvin & 0xFF) : 255;
-      for (uint16_t ctLoI = loFrom; ctLoI <= loTo && !solved; ctLoI += loStep) {
-        const uint8_t ctLo = (uint8_t)ctLoI;
-        if (!fixedKelvin && group != 0 && ctLo != 0x55 && ctLo != 0xAA) continue;
-
-      // Figer la luminosite arriere reduit le balayage d'un facteur cent et un.
-      // Eteindre la lampe arriere la met a zero : une valeur connue, sans avoir
-      // a la deviner, et la luminosite AVANT reste libre pour fournir du trafic.
-      const uint8_t backFrom = (group == 0) ? 0 : ((fixedBack >= 0) ? (uint8_t)fixedBack : 0);
-      const uint8_t backMax =
-          (group == 0) ? 0 : ((fixedBack >= 0) ? (uint8_t)fixedBack : 100);
-      for (uint8_t back = backFrom; back <= backMax && !solved; back++) {
-        if ((int32_t)(millis() - deadline) >= 0) break;
-
-        // Sur l'air la fenetre defile dans l'ordre du payload ; le registre se
-        // remplit a l'envers.
-        uint8_t reg3[3];
-        if (group == 0) {
-          reg3[0] = 0x01;
-          reg3[1] = ctLo;
-          reg3[2] = ctHi;
-        } else {
-          reg3[0] = ctLo;
-          reg3[1] = ctHi;
-          reg3[2] = back;
-        }
-
-        sharedRadioConfig(ADDR_LEN_3, reg3, 3);
-        uint8_t mask = radio.readRegister(REG_MASK | CMD_READ_REGISTER);
-        radio.writeRegister(REG_MASK | CMD_WRITE_REGISTER, (uint8_t)(mask | MASK_PRM_RX));
-        radio.writeRegister(B0_DPL1 | CMD_WRITE_REGISTER, 0x00);
-        radio.writeRegister(B0_DPL2 | CMD_WRITE_REGISTER, 0x00);
-        radio.writeRegister(B0_RXPW0 | CMD_WRITE_REGISTER, 32);
-        radio.writeRegister(REG_PKT1 | CMD_WRITE_REGISTER, 0x00);
-        radio.writeRegister(B0_ENAA | CMD_WRITE_REGISTER, 0x00);
-        radio.clearInterrupts();
-        radio.command(CMD_FLUSH_RX_FIFO);
-        radio.enterRxMode();
-        tried++;
-
-        const uint32_t until = millis() + dwellMs;
-        while ((int32_t)(millis() - until) < 0) {
-          if (radio.operationMode() != OMST_RX) radio.enterRxMode(300);
-
-          // Temoin de trafic, independant du correlateur : RSSI2 est une mesure
-          // temps reel. Sans lui, "zero accroche" ne distingue pas une mauvaise
-          // hypothese d'une telecommande muette.
-          const uint8_t rssi = radio.readRegister(B0_RSSI2 | CMD_READ_REGISTER);
-          if (rssi < 70) strongSamples++;
-          rssiSamples++;
-          if (rssi < bestRssi) bestRssi = rssi;
-
-          if (radio.readRegister(REG_STATUS | CMD_READ_REGISTER) & STATUS_RX_DR) continue;
-
-          uint8_t buf[32];
-          radio.readFifo(buf, 32, false);
-          radio.writeRegister(REG_IRQ1 | CMD_WRITE_REGISTER, IRQ_RX_DR);
-          radio.command(CMD_FLUSH_RX_FIFO);
-          frames++;
-
-          snprintf(line, sizeof(line), "  accroche : ct %02X %02X, arriere %u %%",
-                   (unsigned)ctHi, (unsigned)ctLo, (unsigned)back);
-          out.println(line);
-          for (uint8_t half = 0; half < 2; half++) {
-            int n = snprintf(line, sizeof(line), half ? "        " : "    FIFO");
-            for (uint8_t i = half * 16; i < (uint8_t)(half * 16 + 16); i++)
-              n += snprintf(line + n, sizeof(line) - n, " %02X", buf[i]);
-            out.println(line);
-          }
-          Serial.flush();
-
-          snprintf(line, sizeof(line), "ct %02X %02X (%u K), arriere %u %%", (unsigned)ctHi,
-                   (unsigned)ctLo, (unsigned)((ctHi << 8) | ctLo), (unsigned)back);
-          if (scanCaptureForAddress(out, buf, 32, line)) solved = true;
-        }
-        if ((tried & 0x0F) == 0) delay(1);
-      }
-      }
-    }
-  }
-
-  out.println();
-  snprintf(line, sizeof(line), "  Bilan : %lu candidat(s) essaye(s) en %lu passe(s), %lu accroche(s).",
-           (unsigned long)tried, (unsigned long)passes, (unsigned long)frames);
-  out.println(line);
-  const uint32_t strongPerMille = rssiSamples ? (strongSamples * 1000UL / rssiSamples) : 0;
-  snprintf(line, sizeof(line), "  Trafic : signal fort sur %lu pour mille des mesures, pic %u dB.",
-           (unsigned long)strongPerMille, (unsigned)bestRssi);
-  out.println(line);
-  if (strongPerMille < 5) {
-    out.println("  >>> Quasiment aucun signal fort : la telecommande n'emettait");
-    out.println("  pas, ou pas sur ce canal. Le resultat ne dit RIEN sur les");
-    out.println("  hypotheses testees. Verifie la molette avant de recommencer.");
-  }
-  if (solved) {
-    out.println("  ADRESSE TROUVEE. Enregistre-la avec la commande 'addr' affichee");
-    out.println("  ci-dessus, puis 'ecoute <adresse> 5' pour verifier qu'on suit la lampe.");
-  } else if (frames > 6) {
-    out.println("  Beaucoup d'accroches sans adresse valide : la fenetre mord sur");
-    out.println("  quelque chose de reel mais la lecture echoue. Envoie les vidages.");
-  } else if (frames) {
-    out.println("  Quelques accroches seulement. Un motif de 24 bits se retrouve");
-    out.println("  par hasard environ une fois sur 16 millions de positions, et il");
-    out.println("  en defile des dizaines de millions par minute : une poignee");
-    out.println("  d'accroches sans CRC valide est le bruit attendu, pas un indice.");
-  } else {
-    out.println("  Aucune accroche. Verifie que la molette tournait, puis essaie");
-    out.println("  l'autre groupe et l'autre debit.");
   }
   out.println();
 }

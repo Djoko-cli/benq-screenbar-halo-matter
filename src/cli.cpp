@@ -106,7 +106,6 @@ static void cmdHelp() {
   Serial.println("                        prochain abonnement neuf d'Apple, pas pour un repris");
 #endif
 #endif
-  Serial.println("  debug                 bascule les traces RF");
   Serial.println("  regs                  dump des registres du BC5602");
   Serial.println("  rfinit                re-teste le module apres correction du cablage");
   Serial.println("  calib                 relance la calibration du VCO");
@@ -121,8 +120,6 @@ static void cmdHelp() {
   Serial.println("  rxdirect [ms]         reception en mode direct : entree RX + selecteurs GIO2");
   Serial.println("  bande                 ou emet la telecommande : 84 canaux, repos puis molette");
   Serial.println("  cause                 pourquoi la carte a redemarre la derniere fois");
-  Serial.println("  appaire [s] [canal]   capture pendant l'appairage ; canal 0 = les 3 du FCC");
-  Serial.println("  preambule [ms]        cale le correlateur sur le preambule, balaie X sur 256");
   Serial.println("  presence              entend-on la telecommande, et sur quel canal");
   Serial.println("  rafale [s] [seuil]    duree des rafales -> en deduit le debit");
   Serial.println("  boucle [n]            etalonnage a une carte : deux modules sur le meme bus");
@@ -132,7 +129,6 @@ static void cmdHelp() {
   Serial.println("  sniffspi [s]          ecoute passive du bus SPI d'un appareil tiers");
   Serial.println("  swd                   cherche SWDIO et interroge le microcontroleur");
   Serial.println("  syncpayload [ms]      le correlateur sait-il se caler au milieu d'une trame ?");
-  Serial.println("  ancre [s] [1|2] [K] [lum]  chasse ancree ; K et lum arriere imposables");
   Serial.println("  gio3 [ms]             balaie les 16 valeurs du selecteur GIO3 en reception");
   Serial.println("  debitgio [ms]         trouve le debit de la source, sans connaitre l'adresse");
   Serial.println("  canalgio [ms]         trouve le canal demodulable, sans connaitre l'adresse");
@@ -144,10 +140,7 @@ static void cmdHelp() {
   Serial.println("  fil                   le fil GIO3 fait-il contact ? (test electrique)");
   Serial.println("  discrimine [ms]       canal 5 : la telecommande, ou le Wi-Fi 1 ?");
   Serial.println("  forme [ms]            polarite et longueur du preambule : 12 formes");
-  Serial.println("  benq [ms] [octets]    reception Halo 1, lecture de 8 a 32 octets");
   Serial.println("  xo [0..31|0x1F|off]   trim du quartz du BM5602 : reglage fin de la porteuse");
-  Serial.println("  tx6 <hex12> [n] [ms]  emettre une trame Halo 1 (adresse + 6 octets + CRC)");
-  Serial.println("  txraw <hex> [n] [ms]  emettre des octets bruts apres l'adresse, CRC materiel coupe");
   Serial.println("  txack <adr> <canal> <charge> [n] [ms]  format standard, accuse automatique");
   Serial.println("  prxack <adr> <canal> [ms]  recepteur de banc qui accuse automatiquement");
   Serial.println("  ecoute <adr> <canal> [ms]  ecoute passive, decode commandes et accuses");
@@ -182,13 +175,11 @@ static void cmdHelp() {
   Serial.println("  aw [3|4|5]            longueur d'adresse attendue");
   Serial.println("  chiplog               bascule les logs de la pile Matter");
   Serial.println();
-  Serial.println("  addr                  affiche l'adresse de communication");
-  Serial.println("  addr 4FF0FD63         definit l'adresse, ordre d'ecriture (sur l'air 63 FD F0 4F)");
-  Serial.println("  chan 5                canal radio : 5=2405 MHz, 46=2446, 75=2475");
-  Serial.println("  erase                 efface la configuration radio");
-  Serial.println("  normal                retour au mode normal");
+  Serial.println("  addr                  adresse des outils (celle du pilote : 'lampe adresse')");
+  Serial.println("  addr 4FF0FD63         la definit, ordre d'ecriture (sur l'air 63 FD F0 4F)");
+  Serial.println("  chan 5                canal des outils : 5=2405 MHz, 46=2446, 75=2475");
+  Serial.println("  erase                 efface l'adresse et le canal des outils");
   Serial.println("  ecoute B0000159 5     appairage Halo 1 (59 01 00 B0) : ecouter, jamais emettre");
-  Serial.println("  (poll, send, find, pair, sniff, tail : commandes Halo 2 retirees)");
   Serial.println();
   Serial.println("  wifi <ssid> <mdp>     identifiants Wi-Fi (cibles sans commissioning BLE)");
   Serial.println("  decommission          retire toutes les fabriques Matter");
@@ -207,7 +198,8 @@ static void cmdAddress(char *arg) {
     Serial.println("Format attendu : addr 11223344 (8 caracteres hexa)");
     return;
   }
-  // tx6 et txraw emettent sur cette adresse.
+  // Plus aucun outil n'emet sur cette adresse (tx6 et txraw retires) ; la
+  // garde reste, par prudence : l'ecoute de base s'y cale.
   if (isPairingAddr(v)) {
     Serial.println("Refuse : adresse d'appairage.");
     return;
@@ -228,18 +220,6 @@ static void cmdChannel(char *arg) {
   }
   halo.setChannel((uint8_t)ch);
   Serial.printf("Canal : %d (%d MHz)\n", ch, 2400 + ch);
-}
-
-// Commandes de la couche Halo 2 (poll, send, find, pair, sniff, tail) : la
-// lampe est un Halo 1, et ces commandes emettaient ou attendaient le format
-// Halo 2, qu'elle ne parle pas. Retirees (plan du pilote Halo 1, etape C1).
-static void cmdHalo2Retired(bool pairing) {
-  if (pairing) {
-    Serial.println("Commande Halo 2 retiree. Appairage Halo 1 (59 01 00 B0 sur l'air) :");
-    Serial.println("  'ecoute B0000159 5' pendant l'appairage, sans jamais y emettre.");
-  } else {
-    Serial.println("Commande Halo 2 retiree : voir 'txack', 'ecoute' (puis 'lampe').");
-  }
 }
 
 #ifndef DIAG_ONLY
@@ -367,8 +347,8 @@ static void cmdWifi(char *arg) {
 // rfinit, regs, xo, cc*, swd...) peuvent changer sa configuration ou le trim
 // du quartz : le pilote Halo 1 reconfigure alors la puce au prochain usage.
 static bool radioFree(const char *cmd) {
-  static const char *const kFree[] = {"lampe", "help", "?", "matter", "debug", "chiplog",
-                                      "cause", "wifi", "led", "decommission", "reboot"};
+  static const char *const kFree[] = {"lampe", "help", "?", "matter", "chiplog", "cause",
+                                      "wifi", "led", "decommission", "reboot"};
   for (const char *k : kFree)
     if (!strcmp(cmd, k)) return true;
   return false;
@@ -395,11 +375,7 @@ static void handleLine(char *line) {
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "matter")) cmdMatter(arg);
 #endif
-  else if (!strcmp(line, "poll")) cmdHalo2Retired(false);
-  else if (!strcmp(line, "debug")) {
-    halo.debug = !halo.debug;
-    Serial.printf("Debug %s\n", halo.debug ? "active" : "desactive");
-  } else if (!strcmp(line, "chiplog")) {
+  else if (!strcmp(line, "chiplog")) {
     setChipLogging(!chipLogging);
     Serial.printf("Logs de la pile Matter %s\n", chipLogging ? "actives" : "coupes");
   } else if (!strcmp(line, "amble")) {
@@ -424,7 +400,7 @@ static void handleLine(char *line) {
     Serial.println("  (non persistant, et sans adresse de 5 octets connue ce reglage");
     Serial.println("   ne sert qu'a verifier que le registre accepte la valeur)");
   } else if (!strcmp(line, "gio")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeGioFunctions(Serial);
   } else if (!strcmp(line, "debit")) {
     const long v = strtol(arg, nullptr, 10);
@@ -440,25 +416,25 @@ static void handleLine(char *line) {
     uint32_t secs = 20;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 3 && v <= 120) secs = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.tapTest(Serial, secs);
   } else if (!strcmp(line, "gio3bits")) {
     long sel = strtol(arg, nullptr, 10);
     if (sel < 0 || sel > 15) sel = 14;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.captureGio3Bits(Serial, (uint8_t)sel);
   } else if (!strcmp(line, "gio3check")) {
     uint32_t dwell = 2000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 500 && v <= 10000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.checkGio3Correlator(Serial, dwell);
   } else if (!strcmp(line, "holtek")) {
     if (*arg) halo.setHoltekTuning(strtol(arg, nullptr, 10) != 0);
     Serial.print("Reglages analogiques Holtek reappliques apres reset : ");
     Serial.println(halo.holtekTuning() ? "oui" : "non");
   } else if (!strcmp(line, "survie")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.compareAfterReset(Serial);
   } else if (!strcmp(line, "modem")) {
     char *end = nullptr;
@@ -473,19 +449,19 @@ static void handleLine(char *line) {
       const long v = strtol(end, nullptr, 10);
       if (v >= 100 && v <= 10000) dwell = (uint32_t)v;
     }
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sweepModemRegister(Serial, (int)bank, (uint8_t)reg, dwell);
   } else if (!strcmp(line, "largeur")) {
     uint32_t dwell = 600;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 5000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sweepAddressWidths(Serial, dwell);
   } else if (!strcmp(line, "canalpico")) {
     uint32_t dwell = 1500;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 300 && v <= 10000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sweepChannelsPico(Serial, 0, 83, dwell);
   } else if (!strcmp(line, "canalgio")) {
     // canalgio [ms] [premier] [dernier] : restreindre la plage permet un temps
@@ -503,13 +479,13 @@ static void handleLine(char *line) {
     }
     if (from < 0 || from > 83) from = 0;
     if (to < from || to > 83) to = 83;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeChannelByGio3(Serial, (uint8_t)from, (uint8_t)to, dwell);
   } else if (!strcmp(line, "debitgio")) {
     uint32_t dwell = 3000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 500 && v <= 120000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeRateByGio3(Serial, dwell);
   } else if (!strcmp(line, "ccpins")) {
     // ccpins sck miso mosi csn gdo0 gdo2 paen rxen
@@ -737,7 +713,7 @@ static void handleLine(char *line) {
         if (trials > 200) trials = 200;
         if (gap < 0) gap = 0;
         if (gap > 5000) gap = 5000;
-        halo.setMode(HaloMode::Normal);
+        halo.prepareForTool();
         halo.txAck(Serial, addrReg, (uint8_t)ch, pay, (uint8_t)np, (uint8_t)trials, (uint16_t)gap);
       }
     }
@@ -754,7 +730,7 @@ static void handleLine(char *line) {
     if (na != 4 || ch < 0 || ch > 83 || ms < 500 || ms > 600000) {
       Serial.println("Usage : ecoute <adresse 8 hex> <canal> [ms]");
     } else {
-      halo.setMode(HaloMode::Normal);
+      halo.prepareForTool();
       halo.sniffStd(Serial, addrReg, (uint8_t)ch, (uint32_t)ms);
     }
   } else if (!strcmp(line, "prxack")) {
@@ -773,51 +749,8 @@ static void handleLine(char *line) {
       // Ce recepteur accuse tout : sur la balise, il clorait l'appairage.
       Serial.println("Refuse : adresse d'appairage.");
     } else {
-      halo.setMode(HaloMode::Normal);
+      halo.prepareForTool();
       halo.prxAck(Serial, addrReg, (uint8_t)ch, (uint32_t)ms);
-    }
-  } else if (!strcmp(line, "txraw")) {
-    // txraw <hex d'un seul tenant> [nombre] [intervalle ms]
-    // Correction de l'audit (B10) : l'ancienne lecture s'arretait au premier
-    // espace et emettait en silence une trame tronquee.
-    char *hex = arg;
-    char *rest = splitWord(hex);
-    uint8_t buf[32];
-    const int len = parseHexBytes(hex, buf, 30);
-    if (len < 1) {
-      Serial.println("Usage : txraw <hex d'un seul tenant> [nombre] [intervalle ms]");
-    } else {
-      char *end = rest;
-      long n = 3, gap = 2;
-      if (*end) n = strtol(end, &end, 10);
-      if (end && *end) gap = strtol(end, nullptr, 10);
-      if (n < 1 || n > 5000) n = 3;
-      if (gap < 0 || gap > 2000) gap = 2;
-      halo.setMode(HaloMode::Normal);
-      halo.txRaw(Serial, buf, (uint8_t)len, (uint16_t)n, (uint16_t)gap);
-    }
-  } else if (!strcmp(line, "tx6")) {
-    // tx6 <12 chiffres hex> [nombre] [intervalle ms]
-    char *p = arg;
-    uint8_t pay[6];
-    bool ok = strlen(p) >= 12;
-    for (uint8_t i = 0; ok && i < 6; i++) {
-      char pair[3] = {p[i * 2], p[i * 2 + 1], 0};
-      char *e = nullptr;
-      pay[i] = (uint8_t)strtol(pair, &e, 16);
-      if (e != pair + 2) ok = false;
-    }
-    if (!ok) {
-      Serial.println("Usage : tx6 <12 chiffres hex> [nombre] [intervalle ms]");
-    } else {
-      char *end = p + 12;
-      long n = 5, gap = 3;
-      if (*end) n = strtol(end, &end, 10);
-      if (*end) gap = strtol(end, nullptr, 10);
-      if (n < 1 || n > 5000) n = 5;
-      if (gap < 0 || gap > 1000) gap = 3;
-      halo.setMode(HaloMode::Normal);
-      halo.txHalo1(Serial, pay, (uint16_t)n, (uint16_t)gap);
     }
   } else if (!strcmp(line, "xo")) {
     // xo [0..31 | 0x00..0x1F | off] : trim du quartz du BM5602, donc reglage
@@ -858,17 +791,6 @@ static void handleLine(char *line) {
       Serial.printf("XO1 = 0x%02X, XO_TRIM = %u\n", xo, (unsigned)(xo & 0x1F));
       if (v == -1) Serial.println("Trim libre : le prochain reset logiciel le ramene a 0x10.");
     }
-  } else if (!strcmp(line, "benq")) {
-    // benq [ms] [octets lus, 8 a 32]
-    char *end = nullptr;
-    uint32_t d = 30000;
-    const long v = strtol(arg, &end, 10);
-    if (v >= 1000 && v <= 300000) d = (uint32_t)v;
-    long len = 32;
-    if (end && *end) len = strtol(end, nullptr, 10);
-    if (len < 8 || len > 32) len = 32;
-    halo.setMode(HaloMode::Normal);
-    halo.listenHalo1(Serial, d, (uint8_t)len);
   } else if (!strcmp(line, "amont")) {
     // amont [ms] [adresse hex 8 chiffres] : sequence de reception du projet
     // amont, sans reset logiciel. Sans adresse, celle du Halo 2.
@@ -889,51 +811,37 @@ static void handleLine(char *line) {
       const long pl = strtol(end + 8, nullptr, 10);
       if (pl >= 1 && pl <= 32) plen = (uint8_t)pl;
     }
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.listenLikeUpstream(Serial, dwell, a, plen);
   } else if (!strcmp(line, "forme")) {
     uint32_t dwell = 20000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 1000 && v <= 120000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probePreambleShape(Serial, dwell);
   } else if (!strcmp(line, "discrimine")) {
     uint32_t ph = 20000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 3000 && v <= 120000) ph = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.discriminateWifi(Serial, ph);
   } else if (!strcmp(line, "fil")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.checkGio3Wire(Serial);
   } else if (!strcmp(line, "gio3")) {
     uint32_t dwell = 1500;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 300 && v <= 10000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sweepGio3(Serial, dwell);
-  } else if (!strcmp(line, "ancre")) {
-    char *end = nullptr;
-    long secs = strtol(arg, &end, 10);
-    if (secs < 20 || secs > 1800) secs = 180;
-    long grp = 1, kelvin = 0;
-    if (end && *end) grp = strtol(end, &end, 10);
-    if (end && *end) kelvin = strtol(end, &end, 10);
-    if (kelvin < 2000 || kelvin > 7000) kelvin = 0;
-    long back = -1;
-    if (end && *end) back = strtol(end, nullptr, 10);
-    if (back < 0 || back > 100) back = -1;
-    halo.setMode(HaloMode::Normal);
-    halo.huntAnchored(Serial, (uint32_t)secs, (grp == 2) ? 1 : 0, 60, (uint16_t)kelvin,
-                      (int16_t)back);
   } else if (!strcmp(line, "syncpayload")) {
     uint32_t dwell = 3000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 500 && v <= 20000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.validatePayloadSync(Serial, dwell);
   } else if (!strcmp(line, "swd")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     Serial.println();
     Serial.println("=== Interrogation du microcontroleur par SWD ===");
     Serial.println("  Cablage sur le connecteur J5, avec les memes fils qu'avant :");
@@ -954,10 +862,10 @@ static void handleLine(char *line) {
     uint32_t secs = 60;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 5 && v <= 600) secs = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sniffSpiBus(Serial, secs);
   } else if (!strcmp(line, "autotest")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.selfTest(Serial);
   } else if (!strcmp(line, "etalon")) {
     while (*arg == ' ') arg++;
@@ -972,7 +880,7 @@ static void handleLine(char *line) {
       const long v = strtol(num, &end, 10);
       // Argument facultatif : longueur du preambule emis, 1 ou 2 octets.
       const long amb = (end && *end) ? strtol(end, nullptr, 10) : 2;
-      halo.setMode(HaloMode::Normal);
+      halo.prepareForTool();
       if (tx)
         halo.calibrationBeacon(Serial, (v >= 10 && v <= 600) ? (uint32_t)v : 120,
                                (amb == 1) ? 1 : 2);
@@ -982,7 +890,7 @@ static void handleLine(char *line) {
     uint16_t n = 50;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 5 && v <= 500) n = (uint16_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.loopbackTest(Serial, n);
   } else if (!strcmp(line, "rafale")) {
     uint32_t secs = 20;
@@ -994,49 +902,34 @@ static void handleLine(char *line) {
       const long t = strtol(end, nullptr, 10);
       if (t >= 20 && t <= 120) thr = t;
     }
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.measureBursts(Serial, secs, (uint8_t)thr);
   } else if (!strcmp(line, "presence")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probePresence(Serial);
-  } else if (!strcmp(line, "preambule")) {
-    uint32_t dwell = 500;
-    const long v = strtol(arg, nullptr, 10);
-    if (v >= 50 && v <= 5000) dwell = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
-    halo.huntByPreamble(Serial, dwell);
-  } else if (!strcmp(line, "appaire")) {
-    uint32_t secs = 180;
-    char *end = nullptr;
-    const long v = strtol(arg, &end, 10);
-    if (v >= 20 && v <= 900) secs = (uint32_t)v;
-    // Argument facultatif : se limiter a un seul canal.
-    const long ch = (end && *end) ? strtol(end, nullptr, 10) : 0;
-    halo.setMode(HaloMode::Normal);
-    halo.capturePairing(Serial, secs, (ch > 0 && ch < 84) ? (uint8_t)ch : 0);
   } else if (!strcmp(line, "cause")) {
     Serial.print("  cause du dernier demarrage : ");
     Serial.println(resetReasonText());
   } else if (!strcmp(line, "bande")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.sweepBand(Serial);
   } else if (!strcmp(line, "rxdirect")) {
     uint32_t win = 2000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 30000) win = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeDirectRx(Serial, win);
   } else if (!strcmp(line, "direct")) {
     uint32_t win = 3000;
     const long v = strtol(arg, nullptr, 10);
     if (v >= 200 && v <= 30000) win = (uint32_t)v;
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeDirectMode(Serial, win);
   } else if (!strcmp(line, "rxseq")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.probeRxSequences(Serial);
   } else if (!strcmp(line, "guet")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     Serial.println();
     Serial.println("=== Guet sur canal fixe ===");
     if (*arg) {
@@ -1048,13 +941,13 @@ static void handleLine(char *line) {
     }
     Serial.println("  (des pics +12dB = un emetteur proche ; aucun = rien sur ce canal)");
   } else if (!strcmp(line, "chasse")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.huntRemote(Serial);
   } else if (!strcmp(line, "rxdiag")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.diagnoseRx(Serial);
   } else if (!strcmp(line, "spectre")) {
-    halo.setMode(HaloMode::Normal);
+    halo.prepareForTool();
     halo.scanSpectrum(Serial);
   } else if (!strcmp(line, "regcfg")) {
     if (!halo.radio.present()) {
@@ -1063,7 +956,7 @@ static void handleLine(char *line) {
       Serial.println("Chargement des valeurs recommandees Holtek...");
       uint8_t bad = halo.radio.registerConfigure(&Serial);
       Serial.printf("  ecarts de relecture : %u registre(s)\n", bad);
-      halo.setMode(HaloMode::Normal);
+      halo.prepareForTool();
     }
   } else if (!strcmp(line, "calib")) {
     if (!halo.radio.present()) {
@@ -1074,7 +967,7 @@ static void handleLine(char *line) {
       Serial.printf("  quartz pret : %s\n", xtal ? "oui" : "NON (XCLK_RDY jamais pose)");
       bool ok = xtal && halo.radio.calibrate();
       Serial.printf("  calibration VCO : %s\n", ok ? "terminee" : "ECHEC (ACAL_EN pas retombe)");
-      halo.setMode(HaloMode::Normal);  // reconfigure la radio derriere
+      halo.prepareForTool();  // reconfigure la radio derriere
       halo.printInfo(Serial);
     }
   } else if (!strcmp(line, "rfinit")) {
@@ -1084,21 +977,13 @@ static void handleLine(char *line) {
     if (halo.radio.present()) halo.radio.dumpRegisters(Serial);
     else Serial.println("BM5602 absent.");
   } else if (!strcmp(line, "addr")) cmdAddress(arg);
-  else if (!strcmp(line, "tail")) cmdHalo2Retired(false);
   else if (!strcmp(line, "chan")) cmdChannel(arg);
   else if (!strcmp(line, "erase")) {
     uint8_t zero[4] = {0, 0, 0, 0};
     halo.setAddress(zero);
-    halo.setTail(0x01, 0x02);
     halo.setChannel(RF_CHANNEL_1);
-    Serial.println("Configuration radio effacee.");
-  } else if (!strcmp(line, "find")) cmdHalo2Retired(false);
-  else if (!strcmp(line, "pair")) cmdHalo2Retired(true);
-  else if (!strcmp(line, "sniff")) cmdHalo2Retired(false);
-  else if (!strcmp(line, "normal")) {
-    halo.setMode(HaloMode::Normal);
-    Serial.println("Mode normal.");
-  } else if (!strcmp(line, "send")) cmdHalo2Retired(false);
+    Serial.println("Adresse et canal des outils effaces.");
+  }
 #ifndef DIAG_ONLY
   else if (!strcmp(line, "wifi")) cmdWifi(arg);
   else if (!strcmp(line, "decommission")) {

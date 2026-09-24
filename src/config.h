@@ -78,7 +78,7 @@
 #endif
 
 // Le datasheet BC5602 autorise plus, mais le module a des pistes courtes non
-// adaptees : 1 MHz est large pour 10 octets de payload et reste tres fiable.
+// adaptees : 1 MHz est largement suffisant et reste tres fiable.
 #ifndef RF_SPI_HZ
 #define RF_SPI_HZ 1000000UL
 #endif
@@ -233,30 +233,3 @@
 #define HALO1_LISTEN_DEFAULT true      // produit : suivre la telecommande
 #endif
 #endif
-
-// ===========================================================================
-//  Limites de la lampe (a reverifier sur le Halo 1re gen via la CLI)
-// ===========================================================================
-#define HALO_CT_MIN_K 2700
-#define HALO_CT_MAX_K 6500
-#define HALO_BRIGHT_MIN 1
-#define HALO_BRIGHT_MAX 100
-
-// ===========================================================================
-//  Ordonnancement (tout est non bloquant : homeSpan.poll() doit continuer
-//  a tourner, aucune operation RF ne doit depasser ~15 ms)
-// ===========================================================================
-#define HALO_POLL_INTERVAL_MS 5000    // interrogation d'etat au repos
-#define HALO_COALESCE_MS 250          // regroupe les rafales de curseur (app domotique)
-#define HALO_VERIFY_INTERVAL_MS 400   // cadence de verification de convergence
-#define HALO_VERIFY_MAX_TRIES 12      // ~4,8 s : la lampe fait un fondu progressif
-#define HALO_SETTLE_MS 1500           // delai avant de re-refleter l'etat vers Matter
-#define HALO_ADOPT_MS 2500            // delai avant d'adopter un changement externe
-
-// ===========================================================================
-//  Endpoints Matter optionnels
-//  Le bit 5 du registre de controle est documente comme "capteur ultrason" sur
-//  le Halo 2. Sa signification sur le Halo 1 reste a confirmer (cf. docs/PROTOCOL.md).
-// ===========================================================================
-#define HALO_EXPOSE_SENSOR_SWITCH 1
-#define HALO_EXPOSE_AUTO_SWITCH 1
