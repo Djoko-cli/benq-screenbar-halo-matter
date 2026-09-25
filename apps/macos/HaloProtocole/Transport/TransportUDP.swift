@@ -60,11 +60,7 @@ public final class TransportUDP: Transport {
             recevoir(c)
             let session = try await poigneeDeMain(c)
             let (flux, suite) = AsyncStream.makeStream(of: EvenementTransport.self, bufferingPolicy: .unbounded)
-            etat.withLock { e in
-                e.session = session
-                e.suite = suite
-                e.recus.removeAll()
-            }
+            try adopter(session, suite)
             suite.onTermination = { [weak self] _ in self?.fermer() }
             return flux
         } catch {
@@ -75,6 +71,26 @@ public final class TransportUDP: Transport {
             c.cancel()
             throw error
         }
+    }
+
+    /// Pose la session et le flux, sauf si un echec (`.failed`, erreur de
+    /// reception) ou une fermeture est arrive entre le dernier coup d'oeil de
+    /// la poignee de main et ce verrou : `echec` et `terminer` n'avaient alors
+    /// aucun flux a fermer, et celui-ci ne recevrait jamais `.ferme`. L'erreur
+    /// gardee est levee (ou, pour une fermeture, une erreur de transport) ;
+    /// `ouvrir` annule alors la connexion.
+    func adopter(_ session: SessionH1, _ suite: AsyncStream<EvenementTransport>.Continuation) throws {
+        let refus: (any Error)? = etat.withLock { e in
+            guard !e.fini, !e.echoue else {
+                if let erreur = e.erreur { return erreur }
+                return ErreurTransport(tr("session réseau fermée par l'app"))
+            }
+            e.session = session
+            e.suite = suite
+            e.recus.removeAll()
+            return nil
+        }
+        if let refus { throw refus }
     }
 
     // MARK: - Connexion (file du transport)
@@ -138,7 +154,9 @@ public final class TransportUDP: Transport {
         _ = etat.withLock { $0.suite?.yield(.donnees(ligne)) }
     }
 
-    private func echec(_ err: ErreurReseau) {
+    /// Interne (et non privee) : les tests y simulent un `.failed` ou une
+    /// erreur de reception, sans reseau.
+    func echec(_ err: ErreurReseau) {
         let ouverte = etat.withLock { e -> Bool in
             e.erreur = err
             e.echoue = true

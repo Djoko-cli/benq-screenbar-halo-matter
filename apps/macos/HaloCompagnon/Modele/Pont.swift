@@ -408,8 +408,14 @@ final class Pont {
 
     private func transportOuvert() {
         etatTransport = .ouvert
-        alerteReseau = nil
-        derniereCauseReseau = nil
+        // Une poignee de main reussie leve les causes d'echec d'ouverture, pas
+        // "aucune reponse au json 1" (sansHello) : elle reussissait deja. Ce
+        // bandeau et sa note tiennent jusqu'au hello (synchroniser), sans etre
+        // redits a chaque nouvelle poignee de main de la relance (4.6).
+        if alerteReseau != .sansHello {
+            alerteReseau = nil
+            derniereCauseReseau = nil
+        }
         debutActivite()
         recepteur.resynchroniser()
         note(genreTransport == .udp ? tr("Session réseau ouverte : \(nomTransport).")
@@ -622,6 +628,13 @@ final class Pont {
                 journaliserEnvoi(d)
             case .rouvrir(let n):
                 note(n.texte)
+                // Relance prevue a distance (toujours aucun hello), pas un echec
+                // de plus : le nouvel essai part des la fermeture (0,3 s), le
+                // bandeau "nouvel essai toutes les 30 s" reste vrai, et ces
+                // relances n'usent pas les 40 essais minutes de la reconnexion.
+                if n == .reseauSansHello { essaisReconnexion = 0 }
+                // Reseau : .ferme, transportFerme, puis reconnexion (nouvelle
+                // resolution du nom, nouvelle poignee de main).
                 transport?.fermer()
             case .redemarrage(let ancien, let nouveau):
                 etat.viderDerives()
@@ -631,7 +644,9 @@ final class Pont {
             case .note(let n):
                 if n == .aucuneReponse, genreTransport == .udp {
                     alerteReseau = .sansHello
-                    note(AlerteReseau.sansHello.texte, grave: true)
+                    // Redite a chaque relance (nouvelle poignee de main toutes les
+                    // 30 s) : notee une fois tant que la cause ne change pas (4.6).
+                    noterCauseReseau(AlerteReseau.sansHello.texte, grave: true)
                 } else {
                     note(n.texte, grave: n.grave)
                     if n.grave { alerte = n }
@@ -676,9 +691,11 @@ final class Pont {
             if phase == .connecte {
                 essaisReconnexion = 0
                 // Session retablie : l'alerte d'un echec passe (aucune reponse,
-                // ancien firmware depuis reflashe...) ne vaut plus.
+                // ancien firmware depuis reflashe...) ne vaut plus, et une cause
+                // qui reviendrait ensuite sera notee de nouveau (4.6).
                 alerte = nil
                 alerteReseau = nil
+                derniereCauseReseau = nil
             }
         }
         let r = etat.helloBase != nil ? moteur.reglages : nil
