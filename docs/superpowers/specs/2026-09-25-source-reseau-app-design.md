@@ -200,14 +200,14 @@ anglais) et la reprise.
 | Cas | Detection | Message (resume) | Reprise |
 |---|---|---|---|
 | Reseau local refuse (R7) | chemin `unsatisfied` pour `.localNetworkDenied`, ou `PolicyDenied` a la resolution | "Acces au reseau local refuse : Reglages Systeme > Confidentialite et securite > Reseau local" | arret ; reprise au changement de chemin |
-| Pas de route (bug du noyau, 10.1) | `EHOSTUNREACH`, `ENETUNREACH` | assistant absent : "installer l'assistant : sh tools/macos/halo-routes/installer.sh" ; present (si la sandbox laisse voir son plist) : "route en cours de retablissement" | automatique |
-| Nom introuvable | resolution de `<nom>.local` en echec ou en delai | "Pont introuvable : eteint, hors du reseau Thread, ou routeurs de bordure injoignables" | automatique |
+| Pas de route (bug du noyau, 10.1) | `EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN` | assistant absent : "installer l'assistant : sh tools/macos/halo-routes/installer.sh" ; present (si la sandbox laisse voir son plist) : "route en cours de retablissement" | automatique |
+| Nom introuvable | resolution de `<nom>.local` en echec ou en delai ; `EHOSTDOWN` (ICMPv6 adresse injoignable : le noeud ne repond pas) | "Pont introuvable : eteint, hors du reseau Thread, ou routeurs de bordure injoignables" | automatique |
 | Port injoignable | ICMPv6 apres le SALUT (`ECONNREFUSED`) | "Le pont n'a plus de cle : le brancher en USB, puis Activer l'acces reseau" | arret, "Reessayer" |
 | Aucun DEFI (3 essais) | silence | "Aucune reponse : cle differente (comparer les empreintes par l'USB) ?" | automatique |
-| Pas de `hello` apres le DEFI | `MoteurSession` (`aucuneReponse`) | ajout : "deux autres sessions deja actives (autre Mac, iPhone, halo_udp.py) ?" | voie existante (`json 1` toutes les 30 s) |
+| Pas de `hello` apres le DEFI | `MoteurSession` (`aucuneReponse`) | ajout : "deux autres sessions deja actives (autre Mac, iPhone, halo_udp.py) ?" | `json 1` renvoye (meme `id`) a 2, 4 et 6 s ; 30 s apres le dernier, nouvelle poignee de main (`.rouvrir`, note "nouvelle poignee de main") et non `json 1` : la carte a oublie la session provisoire (30 s apres le SALUT, 10.4) ; "Reessayer" de meme ; le bandeau reste jusqu'au `hello`, sa note une fois |
 | Cle absente du trousseau | lecture a l'ouverture | "Cle absente de ce Mac : brancher le pont en USB, puis Activer l'acces reseau" | arret |
 | Trousseau refuse ou en erreur | `OSStatus` | texte de l'erreur | arret, "Reessayer" |
-| Chemin perdu en session | `.waiting` / `.failed` apres `.ready` | "Connexion reseau perdue : reprise" | automatique |
+| Chemin perdu en session | `.waiting` / `.failed` (ou erreur de reception) apres `.ready` | "Connexion reseau perdue : <cause>" | automatique |
 
 Les cas "arret" s'affichent en bandeau, par la voie des alertes graves ; les
 autres dans la ligne d'etat de la barre laterale ("en attente : ..."). Un

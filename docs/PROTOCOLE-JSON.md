@@ -1243,9 +1243,13 @@ bordure (RIO). Aucune dependance a Matter pour ce canal.
   revenir a 1 apres 999999999) ; seule une commande restee sans reponse est
   renvoyee avec le meme `id` (apres 2 s, 2 fois au plus, avec un `ctr` neuf :
   c'est la regle 6.5 du reseau, ou une perte est ordinaire) ; l'app applique
-  la meme regle a `json 1` : jamais un `id` neuf a distance, pour que la
-  carte rende sa reponse deja en cache ou en file au lieu de rejouer son
-  instantane d'environ 6 Ko. La carte
+  la meme regle aux renvois de `json 1` (sans `hello`, renvoye 3 fois avec le
+  meme `id`, toutes les 2 s), pour que la carte rende sa reponse deja en cache
+  ou en file au lieu de rejouer son instantane d'environ 6 Ko. Seuls les
+  renvois gardent l'`id` : un nouveau `json 1` (relance de 30 s, silence, bail
+  echu, redemarrage vu) en prend un neuf ; a distance, la relance de 30 s sans
+  `hello` refait d'abord la poignee de main (la session provisoire est oubliee
+  30 s apres le SALUT, 10.4). La carte
   garde les 8 dernieres `reponse` (etape `fin`) de chaque session et regle
   chaque ligne par son `id` AVANT tout le reste, cadence comprise
   (`jsonRemoteAdmit`) :

@@ -243,12 +243,17 @@ premières lignes égalent les exemples de 12.1 et que ses trames `brut`
   possible), ASCII imprimable, jamais de JSON ni de RS ; confirmation pour
   `reboot`, `decommission`, `erase`, `wifi`, `addr`, `chan`, `xo`, `debit`,
   `amble`, `aw`, `holtek`, `regcfg`, `lampe oublie`, `lampe adresse <x>`,
-  `lampe stats raz`, `matter med|maxint|reprise auto`, `json cle nouvelle|efface` ;
-  `json 0` refusé (passer par « Libérer le port ») ; la clé de `json cle` est
+  `lampe stats raz`, `matter med|maxint|reprise auto`, `json cle efface` ;
+  `json 0` refusé (passer par « Libérer le port ») ; `json cle nouvelle`
+  refusé (passer par « Nouvelle clé… » de la carte Thread et Matter : la clé
+  rendue doit aller dans le trousseau) ; la clé de `json cle` est
   masquée partout où elle pourrait s'afficher (console, journal, lignes
   rejetées, commandes récentes ; casse et espaces quelconques, toute suite de
-  64 chiffres hexa) et n'entre jamais dans l'historique de saisie. Avant la
-  réponse au `json 1`, une ligne tapée attend en file avec son `id`.
+  64 chiffres hexa ; dans une ligne abîmée, un fragment ou un débordement, là
+  où un log peut couper la clé, aussi le champ `"cle":"` sans guillemet
+  fermant et toute suite de 16 chiffres hexa ou plus) et n'entre jamais dans
+  l'historique de saisie. Avant la réponse au `json 1`, une ligne tapée
+  attend en file avec son `id`.
 
 ### Bac à sable : oui, avec `com.apple.security.device.serial` et `com.apple.security.network.client`
 
@@ -313,12 +318,34 @@ cadence plus rapide pour l'instant.
 
 | Cas | Bandeau / message | Reprise |
 |---|---|---|
-| Trousseau absent ou en erreur, pont sans clé (« port injoignable ») | bandeau, avec « Reconnecter » | arrêt : recréer ou vérifier la clé par l'USB |
-| Réseau local refusé (Réglages Système › Confidentialité et sécurité › Réseau local) | bandeau | arrêt ; reprise dès que le chemin réseau change |
-| Pas de route IPv6, nom introuvable, aucun DEFI, chemin perdu en session | ligne d'état de la barre latérale (« en attente : ... ») | automatique : 0,3 s, 1 s, 2 s, 5 s (40 essais), puis à un changement de chemin réseau ou au réveil du Mac |
+| Trousseau absent ou en erreur, pont sans clé (« port injoignable », ICMPv6 `ECONNREFUSED`) | bandeau ; bouton « Reconnecter » dans le panneau de la barre latérale | arrêt : recréer ou vérifier la clé par l'USB |
+| Réseau local refusé (Réglages Système › Confidentialité et sécurité › Réseau local) | bandeau | arrêt ; reprise dès que le chemin réseau change, ou « Reconnecter » |
+| Pas de route IPv6 (`EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN`), pont introuvable (résolution de `<nom>.local` en échec, ou `EHOSTDOWN` : le nœud ne répond pas), aucun DEFI (autre clé, ou pont sans clé dont l'ICMPv6 ne revient pas), chemin perdu en session (« Connexion réseau perdue : <cause> ») | ligne d'état de la barre latérale (« en attente : ... ») et une note dans la console ; pas de bandeau | automatique : 0,3 s, 1 s, 2 s, 5 s (40 essais), puis à un changement de chemin réseau ou au réveil du Mac |
+| DEFI reçu, puis aucun `hello` (deux autres sessions déjà actives ?) | bandeau « Aucune réponse au json 1 par le réseau… » | nouvelle poignée de main 30 s après le dernier `json 1`, et ainsi de suite (voir ci-dessous) |
 
 Une même cause n'est notée qu'une fois dans la console tant qu'elle ne change
-pas. Le message « Pas de route » dépend de l'assistant système
+pas.
+
+**Aucun `hello` après la poignée de main.** La carte n'ouvre d'abord qu'une
+session H1 provisoire, qu'elle oublie 30 s après le SALUT (ou dès qu'un autre
+SALUT la remplace), et ne l'établit qu'au premier message valide s'il lui
+reste une de ses deux places (`docs/PROTOCOLE-JSON.md`, 10.4). Sans `hello`,
+`json 1` est renvoyé avec le même `id` à 2, 4 et 6 s ; à 8 s, le bandeau
+s'affiche. 30 s après le dernier `json 1`, l'app ne renvoie pas `json 1` sur
+une session que la carte a oubliée : elle ferme et rouvre la source (note
+« nouvelle poignée de main », nouvelle résolution du nom, nouveau SALUT, puis
+`json 1`), et ainsi de suite, environ toutes les 30 s ; « Réessayer json 1 »
+fait de même tout de suite. Le bandeau reste d'un essai à l'autre, sa note
+n'est pas répétée, et il s'efface au premier `hello`.
+
+**Fermer.** « Déconnecter », « Libérer le port », le changement de source,
+un nouveau clic sur le pont déjà connecté et la fin de l'app envoient
+`json 0` (scellé) avant de fermer une session ou une tentative en cours : sa
+place sur la carte se libère tout de suite. Sur une source réseau,
+« Libérer le port » n'a rien à flasher : la note et la barre latérale disent
+« Session réseau fermée », et rien ne se rouvre avant « Reconnecter ».
+
+Le message « Pas de route » dépend de l'assistant système
 `tools/macos/halo-routes/` : si son fichier
 `/Library/LaunchDaemons/fr.djoko.halo.routes.plist` est visible depuis le bac
 à sable, le message dit que la route revient seule ; sinon il renvoie à
@@ -336,12 +363,16 @@ l'app, dans l'ordre : `HALO_CLE` (fichier) ; le trousseau (`security
 find-generic-password -s fr.djoko.halo.pont -a <nom> -w` ; pour une simple
 adresse, le seul pont du trousseau, erreur s'il y en a plusieurs ; macOS
 demande une fois d'autoriser `security`, « Toujours autoriser ») ;
-`~/.config/halo-pont/cle`. Sa commande `cle <port>` (banc sans l'app) exige
-`HALO_CLE` et prévient que la clé de l'app devient alors périmée.
+`~/.config/halo-pont/cle` en dernier recours, avec un avertissement sur la
+sortie d'erreur (clé absente du trousseau ou accès refusé : ce fichier peut
+être périmé ; la clé n'est jamais affichée). Sa commande `cle <port>` (banc
+sans l'app) exige `HALO_CLE` et prévient que la clé de l'app devient alors
+périmée.
 
-Limites laissées de côté pour l'instant : `json cle nouvelle` tapé dans la
-console change bien la clé de la carte, mais la clé rendue n'est pas rangée
-(passer par « Nouvelle clé… ») ; l'app iOS reste hors périmètre (phase 3).
+`json cle nouvelle` tapé dans la console est refusé, sur tout transport : la
+carte changerait de clé, mais la clé rendue ne serait rangée nulle part
+(passer par « Nouvelle clé… »). Limite laissée de côté pour l'instant : l'app
+iOS reste hors périmètre (phase 3).
 
 ## Architecture
 
@@ -443,13 +474,40 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   depuis l'app, livrée ; `lampe stats raz` grisée.
 - **R5** : redémarrer le pont (USB : `reboot`, depuis l'app ou
   `pio device monitor` sans `json cle`) → l'app reprend seule en ~15 s.
+- **Première autorisation réseau local** : sur un Mac où l'app n'a encore
+  jamais joint le réseau local, première connexion réseau → invite de macOS ;
+  noter ce que l'app montre pendant l'invite, puis cliquer « Autoriser » :
+  l'app reprend-elle seule (le moniteur de chemin `NWPathMonitor` rappelle-t-il
+  au changement d'autorisation ?) ou faut-il « Reconnecter » ?
 - **R7** : Réglages Système › Confidentialité et sécurité › Réseau local :
   couper Halo Compagnon → bandeau « Accès au réseau local refusé… » ;
   réautoriser → reprise.
-- **Route** : retirer la route IPv6 statique vers le préfixe OMR → au plus
-  quelques secondes de bandeau « Pas de route… », puis reprise par
-  l'assistant `tools/macos/halo-routes` (journal
-  `/Library/Logs/fr.djoko.halo.routes.log`).
+- **Route** : retirer la route IPv6 statique vers le préfixe OMR → ligne
+  d'état de la barre latérale « Pas de route IPv6… » (pas de bandeau) et une
+  note dans la console, « Transport fermé : Connexion réseau perdue : … » si
+  une session était ouverte ; puis reprise par l'assistant
+  `tools/macos/halo-routes` (journal `/Library/Logs/fr.djoko.halo.routes.log`).
+  Noter l'errno vu : le message le dit (« Pas de route » : `EHOSTUNREACH`,
+  `ENETUNREACH` ou `ENETDOWN` ; « Pont introuvable » : `EHOSTDOWN` ou échec de
+  la résolution) ; `python3 tools/halo_udp.py refus <adresse OMR> 5480`
+  affiche l'errno brut.
 - **Pont sans clé** : `json cle efface` par l'USB, puis connexion réseau →
-  message clé absente ou « port injoignable » (aucun DEFI), sans boucle de
-  tentatives.
+  soit « Le pont n'a plus de clé… » (ICMPv6 port injoignable,
+  `ECONNREFUSED`) : bandeau, arrêt sans boucle de tentatives ; soit, si
+  l'ICMPv6 ne revient pas, « Aucune réponse du pont… » (aucun DEFI) dans la
+  ligne d'état, avec reprise automatique (boucle de tentatives). Noter lequel
+  des deux ; `python3 tools/halo_udp.py refus <adresse OMR> 5480` : `REFUS`
+  attendu.
+- **Trois clients** : deux sessions déjà ouvertes (deux
+  `python3 tools/halo_udp.py session <nom SRP>.local --duree 300`), puis
+  l'app → DEFI mais aucun `hello` (verdict `complet` côté carte, `udp.rejets`
+  monte) : bandeau « Aucune réponse au json 1 par le réseau… » à 8 s, puis
+  note « nouvelle poignée de main » environ toutes les 30 s, bandeau stable,
+  sa note une seule fois ; arrêter un des `halo_udp.py` (Ctrl-C : `json 0`) →
+  `hello` au prochain essai, bandeau effacé. Puis un nouveau clic sur le pont
+  déjà connecté : `json 0` d'abord, la nouvelle session a son `hello` sans
+  attendre les 30 s de silence de l'ancienne (le `halo_udp.py` restant garde
+  sa place).
+- **Libérer le port** sur la source réseau : note « Session réseau fermée :
+  json 0 envoyé… », ligne d'état « Session réseau fermée (json 0) », rien ne
+  se rouvre avant « Reconnecter ».
