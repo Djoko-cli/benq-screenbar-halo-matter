@@ -250,17 +250,19 @@ premières lignes égalent les exemples de 12.1 et que ses trames `brut`
   64 chiffres hexa) et n'entre jamais dans l'historique de saisie. Avant la
   réponse au `json 1`, une ligne tapée attend en file avec son `id`.
 
-### Bac à sable : oui, avec `com.apple.security.device.serial`
+### Bac à sable : oui, avec `com.apple.security.device.serial` et `com.apple.security.network.client`
 
-L'app est sandboxée (`HaloCompagnon/HaloCompagnon.entitlements`) avec le droit
-`com.apple.security.device.serial`, celui que la spécification prévoit (3.1),
-et rien d'autre. Raisons : l'app n'a besoin que des
-ports série et du registre IOKit (lecture, permise dans le bac à sable) ; le
-droit série couvre `open`, `TIOCEXCL`, `TIOCMSET` et `termios` sur `/dev/cu.*` ;
-rien d'autre sur le disque ni le réseau n'est ouvert ; et la même app pourra
-être signée et distribuée sans changement. Si le banc montrait un refus du
-bac à sable sur un `ioctl`, retirer `com.apple.security.app-sandbox` suffit
-(aucun code ne dépend du bac à sable).
+L'app est sandboxée (`HaloCompagnon/HaloCompagnon.entitlements`) avec deux
+droits, rien d'autre : `com.apple.security.device.serial`, celui que la
+spécification prévoit (3.1), pour les ports série et le registre IOKit
+(lecture, permise dans le bac à sable ; il couvre `open`, `TIOCEXCL`,
+`TIOCMSET` et `termios` sur `/dev/cu.*`) ; et `com.apple.security.network.client`,
+pour la source réseau (UDP sortant seulement ; détails, autorisation réseau
+local et signature dans « Source réseau (UDP sur Thread) » plus bas). Rien
+d'autre sur le disque n'est ouvert ; et la même app pourra être signée et
+distribuée sans changement. Si le banc montrait un refus du bac à sable sur
+un `ioctl`, retirer `com.apple.security.app-sandbox` suffit (aucun code ne
+dépend du bac à sable).
 
 ## Source réseau (UDP sur Thread)
 
@@ -381,7 +383,8 @@ datagramme = une ligne, enveloppe `H1` de `HaloProtocole/Reseau/`, section
 10.4) sans toucher au reste ; `PolitiqueCommandes.autoriseeADistance`
 applique déjà la liste blanche de 10.5. L'app iOS (phase 3) réutilisera le
 même framework ; pour l'y ajouter, étendre les plateformes de la cible
-`HaloProtocole` (elle n'importe que Foundation, CryptoKit et Network).
+`HaloProtocole` (elle n'importe que Foundation, Observation, CryptoKit,
+Network, dnssd et Synchronization, tous disponibles sur iOS).
 
 ## Choix d'interprétation
 
