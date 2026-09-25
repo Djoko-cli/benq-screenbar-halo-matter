@@ -98,6 +98,10 @@ final class Pont {
     @ObservationIgnored private let origine = ContinuousClock.now
     @ObservationIgnored private let surveillant = SurveillantUSB()
     @ObservationIgnored private let trousseau: any TrousseauCles
+    /// Trousseau isole de la demo (5.2) : une cle creee en mode demo ne doit
+    /// jamais pouvoir ecraser celle d'un vrai pont ni apparaitre dans
+    /// `pontsConnus` (barre laterale, source par defaut) : store separe.
+    @ObservationIgnored private let trousseauDemo: any TrousseauCles
     @ObservationIgnored private let cheminReseau = NWPathMonitor()
     /// Dernier texte de cause reseau note en console (4.6) : une meme cause
     /// n'est notee qu'une fois tant qu'elle ne change pas.
@@ -111,8 +115,9 @@ final class Pont {
     /// Delais de reouverture apres une fermeture : 300 ms, puis 1 s, 2 s, 5 s (3.1).
     static let delaisReconnexion: [Double] = [0.3, 1, 2, 5]
 
-    init(trousseau: any TrousseauCles = TrousseauSysteme()) {
+    init(trousseau: any TrousseauCles = TrousseauSysteme(), trousseauDemo: any TrousseauCles = TrousseauMemoire()) {
         self.trousseau = trousseau
+        self.trousseauDemo = trousseauDemo
         pontsConnus = trousseau.lister()
         ports = SurveillantUSB.lister()
         surveillant.changement = { [weak self] ports in self?.portsChanges(ports) }
@@ -282,6 +287,7 @@ final class Pont {
         propositionFermeture = false
         derniereReception = nil
         synchroniser()
+        interrompreCreationCle()
     }
 
     private var nomSource: String? {
@@ -385,6 +391,7 @@ final class Pont {
             moteur.ferme(maintenant: maintenant())
             synchroniser()
         }
+        interrompreCreationCle()
     }
 
     private func debutActivite() {
@@ -416,6 +423,7 @@ final class Pont {
         moteur.ferme(maintenant: maintenant())
         synchroniser()
         note(tr("Transport fermé : \(raison)"))
+        interrompreCreationCle()
         if reconnexionAuto { planifierReconnexion(raison) } else { etatTransport = .ferme }
     }
 
@@ -577,7 +585,7 @@ final class Pont {
             }
             if let c = creationCle, r.etape == .fin, moteur.correlateur.suivi(numero: r.id)?.id == c.id {
                 creationCle = nil
-                terminerCreationCle(r, nom: c.nom, suivi: c.id)
+                terminerCreationCle(r, nom: c.nom)
             }
         case .log(let lg):
             ajouterConsole(.log, lg.txt)
@@ -586,8 +594,9 @@ final class Pont {
         }
         if !l.message.estPeriodique {
             let gamma = ParametresGamma(etat)
+            // Le message garde, comme le json, ne doit jamais porter la cle (5.2).
             trames.ajouter(EntreeTrame(id: prochainId(), date: date, n: l.enveloppe.n, ms: l.enveloppe.ms,
-                                       type: l.enveloppe.t, message: l.message,
+                                       type: l.enveloppe.t, message: l.message.sansCle,
                                        json: PolitiqueCommandes.masquerCle(l.json), historique: historique,
                                        gamma: gamma, correspondance: c))
         }
@@ -621,8 +630,8 @@ final class Pont {
                 }
             case .commandeSansReponse(let id):
                 if creationCle?.id == id {
-                    creationCle = nil
-                    note(tr("Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer."), grave: true)
+                    // `creationCle` reste arme : une reponse tardive doit quand meme etre rangee (5.2).
+                    note(tr("Pas encore de réponse à la création de clé : une réponse tardive sera quand même rangée ; sinon la carte Thread affichera « clé inconnue de ce Mac »."))
                 }
                 if let s = moteur.correlateur.suivi(id) {
                     let numero = String(s.numero ?? 0)
@@ -698,40 +707,61 @@ final class Pont {
     /// Source reseau ouverte : liste blanche (10.5).
     var aDistance: Bool { genreTransport == .udp }
 
-    /// `json cle nouvelle` en cours : suivi et nom SRP du pont.
+    /// `json cle nouvelle` en cours : suivi et nom SRP du pont. Efface seulement
+    /// par sa reponse (tardive comprise) ou par la fin de la connexion en
+    /// cours (`interrompreCreationCle`), jamais par le seul delai de reponse :
+    /// une reponse tardive doit encore pouvoir etre rangee (5.2).
     @ObservationIgnored private var creationCle: (id: UUID, nom: String)?
 
-    /// Acces reseau (carte Thread) : par l'USB ou la demo seulement.
+    /// Acces reseau (carte Thread) : par l'USB ou la demo seulement. En demo,
+    /// l'empreinte vient du trousseau isole de la demo, jamais du vrai (5.2).
     var accesReseau: EtatAccesReseau {
         guard genreTransport == .usb || genreTransport == .demo else { return .inconnu }
-        let connus = pontsConnus
+        let connus = genreTransport == .demo ? trousseauDemo.lister() : pontsConnus
         return EtatAccesReseau.depuis(ip: etat.ip?.valeur) { nom in connus.first { $0.nom == nom }?.empreinte }
     }
 
     /// Nouvelle cle par l'USB (10.4) : alea de l'app, cle calculee par la
-    /// carte, rangee dans le trousseau ; les sessions reseau tombent.
+    /// carte, rangee dans le trousseau ; les sessions reseau tombent. Exige un
+    /// acces reseau deja connu (nom SRP et bloc `udp` du firmware) : jamais de
+    /// cle rangee sous un compte vide.
     func creerCle() {
-        guard !aDistance, creationCle == nil, let nom = etat.ip?.valeur.srp?.nom else { return }
+        guard !aDistance, creationCle == nil, accesReseau != .inconnu, let nom = etat.ip?.valeur.srp?.nom else { return }
         guard let id = envoyer(CleReseau.commande(alea: CleReseau.alea())) else { return }
         creationCle = (id, nom)
         note(tr("Nouvelle clé réseau demandée à la carte : les sessions réseau en cours tombent."))
     }
 
-    private func terminerCreationCle(_ r: Reponse, nom: String, suivi: UUID) {
-        moteur.effacerCle(suivi)
-        synchroniser()
+    /// En mode demo, la cle va dans le trousseau isole de la demo (5.2) : elle
+    /// ne doit jamais pouvoir ecraser celle d'un vrai pont, ni apparaitre dans
+    /// `pontsConnus` (barre laterale, source par defaut).
+    private func terminerCreationCle(_ r: Reponse, nom: String) {
         switch CleReseau.verifier(r) {
         case .success(let c):
             do {
-                try trousseau.ranger(nom: nom, cle: c.cle, empreinte: c.empreinte)
-                pontsConnus = trousseau.lister()
+                if genreTransport == .demo {
+                    try trousseauDemo.ranger(nom: nom, cle: c.cle, empreinte: c.empreinte)
+                } else {
+                    try trousseau.ranger(nom: nom, cle: c.cle, empreinte: c.empreinte)
+                    pontsConnus = trousseau.lister()
+                }
                 note(tr("Clé réseau rangée dans le trousseau (empreinte \(c.empreinte)) : le pont est dans la section Réseau."))
             } catch {
-                note(String(describing: error), grave: true)
+                // La carte a deja adopte la nouvelle cle : le Mac doit recommencer, pas se croire toujours a l'ancienne.
+                note(tr("La carte a déjà changé de clé, mais le Mac n'a pas pu la ranger (\(String(describing: error))) : relancer « Nouvelle clé… »."), grave: true)
             }
         case .failure(let e):
             note(e.description, grave: true)
         }
+    }
+
+    /// La connexion en cours ne portera plus la reponse d'une creation de cle
+    /// (transport ferme, source changee...) : le signaler plutot que de
+    /// laisser `creationCle` bloquer un nouvel essai en silence (5.2).
+    private func interrompreCreationCle() {
+        guard creationCle != nil else { return }
+        creationCle = nil
+        note(tr("Création de clé interrompue : si la carte a changé de clé, la carte Thread affichera « clé inconnue de ce Mac » ; recommencer."), grave: true)
     }
 
     /// La commande peut partir par la source en vigueur.

@@ -92,7 +92,10 @@ actor SimulateurDemo {
     private var programme: [Programme] = []
 
     // Transport reseau simule (10.4) : nom SRP du pont de demo et sa cle.
-    private static let srpDemo = "561F9A6463953778"
+    // Jamais le nom ni l'adresse d'un vrai pont (5.2) : "creer la cle" en demo
+    // ne doit jamais pouvoir toucher le trousseau ou la carte d'un vrai pont.
+    // Le nom n'est pas 16 hexa (format d'un vrai pont) pour ne jamais s'y confondre.
+    private static let srpDemo = "DEMO-HALO"
     private var cleDemo: Data?
 
     init(script: ScriptDemo, sortie: AsyncStream<EvenementTransport>.Continuation, boot: String, vitesse: Double = 1) {
@@ -361,7 +364,7 @@ actor SimulateurDemo {
         return LigneJSON.machine("reseau", [
             ("bloc", "ip"), ("frais_ms", 0),
             ("srp", .objet([("nom", .texte(Self.srpDemo))])),
-            ("adresses", .tableau([.objet([("adr", "fd77:9e:f4bb:0:6c06:6762:45d6:a3f0"), ("type", "omr"), ("pref", true)])])),
+            ("adresses", .tableau([.objet([("adr", "fd00:dead:beef:0:0:0:0:1"), ("type", "omr"), ("pref", true)])])),
             ("udp", .objet([("port", 5480), ("ouvert", .booleen(cleDemo != nil)), ("empreinte", empreinte),
                             ("sessions", 0), ("provisoire", false), ("rx", 0), ("rejets", 0), ("rx_perdus", 0),
                             ("defis", 0), ("tx", 0), ("tx_perdus", 0), ("tx_erreurs", 0),

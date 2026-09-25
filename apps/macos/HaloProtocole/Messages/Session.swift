@@ -216,4 +216,12 @@ public struct Reponse: Codable, Sendable, Equatable {
     public var cle: String?
     /// `json cle` : empreinte de la cle.
     public var empreinte: String?
+
+    /// La meme reponse, sans la cle : aucun historique (suivis de commandes,
+    /// journal des trames) ne doit jamais la garder, seule l'empreinte y a sa place (5.2).
+    public var sansCle: Reponse {
+        var r = self
+        r.cle = nil
+        return r
+    }
 }

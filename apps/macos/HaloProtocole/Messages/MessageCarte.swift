@@ -55,6 +55,13 @@ public enum MessageCarte: Sendable, Equatable {
             false
         }
     }
+
+    /// La meme valeur, sans la cle si c'est une `reponse` a `json cle nouvelle` (5.2) :
+    /// pour tout historique qui garde le `message` entier (journal des trames).
+    public var sansCle: MessageCarte {
+        if case .reponse(let r) = self { return .reponse(r.sansCle) }
+        return self
+    }
 }
 
 /// Ligne machine valide et decodee.

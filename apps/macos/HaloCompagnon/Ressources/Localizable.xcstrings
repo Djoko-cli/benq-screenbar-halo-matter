@@ -1137,6 +1137,22 @@
         }
       }
     },
+    "Création de clé interrompue : si la carte a changé de clé, la carte Thread affichera « clé inconnue de ce Mac » ; recommencer." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key creation interrupted: if the board changed its key, the Thread card will show \"key unknown to this Mac\"; try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Création de clé interrompue : si la carte a changé de clé, la carte Thread affichera « clé inconnue de ce Mac » ; recommencer."
+          }
+        }
+      }
+    },
     "Côté carte" : {
       "localizations" : {
         "en" : {
@@ -1669,6 +1685,22 @@
         }
       }
     },
+    "La carte a déjà changé de clé, mais le Mac n'a pas pu la ranger (%@) : relancer « Nouvelle clé… »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The board already switched to the new key, but the Mac could not store it (%@): start “New key…” again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La carte a déjà changé de clé, mais le Mac n'a pas pu la ranger (%@) : relancer « Nouvelle clé… »."
+          }
+        }
+      }
+    },
     "La carte redémarre (démo) : ré-énumération USB" : {
       "localizations" : {
         "en" : {
@@ -2145,22 +2177,6 @@
         }
       }
     },
-    "Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No reply to the key creation: if the board changed its key, the Thread card shows \"key unknown to this Mac\"; try again."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer."
-          }
-        }
-      }
-    },
     "Pas de session machine : les commandes sont désactivées." : {
       "localizations" : {
         "en" : {
@@ -2197,6 +2213,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No Counters Yet"
+          }
+        }
+      }
+    },
+    "Pas encore de réponse à la création de clé : une réponse tardive sera quand même rangée ; sinon la carte Thread affichera « clé inconnue de ce Mac »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reply yet to the key creation: a late reply will still be stored; otherwise the Thread card will show \"key unknown to this Mac\"."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas encore de réponse à la création de clé : une réponse tardive sera quand même rangée ; sinon la carte Thread affichera « clé inconnue de ce Mac »."
           }
         }
       }
