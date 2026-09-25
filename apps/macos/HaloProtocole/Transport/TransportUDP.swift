@@ -54,6 +54,9 @@ public final class TransportUDP: Transport {
         let c = NWConnection(host: NWEndpoint.Host(hote), port: port, using: parametres)
         etat.withLock { $0.connexion = c }
         c.stateUpdateHandler = { [weak self] s in self?.changement(s, c) }
+        if Self.traces {
+            c.pathUpdateHandler = { [weak self] p in self?.tracer("chemin \(Self.decrire(p))") }
+        }
         c.start(queue: file)
         do {
             try await attendrePret()
@@ -101,7 +104,23 @@ public final class TransportUDP: Transport {
 
     // MARK: - Connexion (file du transport)
 
+    /// Journal de mise au point (variable d'environnement HALO_DEBUG_RESEAU=1) :
+    /// etats de la connexion et chemins, sur la sortie d'erreur.
+    static let traces = ProcessInfo.processInfo.environment["HALO_DEBUG_RESEAU"] == "1"
+
+    func tracer(_ texte: @autoclosure () -> String) {
+        guard Self.traces else { return }
+        let date = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        FileHandle.standardError.write(Data("[udp \(hote)] \(date) \(texte())\n".utf8))
+    }
+
+    static func decrire(_ p: NWPath?) -> String {
+        guard let p else { return "aucun" }
+        return "\(p.status) raison=\(p.unsatisfiedReason) interfaces=\(p.availableInterfaces.map(\.name))"
+    }
+
     private func changement(_ s: NWConnection.State, _ c: NWConnection) {
+        tracer("etat \(s) chemin \(Self.decrire(c.currentPath))")
         switch s {
         case .ready:
             etat.withLock { $0.pret = true }
@@ -128,13 +147,16 @@ public final class TransportUDP: Transport {
             if echoue, let erreur { throw erreur }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw etat.withLock { $0.erreur } ?? ErreurReseau.nomIntrouvable(hote)
+        let gardee = etat.withLock { $0.erreur }
+        tracer("pas pret en \(reglages.attentePret), erreur gardee : \(String(describing: gardee))")
+        throw gardee ?? ErreurReseau.nomIntrouvable(hote)
     }
 
     private func recevoir(_ c: NWConnection) {
         c.receiveMessage { [weak self] donnees, _, _, erreur in
             guard let self else { return }
             if let erreur {
+                self.tracer("reception : \(erreur) chemin \(Self.decrire(c.currentPath))")
                 self.echec(ErreurReseau.depuis(erreur, chemin: c.currentPath, hote: self.hote))
                 return
             }

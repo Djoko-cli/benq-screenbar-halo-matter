@@ -319,8 +319,8 @@ cadence plus rapide pour l'instant.
 | Cas | Bandeau / message | Reprise |
 |---|---|---|
 | Trousseau absent ou en erreur, pont sans clé (« port injoignable », ICMPv6 `ECONNREFUSED`) | bandeau ; bouton « Reconnecter » dans le panneau de la barre latérale | arrêt : recréer ou vérifier la clé par l'USB |
-| Réseau local refusé (Réglages Système › Confidentialité et sécurité › Réseau local) | bandeau | arrêt ; reprise dès que le chemin réseau change, ou « Reconnecter » |
-| Pas de route IPv6 (`EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN`), pont introuvable (résolution de `<nom>.local` en échec, ou `EHOSTDOWN` : le nœud ne répond pas), aucun DEFI (autre clé, ou pont sans clé dont l'ICMPv6 ne revient pas), chemin perdu en session (« Connexion réseau perdue : <cause> ») | ligne d'état de la barre latérale (« en attente : ... ») et une note dans la console ; pas de bandeau | automatique : 0,3 s, 1 s, 2 s, 5 s (40 essais), puis à un changement de chemin réseau ou au réveil du Mac |
+| Réseau local refusé (Réglages Système › Confidentialité et sécurité › Réseau local ; macOS refuse la résolution de `<nom>.local` : `NoSuchRecord` aussitôt) | bandeau, tenu pendant les essais | automatique, comme la ligne suivante : un essai refusé ne sort pas du Mac, et la connexion repart d'elle-même dès la réautorisation |
+| Pas de route IPv6 (`EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN`), pont introuvable (`<nom>.local` sans réponse en 5 s, ou `EHOSTDOWN` : le nœud ne répond pas), aucun DEFI (autre clé, ou pont sans clé dont l'ICMPv6 ne revient pas), chemin perdu en session (« Connexion réseau perdue : <cause> ») | ligne d'état de la barre latérale (« en attente : ... ») et une note dans la console ; pas de bandeau | automatique : 0,3 s, 1 s, 2 s, 5 s (40 essais), puis à un changement de chemin réseau ou au réveil du Mac |
 | DEFI reçu, puis aucun `hello` (deux autres sessions déjà actives ?) | bandeau « Aucune réponse au json 1 par le réseau… » | nouvelle poignée de main 30 s après le dernier `json 1`, et ainsi de suite (voir ci-dessous) |
 
 Une même cause n'est notée qu'une fois dans la console tant qu'elle ne change
@@ -480,8 +480,15 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   l'app reprend-elle seule (le moniteur de chemin `NWPathMonitor` rappelle-t-il
   au changement d'autorisation ?) ou faut-il « Reconnecter » ?
 - **R7** : Réglages Système › Confidentialité et sécurité › Réseau local :
-  couper Halo Compagnon → bandeau « Accès au réseau local refusé… » ;
-  réautoriser → reprise.
+  couper Halo Compagnon → une session ouverte continue (le flux routé vers
+  l'ULA du pont n'est pas coupé) ; « Reconnecter » → bandeau « Accès au
+  réseau local refusé… », essais en fond ; réautoriser → reprise seule en
+  1 à 2 s. Vu le 25/09 : sans bandeau, « Pont introuvable » (corrigé).
+- **Journal de mise au point de la source réseau** (états de la connexion,
+  chemins, erreurs brutes de Network.framework) : quitter l'app, puis
+  `open --env HALO_DEBUG_RESEAU=1 --stderr /tmp/halo-udp.log "<chemin>/Halo Compagnon.app"`.
+  Lancer par `open`, pas depuis le shell : macOS attribue alors
+  l'autorisation réseau local à l'app, pas au terminal.
 - **Route** : retirer la route IPv6 statique vers le préfixe OMR → ligne
   d'état de la barre latérale « Pas de route IPv6… » (pas de bandeau) et une
   note dans la console, « Transport fermé : Connexion réseau perdue : … » si

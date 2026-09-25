@@ -452,10 +452,11 @@ final class Pont {
         transport = nil
         if let e = erreur as? ErreurReseau {
             let texte = AlerteReseau.transport(e).texte
-            // Efface un bandeau d'arret perime (ex. "reseau local refuse") des
-            // qu'une reprise automatique redevient possible (4.6).
-            alerteReseau = e.repriseAutomatique ? nil : .transport(e)
-            noterCauseReseau(texte, grave: !e.repriseAutomatique)
+            // Bandeau tant que l'utilisateur doit agir (reseau local refuse,
+            // pont sans cle), essais en cours ou non ; une autre cause efface
+            // un bandeau perime (4.6).
+            alerteReseau = e.bandeau ? .transport(e) : nil
+            noterCauseReseau(texte, grave: e.bandeau)
             if !e.repriseAutomatique {
                 etatTransport = .erreur(texte)
             } else if reconnexionAuto, essaisReconnexion < 40 {
@@ -508,8 +509,8 @@ final class Pont {
     /// ou en echec repart (la ou l'USB attend le retour du port). Les arrets
     /// qui exigent l'utilisateur (cle absente ou trousseau en erreur, pont
     /// sans cle) ne reessaient pas seuls : re-lire le trousseau ou renvoyer un
-    /// SALUT ne changerait rien (4.6). "Reseau local refuse" reste l'exception
-    /// : un changement de chemin peut lever le refus.
+    /// SALUT ne changerait rien (4.6). "Reseau local refuse" reessaie seul,
+    /// bandeau tenu, et repart aussi d'ici apres ses 40 essais.
     func reseauChange() {
         guard reconnexionAuto, source?.estReseau == true else { return }
         if case .trousseau = alerteReseau { return }

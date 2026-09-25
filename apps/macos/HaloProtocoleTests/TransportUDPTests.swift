@@ -292,15 +292,25 @@ struct TransportUDPTests {
 
     @Test func textes() {
         #expect(!ErreurReseau.portInjoignable.repriseAutomatique)
-        #expect(!ErreurReseau.reseauLocalRefuse.repriseAutomatique)
+        // Reseau local refuse : bandeau, mais la reconnexion reessaie (banc R7).
+        #expect(ErreurReseau.reseauLocalRefuse.repriseAutomatique)
         #expect(ErreurReseau.pasDeRoute.repriseAutomatique)
+        #expect(ErreurReseau.reseauLocalRefuse.bandeau)
+        #expect(ErreurReseau.portInjoignable.bandeau)
+        #expect(!ErreurReseau.pasDeRoute.bandeau)
+        #expect(!ErreurReseau.nomIntrouvable("x.local").bandeau)
         #expect(ErreurReseau.depuis(.posix(.EHOSTUNREACH), chemin: nil, hote: "x.local") == .pasDeRoute)
         #expect(ErreurReseau.depuis(.posix(.ENETUNREACH), chemin: nil, hote: "x.local") == .pasDeRoute)
         #expect(ErreurReseau.depuis(.posix(.ENETDOWN), chemin: nil, hote: "x.local") == .pasDeRoute)
         // ICMPv6 "adresse injoignable" : le noeud ne repond pas, la route n'y est pour rien.
         #expect(ErreurReseau.depuis(.posix(.EHOSTDOWN), chemin: nil, hote: "x.local") == .nomIntrouvable("x.local"))
         #expect(ErreurReseau.depuis(.posix(.ECONNREFUSED), chemin: nil, hote: "x.local") == .portInjoignable)
-        #expect(ErreurReseau.depuis(.dns(-65554), chemin: nil, hote: "x.local") == .nomIntrouvable("x.local"))
+        // NoSuchRecord aussitot pour un nom .local : refus du reseau local
+        // (banc R7) ; hors .local, c'est un vrai nom absent.
+        #expect(ErreurReseau.depuis(.dns(-65554), chemin: nil, hote: "x.local") == .reseauLocalRefuse)
+        #expect(ErreurReseau.depuis(.dns(-65554), chemin: nil, hote: "X.LOCAL.") == .reseauLocalRefuse)
+        #expect(ErreurReseau.depuis(.dns(-65554), chemin: nil, hote: "pont.example.org") == .nomIntrouvable("pont.example.org"))
+        #expect(ErreurReseau.depuis(.dns(-65537), chemin: nil, hote: "x.local") == .nomIntrouvable("x.local"))
         #expect(ErreurReseau.depuis(.dns(-65570), chemin: nil, hote: "x.local") == .reseauLocalRefuse)
     }
 }
