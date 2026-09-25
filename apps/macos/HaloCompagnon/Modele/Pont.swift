@@ -509,6 +509,14 @@ final class Pont {
         executer(moteur.tic(maintenant: maintenant()))
     }
 
+    /// Seul un test appelle ceci : avance l'horloge de la session de
+    /// `secondes` sans attendre, comme le ferait `tic()` a l'echeance reelle
+    /// (silence, delai de reponse...). Rend deterministe un scenario qui,
+    /// dans l'app, prend plusieurs secondes reelles (5.1).
+    func avancerPourUnTest(de secondes: TimeInterval) {
+        executer(moteur.tic(maintenant: maintenant() + secondes))
+    }
+
     private func recevoir(_ ev: EvenementTransport) {
         guard case .donnees(let d) = ev else { return }
         derniereReception = Date()
@@ -707,10 +715,16 @@ final class Pont {
     /// Source reseau ouverte : liste blanche (10.5).
     var aDistance: Bool { genreTransport == .udp }
 
-    /// `json cle nouvelle` en cours : suivi et nom SRP du pont. Efface seulement
-    /// par sa reponse (tardive comprise) ou par la fin de la connexion en
-    /// cours (`interrompreCreationCle`), jamais par le seul delai de reponse :
-    /// une reponse tardive doit encore pouvoir etre rangee (5.2).
+    /// `json cle nouvelle` en cours : suivi et nom SRP du pont. Reste arme
+    /// tant que son suivi n'a pas d'issue (en file ou en vol) : une reponse
+    /// tardive doit encore pouvoir etre rangee (5.2). Une fois le suivi
+    /// termine par n'importe quelle issue (sans reponse, perdu par un
+    /// silence ou un redemarrage...), un nouvel essai le remplace plutot que
+    /// de bloquer indefiniment (5.1 : une empreinte inconnue doit pouvoir se
+    /// corriger par un nouvel essai) ; la reponse tardive au remplace ne
+    /// correspondra plus a rien et sera ignoree sans risque (le nouvel essai
+    /// re-cle la carte, sa propre reponse sera rangee). `interrompreCreationCle`
+    /// efface aussi, sur une fin de connexion.
     @ObservationIgnored private var creationCle: (id: UUID, nom: String)?
 
     /// Acces reseau (carte Thread) : par l'USB ou la demo seulement. En demo,
@@ -724,9 +738,11 @@ final class Pont {
     /// Nouvelle cle par l'USB (10.4) : alea de l'app, cle calculee par la
     /// carte, rangee dans le trousseau ; les sessions reseau tombent. Exige un
     /// acces reseau deja connu (nom SRP et bloc `udp` du firmware) : jamais de
-    /// cle rangee sous un compte vide.
+    /// cle rangee sous un compte vide. Bloque seulement si un essai est
+    /// encore en file ou en vol (5.1).
     func creerCle() {
-        guard !aDistance, creationCle == nil, accesReseau != .inconnu, let nom = etat.ip?.valeur.srp?.nom else { return }
+        if let c = creationCle, let s = moteur.correlateur.suivi(c.id), !s.etat.estFinal { return }
+        guard !aDistance, accesReseau != .inconnu, let nom = etat.ip?.valeur.srp?.nom else { return }
         guard let id = envoyer(CleReseau.commande(alea: CleReseau.alea())) else { return }
         creationCle = (id, nom)
         note(tr("Nouvelle clé réseau demandée à la carte : les sessions réseau en cours tombent."))
