@@ -6,8 +6,8 @@ une session H1 (UDP sur Thread, a travers les routeurs de bordure) et suivre
 les lignes JSON du pont, ou lui envoyer des commandes de la liste blanche.
 
   cle <port serie>
-      Nouvelle cle partagee : 'json cle nouvelle <alea>' par l'USB (ouverture
-      sure du C6 : DTR = RTS = 0 en un seul appel, jamais RTS=1 DTR=0 qui le
+      Nouvelle cle partagee (banc sans l'app, HALO_CLE obligatoire) : 'json cle nouvelle <alea>' par l'USB
+      (ouverture sure du C6 : DTR = RTS = 0 en un seul appel, jamais RTS=1 DTR=0 qui le
       redemarre). La cle est rangee dans ~/.config/halo-pont/cle (0600), jamais
       affichee ; seule son empreinte l'est. L'app compagnon doit avoir libere
       le port ("Liberer le port"). Toutes les sessions reseau tombent.
@@ -20,6 +20,7 @@ les lignes JSON du pont, ou lui envoyer des commandes de la liste blanche.
       redemarre, session evincee), nouvelle poignee de main.
       Affiche un resume de chaque ligne (--brut : le JSON tel quel).
       Hote : le nom SRP du pont (ex. 561F9A6463953778.local), ou son adresse OMR.
+      Cle : HALO_CLE, sinon le trousseau (cle creee par l'app), sinon ~/.config/halo-pont/cle.
 
   refus <adresse> [port] [essais]
       UDP vers un port : REFUS (ICMPv6 port injoignable), DELAI (rien), pour
@@ -27,7 +28,7 @@ les lignes JSON du pont, ou lui envoyer des commandes de la liste blanche.
       DELAI attendu (le port est au pont, qui ignore un datagramme invalide).
 
 Exemples :
-  python3 tools/halo_udp.py cle /dev/cu.usbmodem101
+  HALO_CLE=/tmp/cle python3 tools/halo_udp.py cle /dev/cu.usbmodem101
   python3 tools/halo_udp.py session 561F9A6463953778.local --duree 30
   python3 tools/halo_udp.py session 561F9A6463953778.local "lampe niveau 200" "lampe mired 300"
 """
@@ -36,9 +37,11 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import select
 import socket
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -47,6 +50,9 @@ PORT = 5480
 RS = 0x1E
 # HALO_CLE : autre fichier de cle (tests, plusieurs ponts).
 KEY_PATH = os.path.abspath(os.environ.get("HALO_CLE") or os.path.expanduser("~/.config/halo-pont/cle"))
+
+# Cle rangee par l'app (docs/PROTOCOLE-JSON.md 10.4) : trousseau de session.
+SERVICE_TROUSSEAU = "fr.djoko.halo.pont"
 
 
 def mac16(key, text):
@@ -103,6 +109,10 @@ def machine_lines(fd, deadline):
 
 
 def cmd_cle(port_path):
+    if not os.environ.get("HALO_CLE"):
+        raise SystemExit("la cle se cree dans l'app (carte Thread et Matter, par l'USB : Activer l'acces reseau) "
+                         "et se relit dans le trousseau. Banc sans l'app : "
+                         "HALO_CLE=<fichier> python3 tools/halo_udp.py cle <port>")
     alea = os.urandom(32).hex().upper()
     try:
         fd = open_serial(port_path)
@@ -122,6 +132,7 @@ def cmd_cle(port_path):
                     raise SystemExit("empreinte incoherente : cle non rangee")
                 save_key(m["cle"])
                 print(f"cle rangee dans {KEY_PATH} (empreinte {m['empreinte']})")
+                print("  (la cle de l'app devient perimee : la recreer depuis l'app pour y revenir)")
                 if m.get("msg"):
                     print(f"  ({m['msg']})")
                 return
@@ -151,17 +162,82 @@ def save_key(hex_key):
         raise
 
 
-def load_key():
+def lire_fichier_cle(chemin):
     try:
-        with open(KEY_PATH) as f:
+        with open(chemin) as f:
             key = bytes.fromhex(f.read().strip())
     except OSError:
-        raise SystemExit(f"pas de cle : lancer d'abord 'cle <port serie>' ({KEY_PATH})")
+        raise SystemExit(f"{chemin} : illisible")
     except ValueError:
-        raise SystemExit(f"{KEY_PATH} : cle illisible (64 hexa attendus)")
+        raise SystemExit(f"{chemin} : cle illisible (64 hexa attendus)")
     if len(key) != 32:
-        raise SystemExit(f"{KEY_PATH} : cle illisible (64 hexa attendus)")
+        raise SystemExit(f"{chemin} : cle illisible (64 hexa attendus)")
     return key
+
+
+def nom_du_pont(hote):
+    """Nom SRP (compte du trousseau) d'un hote <nom>.local ; None pour une adresse."""
+    return hote[:-len(".local")] if hote.endswith(".local") else None
+
+
+def comptes_du_trousseau():
+    """Comptes (noms SRP) du service, lus sans les secrets (security dump-keychain)."""
+    try:
+        r = subprocess.run(["security", "dump-keychain"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    comptes, service, compte = set(), None, None
+    for ligne in r.stdout.splitlines() + ["keychain:"]:
+        ligne = ligne.strip()
+        if ligne.startswith("keychain:"):
+            if service == SERVICE_TROUSSEAU and compte:
+                comptes.add(compte)
+            service, compte = None, None
+            continue
+        m = re.match(r'"(svce|acct)"<blob>="(.*)"$', ligne)
+        if m:
+            if m.group(1) == "svce":
+                service = m.group(2)
+            else:
+                compte = m.group(2)
+    return sorted(comptes)
+
+
+def cle_du_trousseau(nom):
+    """Cle creee par l'app (security ; macOS demande une fois d'autoriser l'acces)."""
+    if nom is None:
+        comptes = comptes_du_trousseau()
+        if len(comptes) > 1:
+            raise SystemExit(f"plusieurs ponts dans le trousseau ({', '.join(comptes)}) : "
+                             "donner l'hote <nom>.local")
+        if not comptes:
+            return None
+        nom = comptes[0]
+    try:
+        r = subprocess.run(["security", "find-generic-password", "-s", SERVICE_TROUSSEAU, "-a", nom, "-w"],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        key = bytes.fromhex(r.stdout.strip())
+    except ValueError:
+        return None
+    return key if len(key) == 32 else None
+
+
+def load_key(hote=None):
+    """Cle, dans l'ordre : HALO_CLE (fichier), trousseau (cle de l'app), ~/.config/halo-pont/cle."""
+    if os.environ.get("HALO_CLE"):
+        return lire_fichier_cle(KEY_PATH)
+    key = cle_du_trousseau(nom_du_pont(hote) if hote else None)
+    if key:
+        return key
+    if os.path.exists(KEY_PATH):
+        return lire_fichier_cle(KEY_PATH)
+    raise SystemExit("pas de cle : la creer dans l'app (carte Thread et Matter, par l'USB : Activer l'acces "
+                     "reseau), ou HALO_CLE=<fichier> pour un banc sans l'app")
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +328,7 @@ def handshake(s, key, kid):
 
 
 def cmd_session(host, port, commands, duree, brut):
-    key = load_key()
+    key = load_key(host)
     kid = kid_of(key)
     try:
         ai = socket.getaddrinfo(host, port, socket.AF_INET6, socket.SOCK_DGRAM)
