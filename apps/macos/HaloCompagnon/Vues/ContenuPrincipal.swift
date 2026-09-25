@@ -52,7 +52,9 @@ struct ContenuPrincipal: View {
             }
         } detail: {
             VStack(spacing: 0) {
-                if let alerte = pont.alerte {
+                if let a = pont.alerteReseau {
+                    Bandeau(texte: a.texte, couleur: .red, icone: "network.slash")
+                } else if let alerte = pont.alerte {
                     Bandeau(texte: alerte.texte, couleur: .red, icone: "exclamationmark.octagon.fill")
                 }
                 if pont.estDemo {
@@ -147,6 +149,7 @@ struct Bandeau: View {
 /// Choix de la source (port USB ou demo) et etat du transport.
 struct PanneauConnexion: View {
     @Environment(Pont.self) private var pont
+    @State private var aOublier: PontConnu?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -161,6 +164,19 @@ struct PanneauConnexion: View {
                         }
                     }
                 }
+                Section("Réseau") {
+                    if pont.pontsConnus.isEmpty {
+                        Text("Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)")
+                    }
+                    ForEach(pont.pontsConnus) { p in
+                        Menu {
+                            Button("Connecter par le réseau") { pont.connecter(.reseau(nom: p.nom)) }
+                            Button("Oublier ce pont…", role: .destructive) { aOublier = p }
+                        } label: {
+                            Label("\(p.hote) · clé \(p.empreinte)", systemImage: "point.3.connected.trianglepath.dotted")
+                        }
+                    }
+                }
                 Section {
                     Button {
                         pont.connecter(.demo)
@@ -169,7 +185,7 @@ struct PanneauConnexion: View {
                     }
                 }
             } label: {
-                Label(libelleSource, systemImage: pont.estDemo ? "play.rectangle" : "cable.connector")
+                Label(libelleSource, systemImage: pont.estDemo ? "play.rectangle" : (pont.source?.estReseau == true ? "point.3.connected.trianglepath.dotted" : "cable.connector"))
                     .lineLimit(1)
             }
             .menuStyle(.borderlessButton)
@@ -195,13 +211,19 @@ struct PanneauConnexion: View {
             }
             .controlSize(.small)
         }
+        .confirmationDialog("Oublier ce pont ?", isPresented: Binding(get: { aOublier != nil }, set: { if !$0 { aOublier = nil } }),
+                            presenting: aOublier) { p in
+            Button("Oublier \(p.hote)", role: .destructive) { pont.oublierPont(p.nom) }
+        } message: { p in
+            Text("La clé de \(p.hote) est retirée du trousseau de ce Mac ; le pont garde la sienne. Pour revenir : « Activer l'accès réseau » par l'USB crée une nouvelle clé.")
+        }
     }
 
     private var libelleSource: String {
         switch pont.source {
         case .demo: tr("Démo")
         case .serie(let chemin, _): chemin.replacingOccurrences(of: "/dev/cu.", with: "")
-        case .reseau(let nom): nom
+        case .reseau(let nom): "\(nom).local"
         case nil: tr("Choisir une source…")
         }
     }

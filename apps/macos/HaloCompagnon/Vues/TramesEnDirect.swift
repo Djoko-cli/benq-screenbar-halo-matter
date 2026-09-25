@@ -112,9 +112,11 @@ struct TramesEnDirect: View {
                 }
                 Divider()
                 Button("Écoute de fond active (lampe ecoute 1)") { pont.envoyer("lampe ecoute 1") }
-                    .disabled(!pont.peutCommander)
+                    .disabled(!pont.peutEnvoyer("lampe ecoute 1"))
+                    .help(pont.aDistance ? tr("Interdite à distance (liste blanche, section 10.5).") : "")
                 Button("Écoute de fond coupée (lampe ecoute 0)") { pont.envoyer("lampe ecoute 0") }
-                    .disabled(!pont.peutCommander)
+                    .disabled(!pont.peutEnvoyer("lampe ecoute 0"))
+                    .help(pont.aDistance ? tr("Interdite à distance (liste blanche, section 10.5).") : "")
                 Divider()
                 Button("Vider le journal") { pont.viderJournal(); figees = nil }
             } label: {
