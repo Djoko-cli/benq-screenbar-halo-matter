@@ -202,11 +202,6 @@ public struct MoteurSession: Sendable {
         return (id, pomper(maintenant: maintenant))
     }
 
-    /// La cle rendue par `json cle nouvelle` ne reste pas dans les suivis (10.4).
-    public mutating func effacerCle(_ id: UUID) {
-        correlateur.effacerCle(id)
-    }
-
     /// Hors mode machine (ancien firmware, mode humain...) : ligne brute, sans `id`.
     public func ligneBrute(_ commande: String) -> Result<Data, ErreurLigne> {
         LigneCommande.octets(commande, id: nil)

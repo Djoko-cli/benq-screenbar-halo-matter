@@ -233,7 +233,8 @@ public struct Correlateur: Sendable {
             suivis[i].debutA = maintenant
             return .debut(id)
         case .fin:
-            suivis[i].fin = r
+            // La cle ne doit jamais rester dans un suivi (5.2) : seule l'empreinte y a sa place.
+            suivis[i].fin = r.sansCle
             suivis[i].termineeA = maintenant
             let attend = r.ok && r.code == .accepte && r.suite == .livraison
             suivis[i].etat = attend ? .attenteLivraison : .terminee
@@ -300,12 +301,6 @@ public struct Correlateur: Sendable {
         suivis[i].termineeA = maintenant
         enVol = nil
         return [suivis[i]]
-    }
-
-    /// Retire la cle d'une `reponse` a `json cle nouvelle` une fois rangee (10.4).
-    public mutating func effacerCle(_ id: UUID) {
-        guard let i = index(id) else { return }
-        suivis[i].fin?.cle = nil
     }
 
     /// A distance (10.2) : la commande en vol sans aucune `reponse` repart,

@@ -51,13 +51,12 @@ struct CleReseauTests {
                 == .cleInconnue(nom: "56B1E064401F74EF", empreinte: "B64D84FB"))
     }
 
-    @Test func laCleNeResteNiDansLesSuivis() {
+    @Test func laCleNestJamaisRangeeDansLeSuivi() {
         var c = Correlateur()
         let a = c.soumettre(CleReseau.commande(alea: Data(repeating: 1, count: 32)), origine: .interface, maintenant: 0)
         _ = c.prochainEnvoi(maintenant: 0)
         _ = c.recevoir(Self.reponseCle(cle: H1.hexa(VecteursH1.psk), empreinte: "630DCD29").avecId(1), maintenant: 0.1)
-        #expect(c.suivi(a)?.fin?.cle != nil)
-        c.effacerCle(a)
+        // La cle ne va que dans le trousseau : jamais dans un suivi de commande, meme un instant (5.2).
         #expect(c.suivi(a)?.fin?.cle == nil)
         #expect(c.suivi(a)?.fin?.empreinte == "630DCD29", "l'empreinte reste")
     }
