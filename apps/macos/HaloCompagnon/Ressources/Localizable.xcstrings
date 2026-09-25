@@ -175,6 +175,22 @@
         }
       }
     },
+    "%@ — en attente d'un changement du réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — waiting for a network change"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — en attente d'un changement du réseau"
+          }
+        }
+      }
+    },
     "%@ — en attente du retour du port" : {
       "localizations" : {
         "en" : {
@@ -589,6 +605,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No commands sent."
+          }
+        }
+      }
+    },
+    "Aucune réponse au json 1 par le réseau : deux autres sessions déjà actives (autre Mac, iPhone, halo_udp.py) ? Nouvel essai toutes les 30 s." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No answer to json 1 over the network: two other sessions already active (another Mac, iPhone, halo_udp.py)? Retrying every 30 s."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucune réponse au json 1 par le réseau : deux autres sessions déjà actives (autre Mac, iPhone, halo_udp.py) ? Nouvel essai toutes les 30 s."
           }
         }
       }
@@ -1519,6 +1551,22 @@
         }
       }
     },
+    "Installer l'assistant système : sh tools/macos/halo-routes/installer.sh" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install the system helper: sh tools/macos/halo-routes/installer.sh"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installer l'assistant système : sh tools/macos/halo-routes/installer.sh"
+          }
+        }
+      }
+    },
     "Instantané complet (json etat)" : {
       "localizations" : {
         "en" : {
@@ -1575,6 +1623,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The app sends json 0 and closes the port (DTR and RTS stay at 0) so pio run -t upload can flash. Nothing reopens until you click “Reconnect”."
+          }
+        }
+      }
+    },
+    "L'assistant système halo-routes est installé : la route revient d'elle-même." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The halo-routes system helper is installed: the route will come back by itself."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'assistant système halo-routes est installé : la route revient d'elle-même."
           }
         }
       }
@@ -2685,6 +2749,22 @@
         }
       }
     },
+    "Session réseau ouverte : %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network session open: %@."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session réseau ouverte : %@."
+          }
+        }
+      }
+    },
     "Session, log" : {
       "localizations" : {
         "en" : {
@@ -3743,6 +3823,22 @@
         }
       }
     },
+    "réseau changé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "network changed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "réseau changé"
+          }
+        }
+      }
+    },
     "réussie" : {
       "localizations" : {
         "en" : {
@@ -3809,6 +3905,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "check"
+          }
+        }
+      }
+    },
+    "« %@ » : interdite à distance (liste blanche, section 10.5)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”: not allowed remotely (allow list, section 10.5)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "« %@ » : interdite à distance (liste blanche, section 10.5)."
           }
         }
       }
@@ -4023,6 +4135,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "‹ id=%1$@ « %2$@ » : %3$@"
+          }
+        }
+      }
+    },
+    "‹ id=%@ « %@ » : sans réponse sous %lld s (%lld renvois du même id)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ “%2$@”: no reply within %3$lld s (%4$lld resends of the same id)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ id=%1$@ « %2$@ » : sans réponse sous %3$lld s (%4$lld renvois du même id)"
           }
         }
       }

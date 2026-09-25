@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import HaloProtocole
+import Network
 import Observation
 
 /// Modele central de l'app : un transport, le recepteur, le moteur de session
@@ -12,8 +13,11 @@ final class Pont {
     enum Source: Hashable, Sendable {
         case serie(chemin: String, serie: String?)
         case demo
+        /// Pont joint par le reseau (section 10) : son nom SRP, sans `.local`.
+        case reseau(nom: String)
 
         var estDemo: Bool { self == .demo }
+        var estReseau: Bool { if case .reseau = self { true } else { false } }
     }
 
     enum EtatTransport: Equatable, Sendable {
@@ -64,6 +68,10 @@ final class Pont {
     /// Annonce grave (ancien firmware, aucune reponse...) montree en bandeau ;
     /// son texte suit la langue en vigueur.
     private(set) var alerte: MoteurSession.Note?
+    /// Alerte de la source reseau (cle absente, reseau local refuse...), en bandeau.
+    private(set) var alerteReseau: AlerteReseau?
+    /// Ponts dont ce Mac a la cle (trousseau).
+    private(set) var pontsConnus: [PontConnu] = []
     private(set) var derniereReception: Date?
     /// Commande de banc de plus de 20 min : proposer de fermer le port (6.5).
     var propositionFermeture = false
@@ -89,6 +97,8 @@ final class Pont {
     @ObservationIgnored private var dernierCurseur: [String: TimeInterval] = [:]
     @ObservationIgnored private let origine = ContinuousClock.now
     @ObservationIgnored private let surveillant = SurveillantUSB()
+    @ObservationIgnored private let trousseau: any TrousseauCles
+    @ObservationIgnored private let cheminReseau = NWPathMonitor()
     @ObservationIgnored private var observateurReveil: (any NSObjectProtocol)?
     @ObservationIgnored private var observateurFin: (any NSObjectProtocol)?
     /// Session serie ouverte : pas de mise en sommeil de l'app (App Nap) qui
@@ -98,16 +108,24 @@ final class Pont {
     /// Delais de reouverture apres une fermeture : 300 ms, puis 1 s, 2 s, 5 s (3.1).
     static let delaisReconnexion: [Double] = [0.3, 1, 2, 5]
 
-    init() {
+    init(trousseau: any TrousseauCles = TrousseauSysteme()) {
+        self.trousseau = trousseau
+        pontsConnus = trousseau.lister()
         ports = SurveillantUSB.lister()
         surveillant.changement = { [weak self] ports in self?.portsChanges(ports) }
         surveillant.demarrer()
+        cheminReseau.pathUpdateHandler = { [weak self] chemin in
+            guard chemin.status == .satisfied else { return }
+            Task { @MainActor [weak self] in self?.reseauChange() }
+        }
+        cheminReseau.start(queue: .main)
         observateurReveil = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 // Pause de lecture : la premiere ligne lue ensuite peut etre un fragment (2.4).
                 self?.recepteur.signalerPause()
+                self?.reseauChange()
             }
         }
         observateurFin = NotificationCenter.default.addObserver(
@@ -163,9 +181,13 @@ final class Pont {
 
     // MARK: - Connexion
 
-    /// Source proposee par defaut : le premier port Espressif, sinon la demo.
-    var sourceParDefaut: Source {
+    /// Source proposee par defaut : le premier port Espressif, sinon un pont
+    /// reseau connu, sinon la demo.
+    var sourceParDefaut: Source { Self.choisirSource(ports: ports, connus: pontsConnus) }
+
+    static func choisirSource(ports: [PortUSB], connus: [PontConnu]) -> Source {
         if let p = ports.first(where: \.estEspressif) { return .serie(chemin: p.chemin, serie: p.serie) }
+        if let r = connus.first { return .reseau(nom: r.nom) }
         return .demo
     }
 
@@ -181,6 +203,7 @@ final class Pont {
         }
         source = s
         alerte = nil
+        alerteReseau = nil
         reconnexionAuto = true
         essaisReconnexion = 0
         if changement, let nom = nomSource {
@@ -191,6 +214,7 @@ final class Pont {
 
     func deconnecter() {
         reconnexionAuto = false
+        alerteReseau = nil
         fermerProprement()
         etatTransport = .ferme
     }
@@ -260,6 +284,7 @@ final class Pont {
         switch source {
         case .serie(let chemin, _): chemin
         case .demo: tr("démo")
+        case .reseau(let nom): "\(nom).local"
         case nil: nil
         }
     }
@@ -276,6 +301,13 @@ final class Pont {
     func reessayer() {
         alerte = nil
         executer(moteur.reessayer(maintenant: maintenant()))
+    }
+
+    /// Retire la cle d'un pont du trousseau (le pont garde la sienne).
+    func oublierPont(_ nom: String) {
+        do { try trousseau.oublier(nom: nom) } catch { note(String(describing: error), grave: true) }
+        pontsConnus = trousseau.lister()
+        if source == .reseau(nom: nom) { deconnecter() }
     }
 
     private func ouvrir() {
@@ -296,6 +328,15 @@ final class Pont {
             // La meme carte (meme numero de serie USB) peut revenir sous un autre nom.
             let port = ports.first { serie != nil && $0.serie == serie } ?? ports.first { $0.chemin == chemin }
             t = TransportSerie(chemin: port?.chemin ?? chemin)
+        case .reseau(let nom):
+            do {
+                t = TransportUDP(hote: "\(nom).local", cle: try trousseau.lire(nom: nom))
+            } catch {
+                let a = AlerteReseau.trousseau(error as? ErreurTrousseau ?? .absente(nom))
+                alerteReseau = a
+                etatTransport = .erreur(a.texte)
+                return
+            }
         }
         transport = t
         genreTransport = t.genre
@@ -352,10 +393,12 @@ final class Pont {
 
     private func transportOuvert() {
         etatTransport = .ouvert
+        alerteReseau = nil
         debutActivite()
         recepteur.resynchroniser()
-        note(tr("Port ouvert : \(nomTransport) (DTR = RTS = 0)."))
-        executer(moteur.ouvert(maintenant: maintenant()))
+        note(genreTransport == .udp ? tr("Session réseau ouverte : \(nomTransport).")
+                                    : tr("Port ouvert : \(nomTransport) (DTR = RTS = 0)."))
+        executer(moteur.ouvert(maintenant: maintenant(), genre: genreTransport ?? .usb))
     }
 
     private func transportFerme(_ raison: String) {
@@ -369,6 +412,18 @@ final class Pont {
 
     private func echecOuverture(_ erreur: any Error) {
         transport = nil
+        if let e = erreur as? ErreurReseau {
+            let texte = AlerteReseau.transport(e).texte
+            if !e.repriseAutomatique {
+                alerteReseau = .transport(e)
+                etatTransport = .erreur(texte)
+            } else if reconnexionAuto, essaisReconnexion < 40 {
+                planifierReconnexion(texte)
+            } else {
+                etatTransport = .erreur(tr("\(texte) — en attente d'un changement du réseau"))
+            }
+            return
+        }
         let texte = String(describing: erreur)
         if reconnexionAuto, essaisReconnexion < 40 {
             planifierReconnexion(texte)
@@ -405,6 +460,19 @@ final class Pont {
         if revenu {
             essaisReconnexion = 0
             planifierReconnexion(tr("port revenu"))
+        }
+    }
+
+    /// Chemin reseau retrouve ou reveil du Mac : une source reseau en attente
+    /// ou en echec repart (la ou l'USB attend le retour du port).
+    private func reseauChange() {
+        guard reconnexionAuto, source?.estReseau == true else { return }
+        switch etatTransport {
+        case .attente, .erreur:
+            essaisReconnexion = 0
+            planifierReconnexion(tr("réseau changé"))
+        default:
+            break
         }
     }
 
@@ -522,14 +590,21 @@ final class Pont {
                 let a = ancien ?? "?", n = nouveau ?? "?"
                 note(tr("Redémarrage de la carte détecté (boot \(a) → \(n)) : états vidés, nouveau segment de courbes."))
             case .note(let n):
-                note(n.texte, grave: n.grave)
-                if n.grave { alerte = n }
+                if n == .aucuneReponse, genreTransport == .udp {
+                    alerteReseau = .sansHello
+                    note(AlerteReseau.sansHello.texte, grave: true)
+                } else {
+                    note(n.texte, grave: n.grave)
+                    if n.grave { alerte = n }
+                }
             case .commandeSansReponse(let id):
                 if let s = moteur.correlateur.suivi(id) {
                     let numero = String(s.numero ?? 0)
-                    ajouterConsole(.retour(ok: false, session: s.origine == .session),
-                                   tr("‹ id=\(numero) « \(s.commande) » : sans réponse sous 3 s (pas de réémission)"),
-                                   numero: s.numero)
+                    let p = moteur.correlateur.politique
+                    let t = p.renvois > 0
+                        ? tr("‹ id=\(numero) « \(s.commande) » : sans réponse sous \(Int(p.delaiReponse)) s (\(p.renvois) renvois du même id)")
+                        : tr("‹ id=\(numero) « \(s.commande) » : sans réponse sous 3 s (pas de réémission)")
+                    ajouterConsole(.retour(ok: false, session: s.origine == .session), t, numero: s.numero)
                 }
             case .proposerFermeture:
                 propositionFermeture = true
@@ -560,6 +635,7 @@ final class Pont {
                 // Session retablie : l'alerte d'un echec passe (aucune reponse,
                 // ancien firmware depuis reflashe...) ne vaut plus.
                 alerte = nil
+                alerteReseau = nil
             }
         }
         let r = etat.helloBase != nil ? moteur.reglages : nil
@@ -585,10 +661,20 @@ final class Pont {
 
     var peutCommander: Bool { phase.modeMachine && transport != nil }
 
+    /// Source reseau ouverte : liste blanche (10.5).
+    var aDistance: Bool { genreTransport == .udp }
+
+    /// La commande peut partir par la source en vigueur.
+    func peutEnvoyer(_ commande: String) -> Bool {
+        peutCommander && (!aDistance || PolitiqueCommandes.autoriseeADistance(commande))
+    }
+
     /// La console envoie avec un `id` : session machine, ou `json 1` en attente
     /// de son `hello` (la carte est sans doute deja en mode machine ; la ligne
     /// attend en file). Sinon (ancien firmware, mode humain...) : ligne brute.
+    /// A distance, toujours avec un `id` (le pont ignore une ligne sans id).
     var consoleAvecId: Bool {
+        if aDistance { return true }
         if phase.modeMachine { return true }
         if case .attenteHello = phase { return true }
         return false
@@ -599,6 +685,10 @@ final class Pont {
     func envoyer(_ commande: String, fusion: String? = nil) -> UUID? {
         guard peutCommander else {
             note(tr("Pas de session machine : « \(commande) » n'est pas envoyée."))
+            return nil
+        }
+        guard !aDistance || PolitiqueCommandes.autoriseeADistance(commande) else {
+            note(tr("« \(commande) » : interdite à distance (liste blanche, section 10.5)."))
             return nil
         }
         let (id, effets) = moteur.soumettre(commande, origine: .interface, fusion: fusion, maintenant: maintenant())
