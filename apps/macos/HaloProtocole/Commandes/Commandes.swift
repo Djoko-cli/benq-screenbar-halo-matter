@@ -92,6 +92,11 @@ public enum PolitiqueCommandes {
         if m == ["json", "0"] {
             return .interdite(tr("Utiliser « Libérer le port » : l'app enverra json 0 et fermera le port."))
         }
+        // La carte rechangerait de cle, mais la cle rendue ne serait rangee nulle
+        // part (aucun Mac ne l'aurait) : seul le bouton la range dans le trousseau (5.1).
+        if m.count >= 3, m[0] == "json", m[1] == "cle", m[2] == "nouvelle" {
+            return .interdite(tr("Utiliser « Nouvelle clé… » (carte Thread et Matter) : la clé rendue doit être rangée dans le trousseau."))
+        }
 
         if let raison = raisonDangereuse(premier) { return .confirmation(raison) }
 
@@ -110,7 +115,7 @@ public enum PolitiqueCommandes {
                 return .confirmation(tr("Change la reprise automatique des abonnements."))
             }
         }
-        if premier == "json", m.count >= 3, m[1] == "cle", m[2] == "nouvelle" || m[2] == "efface" {
+        if premier == "json", m.count >= 3, m[1] == "cle", m[2] == "efface" {
             return .confirmation(tr("Change la clé du transport réseau : toutes les sessions réseau tombent."))
         }
         return .autorisee
@@ -192,11 +197,25 @@ public enum PolitiqueCommandes {
     /// chiffres hexa (cle imprimee en texte par une commande sans `id`).
     public static func masquerCle(_ texte: String) -> String {
         guard texte.utf8.count >= 64 || texte.range(of: "cle", options: .caseInsensitive) != nil else { return texte }
-        let masque = String(repeating: "•", count: 8)
         var s = texte
         s.replace(/(?i)(json[ \t]+cle[ \t]+nouvelle[ \t]+)[0-9a-f]+/) { m in m.output.1 + masque }
         s.replace(/("cle"[ ]*:[ ]*")[^"]*"/) { m in m.output.1 + masque + "\"" }
         s.replace(/\b[0-9A-Fa-f]{64}\b/) { _ in masque }
         return s
     }
+
+    /// Masque plus strict, pour une ligne abimee, un fragment ou un
+    /// debordement (10.4) : un log IDF qui coupe la reponse a `json cle
+    /// nouvelle` y laisse une part de la cle, sans guillemet fermant ni 64
+    /// hexa d'un bloc. En plus de `masquerCle` : le champ `"cle":"<hexa>`
+    /// meme sans guillemet fermant, et toute suite de 16 chiffres hexa ou plus.
+    /// Jamais sur une ligne de console ordinaire : un nom SRP fait 16 hexa.
+    public static func masquerCleStricte(_ texte: String) -> String {
+        var s = masquerCle(texte)
+        s.replace(/("cle"\s*:\s*")[0-9A-Fa-f]+/) { m in m.output.1 + masque }
+        s.replace(/[0-9A-Fa-f]{16,}/) { _ in masque }
+        return s
+    }
+
+    private static let masque = String(repeating: "•", count: 8)
 }

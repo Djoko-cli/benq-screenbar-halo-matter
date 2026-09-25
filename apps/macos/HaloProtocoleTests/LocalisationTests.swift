@@ -277,6 +277,8 @@ struct SensDecodeTests {
                 == .confirmation("Reboots the board (the USB port will re-enumerate)."))
         #expect(MoteurSession.Note.aucuneReponse.texte.hasPrefix("No response: wrong port"))
         #expect(MoteurSession.Note.reseauSansHello.texte == "No answer to json 1 over the network: new handshake.")
+        #expect(PolitiqueCommandes.verdictConsole("json cle nouvelle 00", transport: .usb)
+                == .interdite("Use “New key…” (Thread and Matter card): the returned key must be stored in the keychain."))
         #expect(ValeurScalaire.booleen(false).description == "no")
         // Termes techniques intacts : champs JSON, commandes, hexa, unites.
         #expect(Interpretation.etat(EtatLampe(marche: true, lum: 0xA5, niveau: 180, temp: 53, mired: 268))
