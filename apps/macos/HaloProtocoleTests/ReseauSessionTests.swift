@@ -61,6 +61,66 @@ struct ReseauSessionTests {
         #expect(M.envois(u.tic(maintenant: 2.0)) == ["id=2 json 1\n"], "USB : inchange")
     }
 
+    /// Sans `hello`, a distance : la carte n'a ouvert qu'une session H1
+    /// provisoire, oubliee 30 s apres le SALUT (10.4). La relance de 30 s est
+    /// donc une nouvelle poignee de main (`.rouvrir`), jamais un `json 1`
+    /// scelle pour une session que la carte ne connait plus.
+    @Test func sansHelloADistanceRouvreApres30s() {
+        var m = MoteurSession()
+        #expect(M.envois(m.ouvert(maintenant: 0, genre: .udp)) == ["id=1 json 1\n"])
+        for t in [2.0, 4.0, 6.0] {
+            #expect(M.envois(m.tic(maintenant: t)) == ["id=1 json 1\n"], "renvoi du meme id a \(t) s")
+        }
+        let e8 = m.tic(maintenant: 8.0)
+        #expect(m.phase == .sansReponse)
+        #expect(e8 == [.note(.aucuneReponse)])
+        let e35 = m.tic(maintenant: 35.9)
+        #expect(e35.isEmpty)
+        let e36 = m.tic(maintenant: 36.0)
+        #expect(e36 == [.rouvrir(.reseauSansHello)], "nouvelle poignee de main, aucun json 1")
+        #expect(M.envois(e36).isEmpty)
+        #expect(!MoteurSession.Note.reseauSansHello.grave, "note de console, pas de bandeau de plus")
+        #expect(m.statistiques.reouvertures == 1)
+        // Tics de 250 ms avant que la fermeture n'arrive : pas de second .rouvrir.
+        let e36b = m.tic(maintenant: 36.25)
+        #expect(e36b.isEmpty)
+        // Transport rouvert (nouvelle resolution, nouvelle poignee de main) : json 1 d'un id neuf.
+        m.ferme(maintenant: 36.5)
+        #expect(M.envois(m.ouvert(maintenant: 37, genre: .udp)) == ["id=2 json 1\n"])
+        #expect(m.phase == .attenteHello(essai: 1))
+    }
+
+    @Test func sansHelloParUSBEtDemoInchange() {
+        for genre in [GenreTransport.usb, .demo] {
+            var u = MoteurSession()
+            _ = u.ouvert(maintenant: 0, genre: genre)
+            for t in [2.0, 4.0, 6.0, 8.0] { _ = u.tic(maintenant: t) }
+            #expect(u.phase == .sansReponse)
+            let e = u.tic(maintenant: 36.0)
+            #expect(e == [.envoyer(LigneCommande.effacement), .envoyer(Data("id=5 json 1\n".utf8))],
+                    "\(genre) : Ctrl-U et json 1 d'un id neuf, sur le meme port")
+            #expect(u.statistiques.reouvertures == 0)
+        }
+    }
+
+    @Test func reessayerADistanceRouvre() {
+        var m = MoteurSession()
+        _ = m.ouvert(maintenant: 0, genre: .udp)
+        for t in [2.0, 4.0, 6.0, 8.0] { _ = m.tic(maintenant: t) }
+        #expect(m.phase == .sansReponse)
+        let e = m.reessayer(maintenant: 10)
+        #expect(e == [.rouvrir(.reseauSansHello)])
+        // La relance de 30 s repart de cet essai : rien de plus avant 40 s.
+        let e36 = m.tic(maintenant: 36)
+        #expect(e36.isEmpty)
+        var u = MoteurSession()
+        _ = u.ouvert(maintenant: 0)
+        for t in [2.0, 4.0, 6.0, 8.0] { _ = u.tic(maintenant: t) }
+        let r = u.reessayer(maintenant: 10)
+        #expect(M.envois(r) == ["\u{15}\n", "id=5 json 1\n"], "USB : inchange")
+        #expect(u.phase == .attenteHello(essai: 1))
+    }
+
     @Test func finDuJson1AttendPlusLongtempsADistance() {
         var m = MoteurSession()
         _ = m.ouvert(maintenant: 0, genre: .udp)

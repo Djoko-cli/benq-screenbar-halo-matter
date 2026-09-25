@@ -859,6 +859,22 @@
         }
       }
     },
+    "Aucune réponse au json 1 par le réseau : nouvelle poignée de main." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No answer to json 1 over the network: new handshake."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucune réponse au json 1 par le réseau : nouvelle poignée de main."
+          }
+        }
+      }
+    },
     "Aucune réponse de la carte" : {
       "localizations" : {
         "en" : {

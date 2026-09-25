@@ -26,7 +26,8 @@ public struct MoteurSession: Sendable {
         public var delaiHello: TimeInterval = 2
         /// ... 3 fois.
         public var renvoisHello = 3
-        /// Puis `\x15\n` et `json 1` toutes les 30 s, pas plus souvent.
+        /// Puis `\x15\n` et `json 1` toutes les 30 s, pas plus souvent. A
+        /// distance, une nouvelle poignee de main a la place (voir `tic`).
         public var relanceLente: TimeInterval = 30
         /// `json ping` apres 10 s sans autre commande (bail de 30 s) ; plus tot
         /// si le bail est plus court (`json 1 bail 10` : au tiers du bail).
@@ -58,7 +59,8 @@ public struct MoteurSession: Sendable {
         case resynchro
         /// `Commande inconnue : "id=1"` : firmware sans protocole JSON.
         case ancienFirmware
-        /// Aucune reponse : ecoute, `json 1` toutes les 30 s.
+        /// Aucune reponse : ecoute, `json 1` toutes les 30 s (a distance :
+        /// nouvelle poignee de main toutes les 30 s).
         case sansReponse
         /// `hello` d'une version majeure non geree : console seule.
         case versionInconnue(Int)
@@ -92,6 +94,11 @@ public struct MoteurSession: Sendable {
         case resynchroSansReponse
         /// `fin` `bail` : `json 1` renvoye.
         case bailEchu
+        /// A distance, toujours aucun `hello` (relance de 30 s ou "Reessayer") :
+        /// nouvelle poignee de main. La carte a oublie la session H1 provisoire
+        /// (30 s sans premier message, 10.4) : un `json 1` scelle pour elle
+        /// serait ecarte sans bruit.
+        case reseauSansHello
 
         /// Montree en bandeau (echec de la connexion).
         public var grave: Bool {
@@ -119,6 +126,8 @@ public struct MoteurSession: Sendable {
                 tr("Pas de réponse à json 1 sous 5 s : fermeture et réouverture du port.")
             case .bailEchu:
                 tr("La carte a quitté le mode machine (bail échu) : json 1 renvoyé.")
+            case .reseauSansHello:
+                tr("Aucune réponse au json 1 par le réseau : nouvelle poignée de main.")
             }
         }
     }
@@ -219,8 +228,10 @@ public struct MoteurSession: Sendable {
     }
 
     /// Relance manuelle apres un echec (ancien firmware flashe, bouton "Reessayer").
+    /// A distance : nouvelle poignee de main, comme la relance de 30 s.
     public mutating func reessayer(maintenant: TimeInterval) -> [Effet] {
         guard phase != .ferme else { return [] }
+        if genre == .udp { return rouvrirADistance(maintenant: maintenant) }
         phase = .attenteHello(essai: 1)
         return effacement + envoyerJson1(maintenant: maintenant)
     }
@@ -274,8 +285,12 @@ public struct MoteurSession: Sendable {
             }
         case .sansReponse:
             if maintenant - dernierEssaiA >= parametres.relanceLente {
-                effets += effacement
-                effets += envoyerJson1(maintenant: maintenant)
+                if genre == .udp {
+                    effets += rouvrirADistance(maintenant: maintenant)
+                } else {
+                    effets += effacement
+                    effets += envoyerJson1(maintenant: maintenant)
+                }
             }
         case .connecte:
             let delaiFin = genre == .udp ? parametres.delaiFinJson1Reseau : parametres.delaiFinJson1
@@ -347,6 +362,17 @@ public struct MoteurSession: Sendable {
         dernierEssaiA = maintenant
         correlateur.noterEnvoiHorsFile(maintenant: maintenant)
         return [.envoyer(Data("id=\(n) json 1\n".utf8))]
+    }
+
+    /// A distance, relancer c'est refaire la poignee de main : la carte oublie
+    /// la session H1 provisoire 30 s apres son SALUT, ou des qu'un autre
+    /// SALUT la remplace (10.4). `dernierEssaiA` repousse la relance suivante :
+    /// pas de second `.rouvrir` avant que la fermeture ne remette le moteur a
+    /// `.ferme` (puis `ouvert` au transport suivant).
+    private mutating func rouvrirADistance(maintenant: TimeInterval) -> [Effet] {
+        dernierEssaiA = maintenant
+        statistiques.reouvertures += 1
+        return [.rouvrir(.reseauSansHello)]
     }
 
     private mutating func pomper(maintenant: TimeInterval) -> [Effet] {

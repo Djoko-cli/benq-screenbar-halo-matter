@@ -253,6 +253,28 @@ struct TransportUDPTests {
         await #expect(throws: ErreurReseau.portInjoignable) { _ = try await t.ouvrir() }
     }
 
+    /// Course de l'ouverture : un `.failed` ou une erreur de reception arrive
+    /// apres le dernier coup d'oeil de la poignee de main, avant que le flux
+    /// soit pose. `echec` n'avait alors aucun flux a fermer : le poser quand
+    /// meme rendrait un flux qui ne recevrait jamais `.ferme`.
+    @Test func echecAvantLaPoseDuFluxLaRefuse() throws {
+        let session = SessionH1(sid: "5A5A0001", ks: SymmetricKey(data: VecteursH1.psk))
+        let t = TransportUDP(hote: "::1", cle: VecteursH1.psk)
+        t.echec(.pasDeRoute)
+        let (_, suite) = AsyncStream.makeStream(of: EvenementTransport.self)
+        #expect(throws: ErreurReseau.pasDeRoute) { try t.adopter(session, suite) }
+        // Fermeture demandee pendant l'ouverture, sans erreur gardee : refusee aussi.
+        let f = TransportUDP(hote: "::1", cle: VecteursH1.psk)
+        f.fermerApresVidage(synchrone: true)
+        let (_, suiteF) = AsyncStream.makeStream(of: EvenementTransport.self)
+        #expect(throws: ErreurTransport.self) { try f.adopter(session, suiteF) }
+        // Sans echec ni fermeture : la session et le flux sont poses.
+        let o = TransportUDP(hote: "::1", cle: VecteursH1.psk)
+        let (_, suiteO) = AsyncStream.makeStream(of: EvenementTransport.self)
+        try o.adopter(session, suiteO)
+        o.fermerApresVidage(synchrone: true)
+    }
+
     @Test func textes() {
         #expect(!ErreurReseau.portInjoignable.repriseAutomatique)
         #expect(!ErreurReseau.reseauLocalRefuse.repriseAutomatique)
