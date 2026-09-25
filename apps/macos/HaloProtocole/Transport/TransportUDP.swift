@@ -168,7 +168,25 @@ public final class TransportUDP: Transport {
                 try await Task.sleep(for: .milliseconds(10))
             }
         }
-        throw ErreurReseau.aucunDefi
+        throw try await echecPoignee(c)
+    }
+
+    /// Aucun DEFI apres tous les essais : cle differente, ou pont sans cle
+    /// (10.4). Sur ce SDK, `::1` ne remonte pas toujours tout de suite
+    /// l'ICMPv6 "port injoignable" d'un port ferme (lwIP) : annuler la
+    /// connexion la fait parfois apparaitre, portee par le `receiveMessage`
+    /// deja en attente, quelques ms plus tard. On annule donc ici et on
+    /// attend une derniere fois, brievement, avant de conclure `aucunDefi`.
+    private func echecPoignee(_ c: NWConnection) async throws -> ErreurReseau {
+        c.cancel()
+        etat.withLock { $0.fini = true }
+        let limite = ContinuousClock.now + .milliseconds(150)
+        while ContinuousClock.now < limite {
+            let (echoue, erreur) = etat.withLock { ($0.echoue, $0.erreur) }
+            if echoue { return erreur == .portInjoignable ? .portInjoignable : .aucunDefi }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return .aucunDefi
     }
 
     // MARK: - Transport

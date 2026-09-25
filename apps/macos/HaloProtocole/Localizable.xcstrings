@@ -869,18 +869,18 @@
         }
       }
     },
-    "Aucune réponse du pont : clé différente de la sienne ? (comparer les empreintes par l'USB)" : {
+    "Aucune réponse du pont : clé différente de la sienne, ou pont sans clé ? (vérifier par l'USB, carte Thread et Matter)" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No answer from the bridge: a different key? (compare fingerprints over USB)"
+            "value" : "No answer from the bridge: a different key, or no key at all? (check over USB, the Thread and Matter board)"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Aucune réponse du pont : clé différente de la sienne ? (comparer les empreintes par l'USB)"
+            "value" : "Aucune réponse du pont : clé différente de la sienne, ou pont sans clé ? (vérifier par l'USB, carte Thread et Matter)"
           }
         }
       }
