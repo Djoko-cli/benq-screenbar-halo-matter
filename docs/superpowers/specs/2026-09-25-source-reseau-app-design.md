@@ -199,7 +199,7 @@ anglais) et la reprise.
 
 | Cas | Detection | Message (resume) | Reprise |
 |---|---|---|---|
-| Reseau local refuse (R7) | chemin `unsatisfied` pour `.localNetworkDenied`, ou `PolicyDenied` a la resolution | "Acces au reseau local refuse : Reglages Systeme > Confidentialite et securite > Reseau local" | arret ; reprise au changement de chemin |
+| Reseau local refuse (R7) | chemin `unsatisfied` pour `.localNetworkDenied`, ou `PolicyDenied` a la resolution ; au banc (25/09, macOS 27) : `NoSuchRecord` aussitot a la resolution de `<nom>.local`, chemin `satisfied` | "Acces au reseau local refuse : Reglages Systeme > Confidentialite et securite > Reseau local" | bandeau tenu pendant les essais ; reprise automatique (amende au banc : le refus se leve sans evenement pour l'app, et la connexion en attente repart seule a la reautorisation) |
 | Pas de route (bug du noyau, 10.1) | `EHOSTUNREACH`, `ENETUNREACH`, `ENETDOWN` | assistant absent : "installer l'assistant : sh tools/macos/halo-routes/installer.sh" ; present (si la sandbox laisse voir son plist) : "route en cours de retablissement" | automatique |
 | Nom introuvable | resolution de `<nom>.local` en echec ou en delai ; `EHOSTDOWN` (ICMPv6 adresse injoignable : le noeud ne repond pas) | "Pont introuvable : eteint, hors du reseau Thread, ou routeurs de bordure injoignables" | automatique |
 | Port injoignable | ICMPv6 apres le SALUT (`ECONNREFUSED`) | "Le pont n'a plus de cle : le brancher en USB, puis Activer l'acces reseau" | arret, "Reessayer" |
@@ -297,7 +297,9 @@ nouveaux) ; les points de banc 1 a 5 sont valides avec Majid.
 - Confidentialite du reseau local : la resolution `.local` (mDNS) la
   declenche ; l'envoi vers une ULA routee (OMR, hors des sous-reseaux du Mac)
   peut-etre pas. La detection passe par `unsatisfiedReason` et `PolicyDenied` ;
-  a confirmer en R7.
+  a confirmer en R7. Banc du 25/09 : ni l'un ni l'autre ; la resolution
+  `.local` refusee rend `NoSuchRecord` aussitot (un nom `.local` absent ne
+  rend rien), et une session deja ouverte vers l'ULA continue.
 - `network.client` doit suffire pour recevoir les reponses d'une socket UDP
   connectee (experience SB_client de l'etude) ; a confirmer au premier essai.
 - Trousseau de session (fichier) plutot que trousseau a protection des

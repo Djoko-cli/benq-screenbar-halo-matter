@@ -1296,6 +1296,11 @@ CHIP ; voir l'etude). Repli : l'instance `_matter._tcp` du pont
 
 App iOS : `NSLocalNetworkUsageDescription` (resoudre un nom `.local` demande
 l'autorisation reseau local) ; `NSBonjourServices` seulement pour une navigation.
+Refus sur macOS (banc R7, 25/09) : la resolution de `<nom>.local` rend
+`NoSuchRecord` (-65554) aussitot, sans `PolicyDenied` ni chemin
+`localNetworkDenied` ; un nom `.local` absent ne rend rien (attente). Une
+session deja ouverte continue : le flux route vers l'ULA du pont n'est pas
+coupe.
 
 ### 10.4 Authentification
 

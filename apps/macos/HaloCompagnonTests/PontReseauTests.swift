@@ -44,6 +44,20 @@ struct PontReseauTests {
         pont.deconnecter()
     }
 
+    /// Reseau local refuse : bandeau, et la reconnexion reessaie quand meme :
+    /// le refus se leve dans Reglages Systeme sans evenement pour l'app (banc R7).
+    @Test func reseauLocalRefuseMontreLeBandeauEtReessaie() {
+        let pont = Pont(trousseau: TrousseauMemoire())
+        pont.connecter(.reseau(nom: Self.nom))
+        pont.echecOuverture(ErreurReseau.reseauLocalRefuse)
+        #expect(pont.alerteReseau == .transport(.reseauLocalRefuse))
+        if case .attente = pont.etatTransport {} else { Issue.record("reprise programmee attendue : \(pont.etatTransport)") }
+        // Une autre cause ensuite efface le bandeau perime.
+        pont.echecOuverture(ErreurReseau.nomIntrouvable(Self.nom + ".local"))
+        #expect(pont.alerteReseau == nil)
+        pont.deconnecter()
+    }
+
     @Test func causeReseauNoteeUneFoisTantQuElleNeChangePas() {
         let pont = Pont(trousseau: TrousseauMemoire())
         pont.connecter(.reseau(nom: Self.nom))

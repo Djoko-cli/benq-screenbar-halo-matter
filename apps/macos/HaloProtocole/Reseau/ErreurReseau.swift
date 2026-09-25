@@ -4,7 +4,8 @@ import dnssd
 
 /// Echec du transport reseau (10.1 a 10.4), avec son texte et sa reprise.
 public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
-    /// Autorisation "reseau local" refusee (Reglages Systeme).
+    /// Autorisation "reseau local" refusee (Reglages Systeme) : macOS refuse
+    /// la resolution du nom `.local` du pont.
     case reseauLocalRefuse
     /// Pas de route IPv6 vers le reseau Thread (bug du noyau de macOS, 10.1).
     case pasDeRoute
@@ -21,11 +22,20 @@ public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
     case autre(String)
 
     /// Vrai : la reconnexion reessaie seule ; faux : il faut l'utilisateur
-    /// (ou un changement du reseau).
+    /// (ou un changement du reseau). "Reseau local refuse" reessaie : le
+    /// refus se leve dans Reglages Systeme sans rien signaler a l'app, et un
+    /// essai refuse ne sort pas du Mac (banc R7).
     public var repriseAutomatique: Bool {
+        if case .portInjoignable = self { return false }
+        return true
+    }
+
+    /// Vrai : l'utilisateur doit agir (Reglages Systeme, USB) ; montre en
+    /// bandeau, essais en cours ou non.
+    public var bandeau: Bool {
         switch self {
-        case .reseauLocalRefuse, .portInjoignable: false
-        default: true
+        case .reseauLocalRefuse, .portInjoignable: true
+        default: false
         }
     }
 
@@ -62,9 +72,24 @@ public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
             default: return .autre(String(describing: code))
             }
         case .dns(let code):
-            return Int(code) == kDNSServiceErr_PolicyDenied ? .reseauLocalRefuse : .nomIntrouvable(hote)
+            // Reseau local refuse : `PolicyDenied` selon la documentation ;
+            // macOS repond en fait `NoSuchRecord`, aussitot, a la resolution
+            // d'un nom `.local` (banc R7). Un nom `.local` absent, lui, reste
+            // sans reponse (aucune erreur) : l'attente de `attentePret` le
+            // classe introuvable.
+            switch Int(code) {
+            case kDNSServiceErr_PolicyDenied: return .reseauLocalRefuse
+            case kDNSServiceErr_NoSuchRecord where estLocal(hote): return .reseauLocalRefuse
+            default: return .nomIntrouvable(hote)
+            }
         default:
             return .autre(String(describing: e))
         }
+    }
+
+    /// Nom mDNS (`.local`, avec ou sans point final).
+    static func estLocal(_ hote: String) -> Bool {
+        let h = hote.lowercased()
+        return h.hasSuffix(".local") || h.hasSuffix(".local.")
     }
 }
