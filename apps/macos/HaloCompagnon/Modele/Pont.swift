@@ -99,6 +99,9 @@ final class Pont {
     @ObservationIgnored private let surveillant = SurveillantUSB()
     @ObservationIgnored private let trousseau: any TrousseauCles
     @ObservationIgnored private let cheminReseau = NWPathMonitor()
+    /// Dernier texte de cause reseau note en console (4.6) : une meme cause
+    /// n'est notee qu'une fois tant qu'elle ne change pas.
+    @ObservationIgnored private var derniereCauseReseau: String?
     @ObservationIgnored private var observateurReveil: (any NSObjectProtocol)?
     @ObservationIgnored private var observateurFin: (any NSObjectProtocol)?
     /// Session serie ouverte : pas de mise en sommeil de l'app (App Nap) qui
@@ -204,6 +207,7 @@ final class Pont {
         source = s
         alerte = nil
         alerteReseau = nil
+        derniereCauseReseau = nil
         reconnexionAuto = true
         essaisReconnexion = 0
         if changement, let nom = nomSource {
@@ -294,6 +298,9 @@ final class Pont {
         reconnexionAuto = true
         essaisReconnexion = 0
         alerte = nil
+        // La cause n'est PAS oubliee (derniereCauseReseau) : reessayer sur la
+        // meme cause ne redouble pas la ligne de console (4.6).
+        alerteReseau = nil
         ouvrir()
     }
 
@@ -335,6 +342,7 @@ final class Pont {
                 let a = AlerteReseau.trousseau(error as? ErreurTrousseau ?? .absente(nom))
                 alerteReseau = a
                 etatTransport = .erreur(a.texte)
+                noterCauseReseau(a.texte, grave: true)
                 return
             }
         }
@@ -394,6 +402,7 @@ final class Pont {
     private func transportOuvert() {
         etatTransport = .ouvert
         alerteReseau = nil
+        derniereCauseReseau = nil
         debutActivite()
         recepteur.resynchroniser()
         note(genreTransport == .udp ? tr("Session réseau ouverte : \(nomTransport).")
@@ -410,12 +419,15 @@ final class Pont {
         if reconnexionAuto { planifierReconnexion(raison) } else { etatTransport = .ferme }
     }
 
-    private func echecOuverture(_ erreur: any Error) {
+    func echecOuverture(_ erreur: any Error) {
         transport = nil
         if let e = erreur as? ErreurReseau {
             let texte = AlerteReseau.transport(e).texte
+            // Efface un bandeau d'arret perime (ex. "reseau local refuse") des
+            // qu'une reprise automatique redevient possible (4.6).
+            alerteReseau = e.repriseAutomatique ? nil : .transport(e)
+            noterCauseReseau(texte, grave: !e.repriseAutomatique)
             if !e.repriseAutomatique {
-                alerteReseau = .transport(e)
                 etatTransport = .erreur(texte)
             } else if reconnexionAuto, essaisReconnexion < 40 {
                 planifierReconnexion(texte)
@@ -464,9 +476,15 @@ final class Pont {
     }
 
     /// Chemin reseau retrouve ou reveil du Mac : une source reseau en attente
-    /// ou en echec repart (la ou l'USB attend le retour du port).
-    private func reseauChange() {
+    /// ou en echec repart (la ou l'USB attend le retour du port). Les arrets
+    /// qui exigent l'utilisateur (cle absente ou trousseau en erreur, pont
+    /// sans cle) ne reessaient pas seuls : re-lire le trousseau ou renvoyer un
+    /// SALUT ne changerait rien (4.6). "Reseau local refuse" reste l'exception
+    /// : un changement de chemin peut lever le refus.
+    func reseauChange() {
         guard reconnexionAuto, source?.estReseau == true else { return }
+        if case .trousseau = alerteReseau { return }
+        if case .transport(.portInjoignable) = alerteReseau { return }
         switch etatTransport {
         case .attente, .erreur:
             essaisReconnexion = 0
@@ -655,6 +673,14 @@ final class Pont {
     /// Annonce de l'app dans la console (texte deja dans la langue en vigueur).
     private func note(_ texte: String, grave: Bool = false) {
         ajouterConsole(.note(grave: grave), texte)
+    }
+
+    /// Cause d'un arret ou d'une reprise reseau : un meme message n'est note
+    /// qu'une fois dans la console tant que la cause ne change pas (4.6).
+    private func noterCauseReseau(_ texte: String, grave: Bool) {
+        guard derniereCauseReseau != texte else { return }
+        derniereCauseReseau = texte
+        note(texte, grave: grave)
     }
 
     // MARK: - Commandes
