@@ -547,17 +547,20 @@ final class Pont {
                 ajouterConsole(.texte(t.classe), t.texte, numero: moteur.correlateur.commandeDeBanc?.numero)
             }
         case .fragment(let s):
-            ajouterConsole(.fragment, s)
+            // Suite d'une ligne coupee : peut-etre la fin d'une cle, sans son debut (10.4).
+            ajouterConsole(.fragment, PolitiqueCommandes.masquerCleStricte(s))
         case .abimee(let raison, let brut):
-            // Une reponse abimee a json cle nouvelle porterait la cle en clair (10.4).
+            // Une reponse abimee a json cle nouvelle porterait la cle en clair, ou
+            // une part d'elle sans guillemet fermant (10.4) : masque strict.
             rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("abîmée : \(raison)"),
-                                 brut: PolitiqueCommandes.masquerCle(brut)))
+                                 brut: PolitiqueCommandes.masquerCleStricte(brut)))
         case .versionInconnue(let v, let t):
             rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("version \(v) inconnue"), brut: t))
         case .invalide(let t, let raison):
             rejets.ajouter(Rejet(id: prochainId(), date: Date(), raison: tr("\(t) invalide : \(raison)"), brut: ""))
         case .debordement(let s):
-            ajouterConsole(.texte(.commande), s)
+            // 2 Ko sans LF : ligne abimee elle aussi, masque strict.
+            ajouterConsole(.texte(.commande), PolitiqueCommandes.masquerCleStricte(s))
         }
         executer(autres)
     }

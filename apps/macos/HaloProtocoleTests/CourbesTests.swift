@@ -170,8 +170,7 @@ struct PolitiqueTests {
     @Test func confirmations() {
         for c in ["reboot", "decommission", "erase", "wifi x y", "addr 1", "chan 5", "xo 3", "debit 1", "amble 2",
                   "aw 5", "holtek", "regcfg", "lampe oublie", "lampe adresse 4FF0FD63", "lampe stats raz",
-                  "matter med 1", "matter maxint 20", "matter reprise auto 1", "json cle nouvelle 00",
-                  "json cle efface"] {
+                  "matter med 1", "matter maxint 20", "matter reprise auto 1", "json cle efface"] {
             if case .confirmation = PolitiqueCommandes.verdictConsole(c, transport: .usb) {} else {
                 Issue.record("confirmation attendue pour \(c)")
             }
@@ -183,6 +182,27 @@ struct PolitiqueTests {
             Issue.record("json 0 passe par Liberer le port")
         }
         #expect(PolitiqueCommandes.attendReenumeration("reboot"))
+    }
+
+    /// `json cle nouvelle` tape a la console rechangerait la cle de la carte,
+    /// mais la cle rendue ne serait rangee nulle part : refusee sur tout
+    /// transport, avec un renvoi au bouton qui la range (5.1).
+    @Test(.langue(.francais)) func jsonCleNouvelleRefuseeALaConsole() {
+        let cle = String(repeating: "AB", count: 32)
+        for genre in [GenreTransport.usb, .demo, .udp] {
+            for c in ["json cle nouvelle \(cle)", "JSON  Cle   NOUVELLE 00", "json cle nouvelle"] {
+                if case .interdite = PolitiqueCommandes.verdictConsole(c, transport: genre) {} else {
+                    Issue.record("\(c) (\(genre)) : interdite attendue")
+                }
+            }
+        }
+        let raison = "Utiliser « Nouvelle clé… » (carte Thread et Matter) : la clé rendue doit être rangée dans le trousseau."
+        #expect(PolitiqueCommandes.verdictConsole("json cle nouvelle \(cle)", transport: .usb) == .interdite(raison))
+        #expect(PolitiqueCommandes.verdictConsole("json cle nouvelle 00", transport: .demo) == .interdite(raison))
+        // json cle efface garde sa confirmation ; json cle (empreinte) reste permise par l'USB.
+        #expect(PolitiqueCommandes.verdictConsole("json cle efface", transport: .usb)
+                == .confirmation("Change la clé du transport réseau : toutes les sessions réseau tombent."))
+        #expect(PolitiqueCommandes.verdictConsole("json cle", transport: .usb) == .autorisee)
     }
 
     @Test func listeBlancheADistance() {
@@ -216,5 +236,38 @@ struct PolitiqueTests {
         let deux = PolitiqueCommandes.masquerCle(#"{"cle":"\#(cle)","autre":{"cle":"\#(cle)"}}"#)
         #expect(!deux.contains(cle))
         #expect(PolitiqueCommandes.masquerCle("lampe niveau 200") == "lampe niveau 200")
+    }
+
+    /// Un log IDF qui coupe la reponse a `json cle nouvelle` laisse une part de
+    /// la cle dans la ligne abimee (sans guillemet fermant) et le reste dans le
+    /// fragment qui suit (10.4) : le masque strict les couvre, le masque
+    /// ordinaire non. Il ne sert jamais aux lignes ordinaires (nom SRP : 16 hexa).
+    @Test func masquageStrictDesLignesAbimeesEtFragments() {
+        let cle = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+        let tete = String(cle.prefix(40)), queue = String(cle.suffix(24))
+        let abimee = #"{"v":1,"t":"reponse","n":5,"ms":1,"id":4,"etape":"fin","cmd":"json cle nouvelle","ok":true,"code":"ok","cle":"\#(tete)I (8123) wifi: sta disconnected"#
+        #expect(PolitiqueCommandes.masquerCle(abimee).contains(tete), "sans guillemet fermant : le masque ordinaire ne voit rien")
+        let a = PolitiqueCommandes.masquerCleStricte(abimee)
+        #expect(!a.contains(String(tete.prefix(16))))
+        #expect(a.contains(#""cle":"••••••••"#))
+        #expect(a.hasSuffix("I (8123) wifi: sta disconnected"), "le texte du log reste lisible")
+        // Le reste de la cle, seul dans le fragment : suite de 16 hexa ou plus.
+        let fragment = #"\#(queue)","empreinte":"630DCD29"}"#
+        #expect(PolitiqueCommandes.masquerCle(fragment).contains(queue))
+        let f = PolitiqueCommandes.masquerCleStricte(fragment)
+        #expect(f == #"••••••••","empreinte":"630DCD29"}"#, "l'empreinte (8 hexa) reste")
+        // Champ cle coupe court (moins de 16 hexa) : masque aussi.
+        #expect(PolitiqueCommandes.masquerCleStricte(#"{"cle" : "0123ABC"#) == #"{"cle" : "••••••••"#)
+        // 15 hexa : sous le seuil, laisses tels quels.
+        #expect(PolitiqueCommandes.masquerCleStricte("x 0123456789ABCDE y") == "x 0123456789ABCDE y")
+        // Tout ce que masque le masque ordinaire l'est aussi ; idempotent.
+        let complet = #"{"cle":"\#(cle)"}"#
+        #expect(PolitiqueCommandes.masquerCleStricte(complet) == PolitiqueCommandes.masquerCle(complet))
+        #expect(PolitiqueCommandes.masquerCleStricte(a) == a)
+        #expect(PolitiqueCommandes.masquerCleStricte(f) == f)
+        // Une ligne ordinaire garde son nom SRP (16 hexa) : masque ordinaire seulement.
+        let srp = #"{"v":1,"t":"reseau","n":9,"ms":1,"bloc":"ip","srp":{"nom":"561F9A6463953778"}}"#
+        #expect(PolitiqueCommandes.masquerCle(srp) == srp)
+        #expect(PolitiqueCommandes.masquerCle("pont 561F9A6463953778.local") == "pont 561F9A6463953778.local")
     }
 }

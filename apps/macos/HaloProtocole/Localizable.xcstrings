@@ -1991,6 +1991,22 @@
         }
       }
     },
+    "Utiliser « Nouvelle clé… » (carte Thread et Matter) : la clé rendue doit être rangée dans le trousseau." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use “New key…” (Thread and Matter card): the returned key must be stored in the keychain."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utiliser « Nouvelle clé… » (carte Thread et Matter) : la clé rendue doit être rangée dans le trousseau."
+          }
+        }
+      }
+    },
     "Voyant : %@" : {
       "localizations" : {
         "en" : {
