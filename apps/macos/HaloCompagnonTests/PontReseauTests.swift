@@ -135,4 +135,49 @@ struct PontReseauTests {
         #expect(demo.lister().first?.nom == Self.nomDemo)
         pont.deconnecter()
     }
+
+    /// Le suivi de la creation peut se terminer sans jamais recevoir de
+    /// reponse (ligne abimee, redemarrage...) : `creerCle()` ne doit pas
+    /// rester bloque en silence pour autant (5.1). `avancerPourUnTest` simule
+    /// l'echeance du delai de reponse (3 s en USB/demo) sans attendre les
+    /// secondes reelles : le suivi du premier essai passe "sans reponse"
+    /// (issue finale) alors que `creationCle` reste arme (round 1). Deux
+    /// avances sont necessaires : la premiere (courte) fait sortir "json cle
+    /// nouvelle" de la file d'attente (cadence limitee a 20 lignes/s, 6.5),
+    /// sans quoi la commande n'est pas encore "envoyee" quand la seconde
+    /// avance verifie le delai ; la seconde declenche ce delai sur la
+    /// commande desormais effectivement envoyee. Avancer l'horloge de la
+    /// session en avance de l'horloge reelle du pont retarde d'autant les
+    /// envois suivants (la cadence les compare a nouveau a l'horloge reelle) :
+    /// la confirmation finale que la cle est bien rangee prend donc, elle,
+    /// plusieurs secondes reelles (`attendre` les couvre, sans sommeil fixe).
+    ///
+    /// La demo, elle, ne perd jamais rien : la reponse au premier essai finit
+    /// toujours par arriver (elle n'est ignoree que parce que le second essai
+    /// a remplace `creationCle` entre-temps, round 2). Verifier seulement
+    /// qu'une cle finit par etre rangee ne distinguerait donc pas le correctif
+    /// du bogue (la reponse tardive au premier essai la rangerait aussi,
+    /// round 1) : le test compte d'abord les demandes envoyees (note
+    /// "Nouvelle clé…") pour verifier que le second appel a bien reussi a en
+    /// envoyer une deuxieme, avant de confirmer le resultat final.
+    @Test func laCreationDeCleReprendApresUnSuiviTermineSansReponse() async throws {
+        let demo = TrousseauMemoire()
+        let pont = Pont(trousseau: TrousseauMemoire(), trousseauDemo: demo)
+        pont.connecter(.demo)
+        try #require(await attendre { pont.phase == .connecte && pont.accesReseau != .inconnu })
+        func demandes() -> Int {
+            pont.console.elements.filter { $0.texte.contains("Nouvelle clé réseau demandée") }.count
+        }
+        pont.creerCle()
+        #expect(demandes() == 1)
+        // Meme thread (@MainActor), aucun `await` entre les lignes qui suivent : la
+        // reponse simulee ne peut pas arriver avant que le second essai ne remplace le premier.
+        pont.avancerPourUnTest(de: 0.1)
+        pont.avancerPourUnTest(de: 3.5)
+        pont.creerCle()
+        #expect(demandes() == 2, "le suivi du premier essai est termine (sans reponse simulee) : un second essai est accepte")
+        try #require(await attendre { !demo.lister().isEmpty })
+        #expect(demo.lister().first?.nom == Self.nomDemo)
+        pont.deconnecter()
+    }
 }
