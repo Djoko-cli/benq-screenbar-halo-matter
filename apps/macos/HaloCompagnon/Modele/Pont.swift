@@ -575,6 +575,10 @@ final class Pont {
             } else {
                 ajouterConsole(.retour(ok: r.ok, session: true), "‹ " + Interpretation.reponse(r), numero: r.id)
             }
+            if let c = creationCle, r.etape == .fin, moteur.correlateur.suivi(numero: r.id)?.id == c.id {
+                creationCle = nil
+                terminerCreationCle(r, nom: c.nom, suivi: c.id)
+            }
         case .log(let lg):
             ajouterConsole(.log, lg.txt)
         default:
@@ -616,6 +620,10 @@ final class Pont {
                     if n.grave { alerte = n }
                 }
             case .commandeSansReponse(let id):
+                if creationCle?.id == id {
+                    creationCle = nil
+                    note(tr("Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer."), grave: true)
+                }
                 if let s = moteur.correlateur.suivi(id) {
                     let numero = String(s.numero ?? 0)
                     let p = moteur.correlateur.politique
@@ -689,6 +697,42 @@ final class Pont {
 
     /// Source reseau ouverte : liste blanche (10.5).
     var aDistance: Bool { genreTransport == .udp }
+
+    /// `json cle nouvelle` en cours : suivi et nom SRP du pont.
+    @ObservationIgnored private var creationCle: (id: UUID, nom: String)?
+
+    /// Acces reseau (carte Thread) : par l'USB ou la demo seulement.
+    var accesReseau: EtatAccesReseau {
+        guard genreTransport == .usb || genreTransport == .demo else { return .inconnu }
+        let connus = pontsConnus
+        return EtatAccesReseau.depuis(ip: etat.ip?.valeur) { nom in connus.first { $0.nom == nom }?.empreinte }
+    }
+
+    /// Nouvelle cle par l'USB (10.4) : alea de l'app, cle calculee par la
+    /// carte, rangee dans le trousseau ; les sessions reseau tombent.
+    func creerCle() {
+        guard !aDistance, creationCle == nil, let nom = etat.ip?.valeur.srp?.nom else { return }
+        guard let id = envoyer(CleReseau.commande(alea: CleReseau.alea())) else { return }
+        creationCle = (id, nom)
+        note(tr("Nouvelle clé réseau demandée à la carte : les sessions réseau en cours tombent."))
+    }
+
+    private func terminerCreationCle(_ r: Reponse, nom: String, suivi: UUID) {
+        moteur.effacerCle(suivi)
+        synchroniser()
+        switch CleReseau.verifier(r) {
+        case .success(let c):
+            do {
+                try trousseau.ranger(nom: nom, cle: c.cle, empreinte: c.empreinte)
+                pontsConnus = trousseau.lister()
+                note(tr("Clé réseau rangée dans le trousseau (empreinte \(c.empreinte)) : le pont est dans la section Réseau."))
+            } catch {
+                note(String(describing: error), grave: true)
+            }
+        case .failure(let e):
+            note(e.description, grave: true)
+        }
+    }
 
     /// La commande peut partir par la source en vigueur.
     func peutEnvoyer(_ commande: String) -> Bool {

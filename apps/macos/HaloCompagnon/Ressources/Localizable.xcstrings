@@ -901,6 +901,22 @@
         }
       }
     },
+    "Clé réseau rangée dans le trousseau (empreinte %@) : le pont est dans la section Réseau." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network key stored in the keychain (fingerprint %@): the bridge is in the Network section."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé réseau rangée dans le trousseau (empreinte %@) : le pont est dans la section Réseau."
+          }
+        }
+      }
+    },
     "Code d'appairage" : {
       "localizations" : {
         "en" : {
@@ -2053,6 +2069,22 @@
         }
       }
     },
+    "Nouvelle clé réseau demandée à la carte : les sessions réseau en cours tombent." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New network key requested from the board: open network sessions are dropped."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nouvelle clé réseau demandée à la carte : les sessions réseau en cours tombent."
+          }
+        }
+      }
+    },
     "Nouvelle source : %@. États, journal des trames et courbes remis à zéro." : {
       "localizations" : {
         "en" : {
@@ -2109,6 +2141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Packets sent / acked"
+          }
+        }
+      }
+    },
+    "Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reply to the key creation: if the board changed its key, the Thread card shows \"key unknown to this Mac\"; try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de réponse à la création de clé : si la carte a changé de clé, la carte Thread affiche « clé inconnue de ce Mac » ; recommencer."
           }
         }
       }
