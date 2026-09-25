@@ -38,7 +38,7 @@ public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
         case .portInjoignable:
             tr("Le pont n'a plus de clé : le brancher en USB, puis « Activer l'accès réseau ».")
         case .aucunDefi:
-            tr("Aucune réponse du pont : clé différente de la sienne ? (comparer les empreintes par l'USB)")
+            tr("Aucune réponse du pont : clé différente de la sienne, ou pont sans clé ? (vérifier par l'USB, carte Thread et Matter)")
         case .cheminPerdu(let raison):
             tr("Connexion réseau perdue : \(raison)")
         case .autre(let raison):
