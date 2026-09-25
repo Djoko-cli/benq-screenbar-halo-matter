@@ -23,7 +23,9 @@ Mac sur l'Ethernet USB seul (Wi-Fi coupe), Tailscale actif.
 - `src/h1_proto.*` (pur, 78 verifications sur l'hote avec des vecteurs Python), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (socket OpenThread, files RX/TX, cle NVS), `json_mode.cpp` a une session par transport (USB + 2 reseau), liste blanche `jsonp::remoteRefusal`, cache des 8 dernieres reponses par session.
 - Ecarts assumes par rapport a cette etude : port **5480** ; une ligne = un datagramme (1078 octets au plus, 6LoWPAN fragmente), pas de decoupage a 512 (a revoir apres R3) ; decouverte par le nom SRP (`reseau` bloc `ip`, `srp.nom`), pas de service `_halo-pont._udp` en v1 ; `json cle nouvelle` exige un `id` mais pas le mode machine.
 - Client de banc : `tools/halo_udp.py` (cle par l'USB, session, commandes, test `refus`).
-- Reste : phase 2 (app macOS, source "Reseau"), phase 3 (iOS).
+- Reste : essais au banc de la phase 2 (app macOS, source "Reseau" :
+  implementee le 25/09 sur la branche `source-reseau`, voir plus bas et
+  docs/PROTOCOLE-JSON.md 10 ; essais au banc a venir), puis phase 3 (iOS).
 
 # 1. Verdict : GO, si l'experience de la section 2 passe (passee le 24/09, voir section 0)
 
@@ -194,7 +196,14 @@ Corriger la section 10 avant d'ecrire du code (details en fin de section).
 
 ## Phase 2 : app macOS
 
-**Nouveau framework `HaloReseau` (macOS et iOS)**
+Implementee le 25/09/2026 sur la branche `source-reseau` (essais au banc a
+venir ; voir docs/PROTOCOLE-JSON.md 10 et le README de l'app). Ecart assume
+par rapport au plan ci-dessous : pas de nouveau framework `HaloReseau`
+separe ; `EnveloppeH1`, `ErreurReseau` et `TransportUDP` vivent dans
+`HaloProtocole` (`Reseau/`, `Transport/TransportUDP.swift`), qui deviendra
+multiplateforme en phase 3.
+
+**Plan initial (24/09) : nouveau framework `HaloReseau` (macOS et iOS)**
 - `EnveloppeH1`, avec des vecteurs de test communs au firmware.
 - `TransportUDP: Transport`, sur `NWConnection`.
 - `DecouverteHalo` : `<HOTE>.local` et port appris par USB ; `NWBrowser` seulement si B2 passe.

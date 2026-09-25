@@ -50,6 +50,37 @@ L'app **n'ouvre jamais un port seule** : il faut choisir une source dans la
 barre latérale (le port Espressif, VID 303A, est proposé en premier) ou le
 mode démo (⇧⌘D).
 
+### Signature pour la source réseau
+
+`Signature.xcconfig` (commité) signe ad hoc par défaut : le dépôt compile et
+teste partout, sans compte Apple, mais sans autorisation réseau local stable
+ni trousseau qui survit d'une compilation à l'autre. Pour la source réseau,
+créer `apps/macos/Local.xcconfig` (ignoré par git, voir `.gitignore`) :
+
+```
+DEVELOPMENT_TEAM = <équipe, 10 caractères>
+CODE_SIGN_IDENTITY = Apple Development
+```
+
+Équipe : `security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject` (champ OU).
+
+Deux pièges rencontrés le 25/09 :
+- **Conteneur du bac à sable.** Passer d'une install ad hoc à la signature
+  d'équipe sur une app déjà installée : macOS protège le conteneur créé par
+  le premier build ad hoc. Quitter l'ancienne app, puis accepter l'invite
+  système sur l'accès aux « données d'autres apps » — sinon les tests
+  hébergés restent bloqués sur « test runner hung before establishing
+  connection ».
+- **`DerivedData` sous `~/Documents`.** macOS y ajoute des attributs étendus
+  que la signature ad hoc du paquet de tests refuse (« resource fork, Finder
+  information, or similar detritus not allowed »). Toujours compiler avec un
+  `-derivedDataPath` hors de `~/Documents`, par exemple :
+
+  ```sh
+  DD=$HOME/Library/Developer/Xcode/DerivedData/halo-sdd
+  xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test
+  ```
+
 ## Langues : français et anglais
 
 L'app parle français (langue de développement : les clés des catalogues sont
@@ -231,6 +262,85 @@ rien d'autre sur le disque ni le réseau n'est ouvert ; et la même app pourra
 bac à sable sur un `ioctl`, retirer `com.apple.security.app-sandbox` suffit
 (aucun code ne dépend du bac à sable).
 
+## Source réseau (UDP sur Thread)
+
+Une deuxième source rejoint le pont sans câble : UDP sur Thread, à travers les
+routeurs de bordure Apple (voir `docs/PROTOCOLE-JSON.md`, section 10).
+Connectée, l'app montre les mêmes écrans que par l'USB, dans les limites de la
+liste blanche du pont et de son profil distant. L'enveloppe `H1` et
+`TransportUDP` vivent dans le framework `HaloProtocole` (`Reseau/`,
+`Transport/TransportUDP.swift`), pas dans l'app : leurs tests ont besoin d'un
+pair UDP local, ce qu'un test hébergé dans le bac à sable de l'app ne permet
+pas.
+
+**Créer la clé (USB uniquement).** Le pont ne parle en réseau que s'il
+partage une clé avec ce Mac. Carte « Thread et Matter », ligne « Transport
+réseau » : pont sans clé → bouton « Activer l'accès réseau… » ; clé du pont
+= clé de ce Mac (même empreinte) → « Clé connue de ce Mac » et « Nouvelle
+clé… » en option ; autre clé → « Clé inconnue de ce Mac » (en orange) et le
+même bouton. La confirmation prévient que les sessions réseau en cours
+tombent. La clé créée est rangée dans le trousseau de ce Mac et n'apparaît
+jamais ailleurs (console, journal, suivi des commandes) : la commande
+s'affiche sans son aléa, et le champ `cle` de la réponse est masqué partout où
+la ligne pourrait s'afficher. Une réponse arrivée après le délai USB de 3 s
+est quand même rangée ; une création interrompue par la fermeture du
+transport est notée dans la console ; un nouvel essai n'est permis qu'une
+fois le précédent terminé. Le mode démo simule un pont « DEMO-HALO » avec son
+propre trousseau en mémoire, isolé du vrai trousseau, de la section « Réseau »
+et du choix de la source par défaut.
+
+**Se connecter.** Barre latérale, menu de la source, section « Réseau » : un
+clic sur un pont connu (`<nom>.local`, son empreinte) s'y connecte
+directement. Un sous-menu « Oublier un pont… » retire sa clé du trousseau de
+ce Mac après confirmation (le pont garde la sienne ; « Activer l'accès
+réseau » par l'USB en recrée une).
+
+**Ce qui est permis à distance.** Le pont applique sa propre liste blanche
+(section 10.5) : `json 1/0/etat/hello/ping`, les réglages de période dans
+leurs bornes réseau, `json trames`/`json log`, les commandes `lampe` et
+`led test|stop`. Tout le reste (`json cle...`, `reboot`, `decommission`,
+`erase`, `wifi`, `matter ...`, les outils de banc radio) revient `interdite`,
+rien n'est exécuté ; c'est la carte qui fait foi, mais l'app grise aussi ces
+commandes (écran Commandes, outils de banc) avec la raison en aide. Le profil
+distant (section 10.6) s'applique dès le `json 1` réseau : `etat` toutes les
+2 s, pas de `compteurs`, `reseau` toutes les 30 s, ni trames ni `log`. R3
+(MAX_RT avec un client distant) n'est pas mesuré : l'app ne demande aucune
+cadence plus rapide pour l'instant.
+
+**Erreurs et remèdes.**
+
+| Cas | Bandeau / message | Reprise |
+|---|---|---|
+| Trousseau absent ou en erreur, pont sans clé (« port injoignable ») | bandeau, avec « Reconnecter » | arrêt : recréer ou vérifier la clé par l'USB |
+| Réseau local refusé (Réglages Système › Confidentialité et sécurité › Réseau local) | bandeau | arrêt ; reprise dès que le chemin réseau change |
+| Pas de route IPv6, nom introuvable, aucun DEFI, chemin perdu en session | ligne d'état de la barre latérale (« en attente : ... ») | automatique : 0,3 s, 1 s, 2 s, 5 s (40 essais), puis à un changement de chemin réseau ou au réveil du Mac |
+
+Une même cause n'est notée qu'une fois dans la console tant qu'elle ne change
+pas. Le message « Pas de route » dépend de l'assistant système
+`tools/macos/halo-routes/` : si son fichier
+`/Library/LaunchDaemons/fr.djoko.halo.routes.plist` est visible depuis le bac
+à sable, le message dit que la route revient seule ; sinon il renvoie à
+`sh tools/macos/halo-routes/installer.sh`.
+
+**Signature et autorisation réseau local.** La source réseau demande le
+droit `com.apple.security.network.client` et
+`INFOPLIST_KEY_NSLocalNetworkUsageDescription` (français et anglais, via
+`InfoPlist.xcstrings`). Signer avec une équipe Apple Development est
+nécessaire pour que cette autorisation et le trousseau restent stables d'une
+compilation à l'autre : voir « Construire, tester, lancer ».
+
+**`halo_udp.py` et le trousseau.** `tools/halo_udp.py` relit la clé créée par
+l'app, dans l'ordre : `HALO_CLE` (fichier) ; le trousseau (`security
+find-generic-password -s fr.djoko.halo.pont -a <nom> -w` ; pour une simple
+adresse, le seul pont du trousseau, erreur s'il y en a plusieurs ; macOS
+demande une fois d'autoriser `security`, « Toujours autoriser ») ;
+`~/.config/halo-pont/cle`. Sa commande `cle <port>` (banc sans l'app) exige
+`HALO_CLE` et prévient que la clé de l'app devient alors périmée.
+
+Limites laissées de côté pour l'instant : `json cle nouvelle` tapé dans la
+console change bien la clé de la carte, mais la clé rendue n'est pas rangée
+(passer par « Nouvelle clé… ») ; l'app iOS reste hors périmètre (phase 3).
+
 ## Architecture
 
 ```
@@ -247,12 +357,14 @@ apps/macos/
 │   ├── Interpretation/          sens décodé et libellés
 │   ├── Localisation/            langue en vigueur (observable), choix du réglage, locale des formats
 │   ├── Localizable.xcstrings    textes du framework (français source, anglais)
-│   └── Transport/               protocole Transport (ouvrir, envoyer, fermer, flux d'octets)
-├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, couverture des clés (aucun champ perdu), corrélation, session, courbes, correspondances, fichier de démo, catalogues et sens décodé dans les deux langues
+│   ├── Reseau/                  enveloppe H1 (EnveloppeH1, CryptoKit), ErreurReseau, CleReseau (10.4) : code pur, testé sans réseau
+│   └── Transport/               protocole Transport (ouvrir, envoyer, fermer, flux d'octets) ; TransportUDP (UDP sur Thread, section 10)
+├── HaloProtocoleTests/          Swift Testing : tramage, décodage de chaque ligne d'exemple de la spec, couverture des clés (aucun champ perdu), corrélation, session, courbes, correspondances, fichier de démo, catalogues et sens décodé dans les deux langues, enveloppe H1 et TransportUDP (pair UDP local)
 ├── HaloCompagnon/               l'app
 │   ├── Serie/                   PortSerie (POSIX, DTR/RTS), TransportSerie (DispatchSource), SurveillantUSB (IOKit)
 │   ├── Demo/                    ScriptDemo, SimulateurDemo (acteur), TransportDemo
-│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux ; réglage de la langue
+│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux ; réglage de la langue ; source réseau et création de clé
+│   ├── Reseau/                  Trousseau (trousseau de session macOS, service fr.djoko.halo.pont), AlerteReseau (bandeau, message "pas de route")
 │   ├── Vues/                    les quatre écrans, leurs composants, les Réglages
 │   └── Ressources/              demo-halo.jsonl, catalogues de textes (Localizable, Titres)
 ├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage, changement de source), langue de l'app
@@ -263,11 +375,13 @@ La couche protocole est du code pur : `RecepteurLignes`, `MoteurSession` et
 `Correlateur` sont des `struct` qui prennent le temps en argument et
 renvoient des effets (envoyer, rouvrir, redémarrage détecté...). `Pont` les
 alimente depuis le transport et exécute les effets. Un transport est un
-`Transport` (`HaloProtocole/Transport/Transport.swift`) : l'app iOS ajoutera
-un `TransportUDP` (datagramme = une ligne, enveloppe `H1` de 10.4) sans
-toucher au reste ; `PolitiqueCommandes.autoriseeADistance` applique déjà la
-liste blanche de 10.5. Pour la rendre multiplateforme, ajouter iOS aux
-plateformes de la cible `HaloProtocole` (elle n'importe que Foundation).
+`Transport` (`HaloProtocole/Transport/Transport.swift`) : la source réseau
+utilise `TransportUDP` (`HaloProtocole/Transport/TransportUDP.swift`,
+datagramme = une ligne, enveloppe `H1` de `HaloProtocole/Reseau/`, section
+10.4) sans toucher au reste ; `PolitiqueCommandes.autoriseeADistance`
+applique déjà la liste blanche de 10.5. L'app iOS (phase 3) réutilisera le
+même framework ; pour l'y ajouter, étendre les plateformes de la cible
+`HaloProtocole` (elle n'importe que Foundation, CryptoKit et Network).
 
 ## Choix d'interprétation
 
@@ -315,3 +429,24 @@ plateformes de la cible `HaloProtocole` (elle n'importe que Foundation).
 - **U5** : Mac en veille ou app suspendue 60 s : fragments classés comme tels
   au réveil (`NSWorkspace.didWakeNotification`), bail échu puis `json 1` renvoyé.
 - Le bac à sable face aux `ioctl` de `PortSerie` (`TIOCEXCL`, `TIOCMSET`).
+- **Clé réseau** : app connectée par l'USB, carte « Thread et Matter » →
+  « Activer l'accès réseau… » → « Clé XXXXXXXX connue de ce Mac » ; puis
+  `python3 tools/halo_udp.py session <nom SRP>.local --duree 10` (macOS
+  demande d'autoriser `security` : « Toujours autoriser ») → session ouverte
+  avec la clé de l'app.
+- **Source réseau** : « Libérer le port », puis menu de la source → section
+  « Réseau » → connexion (autorisation réseau local à la première fois) →
+  `hello` rev 3 transport `udp`, `etat` toutes les 2 s ; `lampe niveau 200`
+  depuis l'app, livrée ; `lampe stats raz` grisée.
+- **R5** : redémarrer le pont (USB : `reboot`, depuis l'app ou
+  `pio device monitor` sans `json cle`) → l'app reprend seule en ~15 s.
+- **R7** : Réglages Système › Confidentialité et sécurité › Réseau local :
+  couper Halo Compagnon → bandeau « Accès au réseau local refusé… » ;
+  réautoriser → reprise.
+- **Route** : retirer la route IPv6 statique vers le préfixe OMR → au plus
+  quelques secondes de bandeau « Pas de route… », puis reprise par
+  l'assistant `tools/macos/halo-routes` (journal
+  `/Library/Logs/fr.djoko.halo.routes.log`).
+- **Pont sans clé** : `json cle efface` par l'USB, puis connexion réseau →
+  message clé absente ou « port injoignable » (aucun DEFI), sans boucle de
+  tentatives.

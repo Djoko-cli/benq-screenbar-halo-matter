@@ -1242,7 +1242,10 @@ bordure (RIO). Aucune dependance a Matter pour ce canal.
   reconnexion refait une poignee de main, et l'app en refait une avant de
   revenir a 1 apres 999999999) ; seule une commande restee sans reponse est
   renvoyee avec le meme `id` (apres 2 s, 2 fois au plus, avec un `ctr` neuf :
-  c'est la regle 6.5 du reseau, ou une perte est ordinaire). La carte
+  c'est la regle 6.5 du reseau, ou une perte est ordinaire) ; l'app applique
+  la meme regle a `json 1` : jamais un `id` neuf a distance, pour que la
+  carte rende sa reponse deja en cache ou en file au lieu de rejouer son
+  instantane d'environ 6 Ko. La carte
   garde les 8 dernieres `reponse` (etape `fin`) de chaque session et regle
   chaque ligne par son `id` AVANT tout le reste, cadence comprise
   (`jsonRemoteAdmit`) :
@@ -1317,8 +1320,12 @@ Cle partagee (PSK) de 32 octets, gardee en NVS (`halo1/cle`). Elle ne passe
   la cle, comme le depart du dernier controleur (accessoire retire d'Apple
   Home : la mise en service se rouvre) : un nouveau proprietaire ne laisse
   pas l'acces a l'ancien. L'app refait alors `json cle nouvelle` par l'USB.
-- L'app macOS range la cle dans le trousseau (element synchronise iCloud,
-  partage avec l'app iOS) ; a defaut, un QR code affiche par l'app macOS.
+- L'app macOS range la cle dans le trousseau : mot de passe generique de
+  session, service `fr.djoko.halo.pont`, compte = nom SRP (sans `.local`),
+  valeur = 64 hexa MAJUSCULES, commentaire = empreinte, libelle
+  `Halo - pont <nom>` ; non synchronise (iCloud et partage avec iOS : phase
+  3). `tools/halo_udp.py` la relit dans ce trousseau (`security
+  find-generic-password -s fr.djoko.halo.pont -a <nom> -w`).
 - NVS non chiffree : qui a la carte en main a de toute facon tout (CLI USB).
 
 Textes canoniques (le MAC porte sur eux) : hexadecimal en **MAJUSCULES**
