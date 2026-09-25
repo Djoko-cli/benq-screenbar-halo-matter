@@ -833,6 +833,22 @@
         }
       }
     },
+    "Accès au réseau local refusé : Réglages Système › Confidentialité et sécurité › Réseau local › Halo Compagnon." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local network access denied: System Settings › Privacy & Security › Local Network › Halo Compagnon."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accès au réseau local refusé : Réglages Système › Confidentialité et sécurité › Réseau local › Halo Compagnon."
+          }
+        }
+      }
+    },
     "Aucune réponse : mauvais port, carte en mode téléchargement, ou commande de banc en cours ? Nouvel essai toutes les 30 s." : {
       "localizations" : {
         "en" : {
@@ -849,6 +865,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No response from the board"
+          }
+        }
+      }
+    },
+    "Aucune réponse du pont : clé différente de la sienne ? (comparer les empreintes par l'USB)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No answer from the bridge: a different key? (compare fingerprints over USB)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucune réponse du pont : clé différente de la sienne ? (comparer les empreintes par l'USB)"
           }
         }
       }
@@ -1075,6 +1107,22 @@
         }
       }
     },
+    "Connexion réseau perdue : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network connection lost: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connexion réseau perdue : %@"
+          }
+        }
+      }
+    },
     "Connexion…" : {
       "localizations" : {
         "en" : {
@@ -1197,6 +1245,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Empreinte incohérente avec la clé reçue : clé non rangée."
+          }
+        }
+      }
+    },
+    "Erreur réseau : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network error: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erreur réseau : %@"
           }
         }
       }
@@ -1369,6 +1433,22 @@
         }
       }
     },
+    "Le pont n'a plus de clé : le brancher en USB, puis « Activer l'accès réseau »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bridge has no key anymore: plug it in over USB, then \"Enable network access\"."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le pont n'a plus de clé : le brancher en USB, puis « Activer l'accès réseau »."
+          }
+        }
+      }
+    },
     "Ligne trop longue : %lld octets, %lld au plus avec le préfixe id=." : {
       "localizations" : {
         "en" : {
@@ -1531,12 +1611,44 @@
         }
       }
     },
+    "Pas de route IPv6 vers le réseau Thread (bug du noyau de macOS, section 10.1)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No IPv6 route to the Thread network (macOS kernel bug, section 10.1)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de route IPv6 vers le réseau Thread (bug du noyau de macOS, section 10.1)."
+          }
+        }
+      }
+    },
     "Pas de réponse à json 1 sous 5 s : fermeture et réouverture du port." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "No response to json 1 within 5 s: closing and reopening the port."
+          }
+        }
+      }
+    },
+    "Pont introuvable (%@) : éteint, hors du réseau Thread, ou routeurs de bordure injoignables." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bridge not found (%@): off, outside the Thread network, or border routers unreachable."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pont introuvable (%@) : éteint, hors du réseau Thread, ou routeurs de bordure injoignables."
           }
         }
       }
@@ -2995,6 +3107,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "service"
+          }
+        }
+      }
+    },
+    "session réseau fermée" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "network session closed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "session réseau fermée"
+          }
+        }
+      }
+    },
+    "session réseau fermée par l'app" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "network session closed by the app"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "session réseau fermée par l'app"
           }
         }
       }
