@@ -34,6 +34,9 @@ public struct MoteurSession: Sendable {
         /// Reponse `fin` au `json 1` attendue au plus 3 s apres le `hello`
         /// (6.5) ; au-dela elle est tenue pour perdue et la file repart.
         public var delaiFinJson1: TimeInterval = 3
+        /// A distance : l'instantane de `json 1` (~6 Ko) passe a 3 Ko/s sur
+        /// Thread, ~4 s avec deux sessions (10.2) ; sa `fin` est attendue 8 s.
+        public var delaiFinJson1Reseau: TimeInterval = 8
         /// Silence : aucune ligne depuis 3 x max(periode, 2 s).
         public var facteurSilence: Double = 3
         public var silenceMin: TimeInterval = 2
@@ -134,6 +137,8 @@ public struct MoteurSession: Sendable {
 
     public var parametres = Parametres()
     public private(set) var phase: Phase = .ferme
+    /// Transport de la connexion en cours (regles du reseau, 10.2).
+    public private(set) var genre: GenreTransport = .usb
     public private(set) var correlateur = Correlateur()
     public private(set) var statistiques = StatistiquesLien()
     /// Reglages de session en vigueur : ceux du `hello`, puis ceux des
@@ -164,8 +169,11 @@ public struct MoteurSession: Sendable {
 
     // MARK: - Entrees
 
-    /// Transport ouvert : `\x15\n` puis `id=1 json 1` (3.3).
-    public mutating func ouvert(maintenant: TimeInterval) -> [Effet] {
+    /// Transport ouvert : `\x15\n` puis `id=1 json 1` (3.3). A distance, pas de
+    /// Ctrl-U (pas de ligne en cours a effacer ; la carte ignore une ligne sans id).
+    public mutating func ouvert(maintenant: TimeInterval, genre: GenreTransport = .usb) -> [Effet] {
+        self.genre = genre
+        correlateur.politique = .pour(genre)
         correlateur.reinitialiser(maintenant: maintenant)
         statistiques.connexions += 1
         phase = .attenteHello(essai: 1)
@@ -175,8 +183,10 @@ public struct MoteurSession: Sendable {
         dernierRecuA = maintenant
         resynchroDepuis = nil
         bancSignale = false
-        return [.envoyer(LigneCommande.effacement)] + envoyerJson1(maintenant: maintenant)
+        return effacement + envoyerJson1(maintenant: maintenant)
     }
+
+    private var effacement: [Effet] { genre == .udp ? [] : [.envoyer(LigneCommande.effacement)] }
 
     /// Transport ferme (cable, re-enumeration, liberation du port).
     public mutating func ferme(maintenant: TimeInterval) {
@@ -212,7 +222,7 @@ public struct MoteurSession: Sendable {
     public mutating func reessayer(maintenant: TimeInterval) -> [Effet] {
         guard phase != .ferme else { return [] }
         phase = .attenteHello(essai: 1)
-        return [.envoyer(LigneCommande.effacement)] + envoyerJson1(maintenant: maintenant)
+        return effacement + envoyerJson1(maintenant: maintenant)
     }
 
     public mutating func recu(_ element: ElementRecu, maintenant: TimeInterval) -> [Effet] {
@@ -252,7 +262,7 @@ public struct MoteurSession: Sendable {
             if let j = json1, maintenant - j.envoyeA >= parametres.delaiHello {
                 if essai <= parametres.renvoisHello {
                     phase = .attenteHello(essai: essai + 1)
-                    effets += envoyerJson1(maintenant: maintenant)
+                    effets += envoyerJson1(maintenant: maintenant, renvoi: true)
                 } else {
                     phase = .sansReponse
                     json1 = nil
@@ -264,11 +274,12 @@ public struct MoteurSession: Sendable {
             }
         case .sansReponse:
             if maintenant - dernierEssaiA >= parametres.relanceLente {
-                effets.append(.envoyer(LigneCommande.effacement))
+                effets += effacement
                 effets += envoyerJson1(maintenant: maintenant)
             }
         case .connecte:
-            if let j = json1, maintenant - j.envoyeA >= parametres.delaiFinJson1 {
+            let delaiFin = genre == .udp ? parametres.delaiFinJson1Reseau : parametres.delaiFinJson1
+            if let j = json1, maintenant - j.envoyeA >= delaiFin {
                 // hello recu mais pas la reponse fin (ligne perdue ou abimee) : la file repart.
                 json1 = nil
                 statistiques.sansReponse += 1
@@ -294,6 +305,7 @@ public struct MoteurSession: Sendable {
         }
 
         if phase.modeMachine {
+            for d in correlateur.renvoisDus(maintenant: maintenant) { effets.append(.envoyer(d)) }
             for s in correlateur.verifierDelais(maintenant: maintenant) {
                 statistiques.sansReponse += 1
                 effets.append(.commandeSansReponse(s.id))
@@ -326,8 +338,11 @@ public struct MoteurSession: Sendable {
         return min(parametres.pingApres, Double(b) / 3)
     }
 
-    private mutating func envoyerJson1(maintenant: TimeInterval) -> [Effet] {
-        let n = correlateur.reserverNumero()
+    /// `json 1`. A distance, un renvoi garde son `id` : si le premier est
+    /// arrive, la carte ne refait pas l'instantane (10.2).
+    private mutating func envoyerJson1(maintenant: TimeInterval, renvoi: Bool = false) -> [Effet] {
+        let n: Int
+        if renvoi, genre == .udp, let j = json1 { n = j.numero } else { n = correlateur.reserverNumero() }
         json1 = (n, maintenant)
         dernierEssaiA = maintenant
         correlateur.noterEnvoiHorsFile(maintenant: maintenant)
@@ -403,9 +418,10 @@ public struct MoteurSession: Sendable {
                 // cadence) laisse json1 pose et le minuteur renvoie json 1
                 // (idempotent). Apres le hello, la reponse fin libere la file.
                 if r.etape == .fin, phase == .connecte { json1 = nil }
-            } else if case .fin(let id, _) = correlateur.recevoir(r, maintenant: maintenant),
-                      r.ok, let s = correlateur.suivi(id) {
-                appliquerReglage(s.commande)
+            } else if case .fin(let id, _) = correlateur.recevoir(r, maintenant: maintenant) {
+                if r.ok, let s = correlateur.suivi(id) { appliquerReglage(s.commande) }
+                // Reseau : id deja traite, sa reponse n'est plus en cache (10.2) : rafraichir l'etat.
+                if r.code == .dejaTraite { correlateur.soumettre("json etat", origine: .session, maintenant: maintenant) }
             }
         case .livraison(let liv):
             correlateur.recevoir(liv, maintenant: maintenant)
