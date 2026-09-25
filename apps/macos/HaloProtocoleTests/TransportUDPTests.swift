@@ -275,11 +275,30 @@ struct TransportUDPTests {
         o.fermerApresVidage(synchrone: true)
     }
 
+    /// Session perdue apres l'ouverture (`.failed`, erreur de reception :
+    /// ENETDOWN...) : le flux se ferme sur "Connexion réseau perdue : <cause>",
+    /// pas sur le texte brut de la cause (4.6).
+    @Test func perteEnSessionFermeSurConnexionPerdue() async throws {
+        let pont = try PontLocal(cle: VecteursH1.psk)
+        defer { pont.arreter() }
+        let t = TransportUDP(hote: "::1", cle: VecteursH1.psk, reglages: Self.rapides(pont.port))
+        let flux = try await t.ouvrir()
+        t.echec(.pasDeRoute)
+        let attendu = ErreurReseau.cheminPerdu(ErreurReseau.pasDeRoute.description).description
+        #expect(await premier(flux) == .ferme(raison: attendu))
+        #expect(TransportUDP.raisonPerte(.pasDeRoute) == attendu)
+        #expect(attendu != ErreurReseau.pasDeRoute.description)
+    }
+
     @Test func textes() {
         #expect(!ErreurReseau.portInjoignable.repriseAutomatique)
         #expect(!ErreurReseau.reseauLocalRefuse.repriseAutomatique)
         #expect(ErreurReseau.pasDeRoute.repriseAutomatique)
         #expect(ErreurReseau.depuis(.posix(.EHOSTUNREACH), chemin: nil, hote: "x.local") == .pasDeRoute)
+        #expect(ErreurReseau.depuis(.posix(.ENETUNREACH), chemin: nil, hote: "x.local") == .pasDeRoute)
+        #expect(ErreurReseau.depuis(.posix(.ENETDOWN), chemin: nil, hote: "x.local") == .pasDeRoute)
+        // ICMPv6 "adresse injoignable" : le noeud ne repond pas, la route n'y est pour rien.
+        #expect(ErreurReseau.depuis(.posix(.EHOSTDOWN), chemin: nil, hote: "x.local") == .nomIntrouvable("x.local"))
         #expect(ErreurReseau.depuis(.posix(.ECONNREFUSED), chemin: nil, hote: "x.local") == .portInjoignable)
         #expect(ErreurReseau.depuis(.dns(-65554), chemin: nil, hote: "x.local") == .nomIntrouvable("x.local"))
         #expect(ErreurReseau.depuis(.dns(-65570), chemin: nil, hote: "x.local") == .reseauLocalRefuse)

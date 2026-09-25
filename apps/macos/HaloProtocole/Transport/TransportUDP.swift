@@ -93,6 +93,12 @@ public final class TransportUDP: Transport {
         if let refus { throw refus }
     }
 
+    /// Raison de fermeture d'une session perdue apres son ouverture (4.6) :
+    /// "Connexion réseau perdue : <cause>".
+    static func raisonPerte(_ cause: ErreurReseau) -> String {
+        ErreurReseau.cheminPerdu(cause.description).description
+    }
+
     // MARK: - Connexion (file du transport)
 
     private func changement(_ s: NWConnection.State, _ c: NWConnection) {
@@ -106,7 +112,7 @@ public final class TransportUDP: Transport {
                 et.erreur = err
                 return et.suite != nil
             }
-            if ouverte { terminer(err.description) }
+            if ouverte { terminer(Self.raisonPerte(err)) }
         case .failed(let e):
             echec(ErreurReseau.depuis(e, chemin: c.currentPath, hote: hote))
         default:
@@ -162,7 +168,7 @@ public final class TransportUDP: Transport {
             e.echoue = true
             return e.suite != nil
         }
-        if ouverte { terminer(err.description) }
+        if ouverte { terminer(Self.raisonPerte(err)) }
     }
 
     // MARK: - Poignee de main (10.4)

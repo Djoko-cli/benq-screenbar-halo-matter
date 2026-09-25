@@ -8,13 +8,15 @@ public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
     case reseauLocalRefuse
     /// Pas de route IPv6 vers le reseau Thread (bug du noyau de macOS, 10.1).
     case pasDeRoute
-    /// `<nom>.local` introuvable.
+    /// `<nom>.local` introuvable, ou le noeud ne repond pas (`EHOSTDOWN`).
     case nomIntrouvable(String)
     /// ICMPv6 "port injoignable" : le pont n'a plus de cle (port 5480 ferme).
     case portInjoignable
     /// Aucun DEFI juste apres les essais du SALUT (autre cle, pont muet).
     case aucunDefi
-    /// Connexion perdue apres son ouverture.
+    /// Connexion perdue apres son ouverture (`.waiting`, `.failed`, erreur de
+    /// reception) : son texte est la raison de fermeture du flux, la cause
+    /// ensuite (`TransportUDP.raisonPerte`).
     case cheminPerdu(String)
     case autre(String)
 
@@ -52,7 +54,10 @@ public enum ErreurReseau: Error, Sendable, Equatable, CustomStringConvertible {
         switch e {
         case .posix(let code):
             switch code {
-            case .EHOSTUNREACH, .ENETUNREACH, .ENETDOWN, .EHOSTDOWN: return .pasDeRoute
+            case .EHOSTUNREACH, .ENETUNREACH, .ENETDOWN: return .pasDeRoute
+            // ICMPv6 "adresse injoignable" : la route existe, c'est le noeud
+            // qui ne repond pas (eteint, hors du reseau Thread).
+            case .EHOSTDOWN: return .nomIntrouvable(hote)
             case .ECONNREFUSED: return .portInjoignable
             default: return .autre(String(describing: code))
             }

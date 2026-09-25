@@ -91,7 +91,11 @@ struct ContenuPrincipal: View {
         .confirmationDialog("Libérer le port ?", isPresented: $confirmerLiberation) {
             Button("Libérer le port") { pont.libererPort() }
         } message: {
-            Text("L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. Rien ne se rouvre avant « Reconnecter ».")
+            if pont.source?.estReseau == true {
+                Text("L'app envoie json 0 et ferme la session réseau. Rien ne se rouvre avant « Reconnecter ».")
+            } else {
+                Text("L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. Rien ne se rouvre avant « Reconnecter ».")
+            }
         }
     }
 
@@ -241,7 +245,9 @@ struct PanneauConnexion: View {
         case .ouvert: tr("Ouvert · \(pont.phase.libelle)")
         case .attente(let prochain, let raison):
             tr("\(raison)\nRéouverture \(prochain.formatted(.relative(presentation: .numeric).locale(Localisation.partagee.locale)))")
-        case .libere: tr("Port libéré (json 0) : flasher est possible")
+        case .libere:
+            pont.source?.estReseau == true ? tr("Session réseau fermée (json 0)")
+                                           : tr("Port libéré (json 0) : flasher est possible")
         case .erreur(let e): tr("Erreur : \(e)")
         }
     }

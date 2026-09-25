@@ -60,6 +60,21 @@ struct PontReseauTests {
         pont.deconnecter()
     }
 
+    /// "Liberer le port" sur une source reseau : rien a flasher, la note le dit
+    /// en termes de session, et aucun bandeau reseau ne promet plus de relance.
+    /// Cle absente : aucun transport n'est cree, rien ne part sur le reseau.
+    @Test func libererUneSourceReseauParleDeSession() {
+        let pont = Pont(trousseau: TrousseauMemoire())
+        pont.connecter(.reseau(nom: Self.nom))
+        pont.libererPort()
+        #expect(pont.etatTransport == .libere)
+        #expect(pont.alerteReseau == nil)
+        let derniere = pont.console.elements.last?.texte ?? ""
+        #expect(derniere == "Session réseau fermée. « Reconnecter » pour reprendre.")
+        #expect(!pont.console.elements.contains { $0.texte.contains("Flasher") })
+        pont.deconnecter()
+    }
+
     @Test func choixDeLaSource() {
         let connu = PontConnu(nom: Self.nom, empreinte: "630DCD29")
         let c6 = PortUSB(chemin: "/dev/cu.usbmodem1", vid: 0x303A, pid: 0x1001, serie: nil, produit: nil)
