@@ -1123,22 +1123,6 @@
         }
       }
     },
-    "Connecter par le réseau" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connect over the network"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connecter par le réseau"
-          }
-        }
-      }
-    },
     "Connexions · redémarrages" : {
       "localizations" : {
         "en" : {
@@ -2367,18 +2351,18 @@
         }
       }
     },
-    "Oublier ce pont…" : {
+    "Oublier un pont…" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Forget this bridge…"
+            "value" : "Forget a bridge…"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Oublier ce pont…"
+            "value" : "Oublier un pont…"
           }
         }
       }

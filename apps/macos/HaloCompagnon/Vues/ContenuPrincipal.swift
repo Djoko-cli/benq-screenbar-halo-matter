@@ -169,11 +169,17 @@ struct PanneauConnexion: View {
                         Text("Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)")
                     }
                     ForEach(pont.pontsConnus) { p in
-                        Menu {
-                            Button("Connecter par le réseau") { pont.connecter(.reseau(nom: p.nom)) }
-                            Button("Oublier ce pont…", role: .destructive) { aOublier = p }
+                        Button {
+                            pont.connecter(.reseau(nom: p.nom))
                         } label: {
                             Label("\(p.hote) · clé \(p.empreinte)", systemImage: "point.3.connected.trianglepath.dotted")
+                        }
+                    }
+                    if !pont.pontsConnus.isEmpty {
+                        Menu("Oublier un pont…") {
+                            ForEach(pont.pontsConnus) { p in
+                                Button(p.hote, role: .destructive) { aOublier = p }
+                            }
                         }
                     }
                 }
