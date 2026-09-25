@@ -109,8 +109,12 @@ enum Catalogues {
 struct CataloguesTests {
     @Test func catalogues() {
         #expect(Catalogues.tous.map(\.description)
-                == ["HaloProtocole/Localizable", "HaloCompagnon/Localizable", "HaloCompagnon/Titres"])
+                == ["HaloProtocole/Localizable", "HaloCompagnon/InfoPlist", "HaloCompagnon/Localizable",
+                    "HaloCompagnon/Titres"])
     }
+
+    /// Catalogues des textes du code (l'Info.plist a le sien, sans cle extraite du code).
+    static let duCode = Catalogues.tous.filter { $0.table != "InfoPlist" }
 
     @Test(arguments: Catalogues.tous)
     func chaqueCleATraductionAnglaise(_ c: Catalogues.Catalogue) throws {
@@ -148,7 +152,7 @@ struct CataloguesTests {
     /// ne manque, aucune cle du catalogue n'est morte (rejouer
     /// `xcstringstool sync` apres un changement de texte, voir le README).
     @Test(.enabled(if: Catalogues.stringsdataDisponibles, "produits de compilation introuvables"),
-          arguments: Catalogues.tous)
+          arguments: Self.duCode)
     func codeEtCatalogueAlignes(_ c: Catalogues.Catalogue) throws {
         let extraites = try Catalogues.clesExtraites(cible: c.cible)[c.table] ?? []
         let catalogue = Set(try Catalogues.entrees(c.chemin).cles.keys)
@@ -162,7 +166,7 @@ struct CataloguesTests {
           arguments: ["HaloProtocole", "HaloCompagnon"])
     func chaqueTableASonCatalogue(_ cible: String) throws {
         let tables = Set(try Catalogues.clesExtraites(cible: cible).keys)
-        let catalogues = Set(Catalogues.tous.filter { $0.cible == cible }.map(\.table))
+        let catalogues = Set(Self.duCode.filter { $0.cible == cible }.map(\.table))
         #expect(tables == catalogues)
     }
 }

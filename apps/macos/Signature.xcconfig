@@ -1,0 +1,11 @@
+// Signature de l'app et des tests.
+// Par defaut : ad hoc (le depot compile partout, sans compte Apple). Pour que
+// l'autorisation "reseau local" et le trousseau tiennent d'une compilation a
+// l'autre, signer avec son equipe : creer Local.xcconfig (ignore par git) avec
+//   DEVELOPMENT_TEAM = <equipe, 10 caracteres>
+//   CODE_SIGN_IDENTITY = Apple Development
+// L'equipe : security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject (champ OU).
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"

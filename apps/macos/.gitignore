@@ -12,3 +12,6 @@ xcuserdata/
 .swiftpm/
 .DS_Store
 __pycache__/
+
+# Signature propre au poste (equipe Apple Development) : voir Signature.xcconfig
+Local.xcconfig
