@@ -24,6 +24,24 @@ attributes:
     "svce"<blob>="com.exemple"
 '''
 
+# Formats including hex with quoted text and bare hex
+DUMP_HEX = '''keychain: "/Users/x/Library/Keychains/login.keychain-db"
+class: "genp"
+attributes:
+    "acct"<blob>=0x561F9A6463953778  "561F9A6463953778"
+    "svce"<blob>="fr.djoko.halo.pont"
+keychain: "/Users/x/Library/Keychains/login.keychain-db"
+class: "genp"
+attributes:
+    "acct"<blob>=0xAABBCCDD
+    "svce"<blob>="fr.djoko.halo.pont"
+keychain: "/Users/x/Library/Keychains/login.keychain-db"
+class: "genp"
+attributes:
+    "acct"<blob>="autre"
+    "svce"<blob>="com.exemple"
+'''
+
 
 def resultat(sortie, code=0):
     return subprocess.CompletedProcess([], code, stdout=sortie, stderr="")
@@ -37,6 +55,11 @@ class Cle(unittest.TestCase):
     def test_comptes_du_trousseau(self):
         with mock.patch.object(halo_udp.subprocess, "run", return_value=resultat(DUMP)):
             self.assertEqual(halo_udp.comptes_du_trousseau(), ["561F9A6463953778"])
+
+    def test_comptes_du_trousseau_hex(self):
+        with mock.patch.object(halo_udp.subprocess, "run", return_value=resultat(DUMP_HEX)):
+            # 0xAABBCCDD is not valid UTF-8, so it gets replaced with U+FFFD
+            self.assertEqual(halo_udp.comptes_du_trousseau(), ["561F9A6463953778", "����"])
 
     def test_cle_du_trousseau(self):
         with mock.patch.object(halo_udp.subprocess, "run", return_value=resultat(CLE.hex().upper() + "\n")) as run:
