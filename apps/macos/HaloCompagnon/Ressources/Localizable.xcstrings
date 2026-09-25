@@ -143,6 +143,22 @@
         }
       }
     },
+    "%@ · clé %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · key %2$@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · clé %2$@"
+          }
+        }
+      }
+    },
     "%@ · essai %lld · %lld/%lld accusés" : {
       "localizations" : {
         "en" : {
@@ -409,12 +425,44 @@
         }
       }
     },
+    "Accès réseau : aucune clé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network access: no key"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accès réseau : aucune clé"
+          }
+        }
+      }
+    },
     "Actifs" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Active"
+          }
+        }
+      }
+    },
+    "Activer l'accès réseau…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable network access…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activer l'accès réseau…"
           }
         }
       }
@@ -555,6 +603,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Waiting for USB re-enumeration (the board is rebooting)."
+          }
+        }
+      }
+    },
+    "Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No bridge: \"Enable network access\" over USB (Thread and Matter card)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)"
           }
         }
       }
@@ -885,6 +949,38 @@
         }
       }
     },
+    "Clé %@ connue de ce Mac" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key %@ known to this Mac"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé %@ connue de ce Mac"
+          }
+        }
+      }
+    },
+    "Clé %@ inconnue de ce Mac" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key %@ unknown to this Mac"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé %@ inconnue de ce Mac"
+          }
+        }
+      }
+    },
     "Clé absente de ce Mac pour %@.local : brancher le pont en USB, puis « Activer l'accès réseau »." : {
       "localizations" : {
         "en" : {
@@ -1027,6 +1123,22 @@
         }
       }
     },
+    "Connecter par le réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect over the network"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecter par le réseau"
+          }
+        }
+      }
+    },
     "Connexions · redémarrages" : {
       "localizations" : {
         "en" : {
@@ -1149,6 +1261,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Création de clé interrompue : si la carte a changé de clé, la carte Thread affichera « clé inconnue de ce Mac » ; recommencer."
+          }
+        }
+      }
+    },
+    "Créer la clé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create the key"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Créer la clé"
+          }
+        }
+      }
+    },
+    "Créer une nouvelle clé réseau ?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create a new network key?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Créer une nouvelle clé réseau ?"
           }
         }
       }
@@ -1609,6 +1753,22 @@
         }
       }
     },
+    "Interdite à distance (liste blanche, section 10.5)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not allowed remotely (allow list, section 10.5)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interdite à distance (liste blanche, section 10.5)."
+          }
+        }
+      }
+    },
     "Issue" : {
       "localizations" : {
         "en" : {
@@ -1707,6 +1867,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The board reboots (demo): USB re-enumeration"
+          }
+        }
+      }
+    },
+    "La carte remplace sa clé : les sessions réseau en cours tombent. La nouvelle clé est rangée dans le trousseau de ce Mac ; halo_udp.py l'y relira." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The board replaces its key: open network sessions are dropped. The new key is stored in this Mac's keychain; halo_udp.py will read it there."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La carte remplace sa clé : les sessions réseau en cours tombent. La nouvelle clé est rangée dans le trousseau de ce Mac ; halo_udp.py l'y relira."
+          }
+        }
+      }
+    },
+    "La clé de %@ est retirée du trousseau de ce Mac ; le pont garde la sienne. Pour revenir : « Activer l'accès réseau » par l'USB crée une nouvelle clé." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key of %@ is removed from this Mac's keychain; the bridge keeps its own. To come back: \"Enable network access\" over USB creates a new key."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La clé de %@ est retirée du trousseau de ce Mac ; le pont garde la sienne. Pour revenir : « Activer l'accès réseau » par l'USB crée une nouvelle clé."
           }
         }
       }
@@ -2117,12 +2309,76 @@
         }
       }
     },
+    "Nouvelle clé…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New key…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nouvelle clé…"
+          }
+        }
+      }
+    },
     "Nouvelle source : %@. États, journal des trames et courbes remis à zéro." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "New source: %@. States, frame log and charts reset."
+          }
+        }
+      }
+    },
+    "Oublier %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oublier %@"
+          }
+        }
+      }
+    },
+    "Oublier ce pont ?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget this bridge?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oublier ce pont ?"
+          }
+        }
+      }
+    },
+    "Oublier ce pont…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget this bridge…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oublier ce pont…"
           }
         }
       }
@@ -2735,6 +2991,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Responses"
+          }
+        }
+      }
+    },
+    "Réseau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réseau"
           }
         }
       }

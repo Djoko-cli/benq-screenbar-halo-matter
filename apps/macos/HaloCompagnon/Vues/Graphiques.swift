@@ -117,7 +117,8 @@ struct Graphiques: View {
                 .foregroundStyle(.secondary)
             Menu("Remise à zéro") {
                 Button("Statistiques de la carte (lampe stats raz)…") { confirmerRaz = true }
-                    .disabled(!pont.peutCommander)
+                    .disabled(!pont.peutEnvoyer("lampe stats raz"))
+                    .help(pont.aDistance ? tr("Interdite à distance (liste blanche, section 10.5).") : "")
                 Button("Courbes de l'app seulement") { pont.viderCourbes() }
             }
             .fixedSize()
