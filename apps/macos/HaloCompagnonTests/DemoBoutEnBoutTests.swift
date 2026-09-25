@@ -196,7 +196,7 @@ struct DemoBoutEnBoutTests {
 @MainActor
 struct PontDemoTests {
     @Test func connexionEtatEtCommande() async throws {
-        let pont = Pont()
+        let pont = Pont(trousseau: TrousseauMemoire())
         pont.connecter(.demo)
         let pret = await attendre {
             pont.phase == .connecte && pont.etat.lampe != nil && pont.etat.identite != nil && !pont.pilote.elements.isEmpty
@@ -227,7 +227,7 @@ struct PontDemoTests {
     @Test func redemarrageEtReconnexion() async throws {
         // Demo acceleree : a la fin de la chronologie la carte "redemarre" (flux ferme,
         // comme une re-enumeration USB) ; l'app rouvre apres 300 ms et voit un nouveau boot.
-        let pont = Pont()
+        let pont = Pont(trousseau: TrousseauMemoire())
         pont.vitesseDemo = 25
         pont.connecter(.demo)
         let reconnectee = await attendre(.seconds(60)) {
@@ -246,7 +246,7 @@ struct PontDemoTests {
     }
 
     @Test func changerDeSourceRemetTout() async throws {
-        let pont = Pont()
+        let pont = Pont(trousseau: TrousseauMemoire())
         pont.connecter(.demo)
         try #require(await attendre { pont.phase == .connecte && !pont.pilote.elements.isEmpty && !pont.trames.elements.isEmpty })
         #expect(pont.reglages?.trames == true)

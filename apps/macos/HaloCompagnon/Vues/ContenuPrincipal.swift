@@ -201,6 +201,7 @@ struct PanneauConnexion: View {
         switch pont.source {
         case .demo: tr("Démo")
         case .serie(let chemin, _): chemin.replacingOccurrences(of: "/dev/cu.", with: "")
+        case .reseau(let nom): nom
         case nil: tr("Choisir une source…")
         }
     }
