@@ -80,4 +80,27 @@ struct PontReseauTests {
         #expect(AlerteReseau.textePasDeRoute(assistant: false).contains("installer.sh"))
         #expect(!AlerteReseau.textePasDeRoute(assistant: true).contains("installer.sh"))
     }
+
+    @Test func creerLaCleParLUSB() async throws {
+        let t = TrousseauMemoire()
+        let pont = Pont(trousseau: t)
+        pont.connecter(.demo)
+        try #require(await attendre { pont.phase == .connecte && pont.accesReseau != .inconnu })
+        #expect(pont.accesReseau == .sansCle(nom: Self.nom))
+        pont.creerCle()
+        try #require(await attendre { !t.lister().isEmpty })
+        let connu = try #require(t.lister().first)
+        #expect(connu.nom == Self.nom)
+        let cle = try t.lire(nom: connu.nom)
+        #expect(H1.kid(cle: cle) == connu.empreinte)
+        #expect(pont.pontsConnus == [connu])
+        // Le secret ne traine nulle part (10.4).
+        let hexa = H1.hexa(cle)
+        #expect(!pont.console.elements.contains { $0.texte.contains(hexa) })
+        #expect(!pont.trames.elements.contains { $0.json.contains(hexa) })
+        #expect(!pont.suivis.contains { $0.fin?.cle != nil })
+        _ = await attendre { pont.accesReseau == .cleConnue(nom: connu.nom, empreinte: connu.empreinte) }
+        #expect(pont.accesReseau == .cleConnue(nom: connu.nom, empreinte: connu.empreinte))
+        pont.deconnecter()
+    }
 }

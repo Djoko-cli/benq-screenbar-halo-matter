@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HaloProtocole
 
@@ -90,6 +91,10 @@ actor SimulateurDemo {
     private var groupeRafale = 0
     private var programme: [Programme] = []
 
+    // Transport reseau simule (10.4) : nom SRP du pont de demo et sa cle.
+    private static let srpDemo = "56B1E064401F74EF"
+    private var cleDemo: Data?
+
     init(script: ScriptDemo, sortie: AsyncStream<EvenementTransport>.Continuation, boot: String, vitesse: Double = 1) {
         self.script = script
         self.vitesse = max(0.1, vitesse)
@@ -179,6 +184,7 @@ actor SimulateurDemo {
         if reseauMs > 0, ms >= prochainReseau {
             prochainReseau = ms + reseauMs
             for b in ["reseau.thread", "reseau.abonnements"] { emettreBloc(b) }
+            emettre(ligneIp())
         }
         if periodeMs == 0 || periodeMs > 2000, ms >= prochainHb {
             prochainHb = ms + 2000
@@ -349,6 +355,20 @@ actor SimulateurDemo {
         decalageVersion == 0 ? l : LigneJSON.remplacerEntier(l, "version") { $0 + decalageVersion }
     }
 
+    /// Bloc `reseau` `ip` d'apres la cle simulee.
+    private func ligneIp() -> String {
+        let empreinte: JSONValeur = cleDemo.map { .texte(H1.kid(cle: $0)) } ?? .nul
+        return LigneJSON.machine("reseau", [
+            ("bloc", "ip"), ("frais_ms", 0),
+            ("srp", .objet([("nom", .texte(Self.srpDemo))])),
+            ("adresses", .tableau([.objet([("adr", "fd4f:9c:ed42:0:92ce:ed98:d7ba:119f"), ("type", "omr"), ("pref", true)])])),
+            ("udp", .objet([("port", 5480), ("ouvert", .booleen(cleDemo != nil)), ("empreinte", empreinte),
+                            ("sessions", 0), ("provisoire", false), ("rx", 0), ("rejets", 0), ("rx_perdus", 0),
+                            ("defis", 0), ("tx", 0), ("tx_perdus", 0), ("tx_erreurs", 0),
+                            ("tampons_libres", 65), ("tampons_min", 42)])),
+        ])
+    }
+
     private func instantane(hello: Bool, etat: Bool) {
         if hello {
             for b in ["hello.base", "hello.identite", "config"] { emettreBloc(b) }
@@ -356,6 +376,7 @@ actor SimulateurDemo {
         if etat {
             for b in ["etat.lampe", "etat.tranches", "etat.sante", "compteurs.pilote", "compteurs.radio",
                       "compteurs.matter", "reseau.thread", "reseau.abonnements"] { emettreBloc(b) }
+            emettre(ligneIp())
         }
     }
 
@@ -484,7 +505,23 @@ actor SimulateurDemo {
                   + "compteurs \(compteursMs) ms, reseau \(reseauMs) ms, bail \(bailS) s")
             reponse(id, cmd, code: "ok")
         case "cle":
-            reponse(id, cmd, ok: false, code: "refuse", msg: "(demo) pas de transport reseau ni de cle")
+            // Transport reseau simule : la cle ne sert qu'a l'essai de l'app (10.4).
+            if m.count == 2 {
+                reponse(id, cmd, code: "ok", suite: [("empreinte", cleDemo.map { .texte(H1.kid(cle: $0)) } ?? .nul)])
+            } else if m.count == 3, m[2] == "efface" {
+                cleDemo = nil
+                reponse(id, cmd, code: "ok")
+                emettre(ligneIp())
+            } else if m.count == 4, m[2] == "nouvelle", id != nil,
+                      let alea = H1.octets(hexa: m[3].uppercased()), alea.count == 32 {
+                let cle = Data(HMAC<SHA256>.authenticationCode(for: H1.aleatoire(32), using: SymmetricKey(data: alea)))
+                cleDemo = cle
+                reponse(id, "json cle nouvelle", code: "ok",
+                        suite: [("cle", .texte(H1.hexa(cle))), ("empreinte", .texte(H1.kid(cle: cle)))])
+                emettre(ligneIp())
+            } else {
+                usage("json cle [nouvelle <64 hexa>|efface]")
+            }
         default:
             usage("json [1|0|etat|hello|ping|periode|compteurs|reseau|trames|log|cle]")
         }

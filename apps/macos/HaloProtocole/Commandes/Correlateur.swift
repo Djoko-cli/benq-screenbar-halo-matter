@@ -302,6 +302,12 @@ public struct Correlateur: Sendable {
         return [suivis[i]]
     }
 
+    /// Retire la cle d'une `reponse` a `json cle nouvelle` une fois rangee (10.4).
+    public mutating func effacerCle(_ id: UUID) {
+        guard let i = index(id) else { return }
+        suivis[i].fin?.cle = nil
+    }
+
     /// A distance (10.2) : la commande en vol sans aucune `reponse` repart,
     /// memes octets (meme `id`), a `delaiRenvoi` puis a 2 x `delaiRenvoi`.
     public mutating func renvoisDus(maintenant: TimeInterval) -> [Data] {

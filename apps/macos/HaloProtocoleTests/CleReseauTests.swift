@@ -50,4 +50,23 @@ struct CleReseauTests {
         #expect(EtatAccesReseau.depuis(ip: ip("56B1E064401F74EF", ouvert: true, empreinte: "B64D84FB"), empreinteDuMac: mac)
                 == .cleInconnue(nom: "56B1E064401F74EF", empreinte: "B64D84FB"))
     }
+
+    @Test func laCleNeResteNiDansLesSuivis() {
+        var c = Correlateur()
+        let a = c.soumettre(CleReseau.commande(alea: Data(repeating: 1, count: 32)), origine: .interface, maintenant: 0)
+        _ = c.prochainEnvoi(maintenant: 0)
+        _ = c.recevoir(Self.reponseCle(cle: H1.hexa(VecteursH1.psk), empreinte: "630DCD29").avecId(1), maintenant: 0.1)
+        #expect(c.suivi(a)?.fin?.cle != nil)
+        c.effacerCle(a)
+        #expect(c.suivi(a)?.fin?.cle == nil)
+        #expect(c.suivi(a)?.fin?.empreinte == "630DCD29", "l'empreinte reste")
+    }
+}
+
+extension Reponse {
+    func avecId(_ n: Int) -> Reponse {
+        var r = self
+        r.id = n
+        return r
+    }
 }
