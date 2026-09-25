@@ -59,16 +59,37 @@ public struct SuiviCommande: Sendable, Identifiable, Equatable {
     public internal(set) var envoyeeA: TimeInterval?
     public internal(set) var debutA: TimeInterval?
     public internal(set) var termineeA: TimeInterval?
+    /// Renvois du meme `id` (reseau, 10.2).
+    public internal(set) var renvois = 0
+}
+
+/// Delais de la correlation selon le transport (6.5, 10.2). L'USB ne perd
+/// rien : pas de renvoi, "sans reponse" a 3 s. Le reseau perd : une commande
+/// sans aucune reponse repart avec le meme `id` a 2 s puis 4 s (la carte
+/// repond depuis son cache sans reexecuter), "sans reponse" a 6 s.
+public struct PolitiqueDelais: Sendable, Equatable {
+    public var delaiRenvoi: TimeInterval
+    public var renvois: Int
+    public var delaiReponse: TimeInterval
+
+    public static let usb = PolitiqueDelais(delaiRenvoi: 0, renvois: 0, delaiReponse: 3)
+    public static let reseau = PolitiqueDelais(delaiRenvoi: 2, renvois: 2, delaiReponse: 6)
+
+    public static func pour(_ genre: GenreTransport) -> PolitiqueDelais {
+        genre == .udp ? .reseau : .usb
+    }
 }
 
 /// Correlation des commandes par `id`, une seule en vol a la fois (6.5).
 ///
 /// Code pur : le temps est passe en argument (secondes monotones).
 public struct Correlateur: Sendable {
-    public static let delaiReponse: TimeInterval = 3
     public static let historiqueMax = 300
     /// Au plus 20 lignes par seconde vers la carte (6.5, refus `cadence`).
     public static let intervalleMin: TimeInterval = 0.05
+
+    /// Delais en vigueur : USB par defaut ; le moteur de session regle le reseau.
+    public var politique = PolitiqueDelais.usb
 
     public private(set) var suivis: [SuiviCommande] = []
     private var file: [UUID] = []
@@ -271,14 +292,27 @@ public struct Correlateur: Sendable {
         return touches
     }
 
-    /// Commandes sans `reponse` sous 3 s (et sans `debut`) : marquees, pas reemises.
+    /// Commandes sans `reponse` sous le delai de la politique (et sans `debut`) : marquees, pas reemises ici.
     public mutating func verifierDelais(maintenant: TimeInterval) -> [SuiviCommande] {
         guard let id = enVol, let i = index(id), suivis[i].etat == .envoyee,
-              let t = suivis[i].envoyeeA, maintenant - t >= Self.delaiReponse else { return [] }
+              let t = suivis[i].envoyeeA, maintenant - t >= politique.delaiReponse else { return [] }
         suivis[i].etat = .sansReponse
         suivis[i].termineeA = maintenant
         enVol = nil
         return [suivis[i]]
+    }
+
+    /// A distance (10.2) : la commande en vol sans aucune `reponse` repart,
+    /// memes octets (meme `id`), a `delaiRenvoi` puis a 2 x `delaiRenvoi`.
+    public mutating func renvoisDus(maintenant: TimeInterval) -> [Data] {
+        guard politique.renvois > 0, let id = enVol, let i = index(id), suivis[i].etat == .envoyee,
+              suivis[i].renvois < politique.renvois, let t = suivis[i].envoyeeA, let n = suivis[i].numero,
+              maintenant - t >= politique.delaiRenvoi * Double(suivis[i].renvois + 1),
+              case .success(let octets) = LigneCommande.octets(suivis[i].commande, id: n)
+        else { return [] }
+        suivis[i].renvois += 1
+        dernierEnvoiA = maintenant
+        return [octets]
     }
 
     private func index(_ id: UUID) -> Int? {
