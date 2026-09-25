@@ -206,6 +206,11 @@ final class Pont {
             // de l'ancienne source ne reste (ni etat, ni boot, ni courbes).
             fermerProprement()
             oublierSource()
+        } else if s.estReseau {
+            // Meme pont reseau choisi de nouveau : json 0 scelle d'abord (4.5),
+            // sinon l'ancienne session H1 garderait l'une des deux places de la
+            // carte jusqu'a son oubli (10.4).
+            fermerProprement()
         } else {
             fermerTransport()
         }
@@ -229,14 +234,24 @@ final class Pont {
     }
 
     /// "Liberer le port" (3.1, etape 7) : `json 0`, fermeture, pas de reouverture avant un clic.
+    /// Source reseau : la session H1 se ferme de meme (`json 0` scelle, 4.5), rien a flasher.
     func libererPort() {
         reconnexionAuto = false
         let modeMachine = rendModeHumain
+        let reseau = source?.estReseau == true
         fermerProprement()
         etatTransport = .libere
-        note(modeMachine
-             ? tr("Port libéré : json 0 envoyé, port fermé. Flasher est possible ; « Reconnecter » pour reprendre.")
-             : tr("Port libéré : port fermé. Flasher est possible ; « Reconnecter » pour reprendre."))
+        // Plus aucune relance : un bandeau reseau qui en promettait une ne vaut plus.
+        alerteReseau = nil
+        if reseau {
+            note(modeMachine
+                 ? tr("Session réseau fermée : json 0 envoyé. « Reconnecter » pour reprendre.")
+                 : tr("Session réseau fermée. « Reconnecter » pour reprendre."))
+        } else {
+            note(modeMachine
+                 ? tr("Port libéré : json 0 envoyé, port fermé. Flasher est possible ; « Reconnecter » pour reprendre.")
+                 : tr("Port libéré : port fermé. Flasher est possible ; « Reconnecter » pour reprendre."))
+        }
     }
 
     /// Vrai si fermer doit d'abord rendre le mode humain a la carte (`json 0`) :

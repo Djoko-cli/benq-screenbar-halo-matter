@@ -1793,6 +1793,22 @@
         }
       }
     },
+    "L'app envoie json 0 et ferme la session réseau. Rien ne se rouvre avant « Reconnecter »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app sends json 0 and closes the network session. Nothing reopens until you click “Reconnect”."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'app envoie json 0 et ferme la session réseau. Rien ne se rouvre avant « Reconnecter »."
+          }
+        }
+      }
+    },
     "L'app envoie json 0 et ferme le port (DTR et RTS restent à 0) : pio run -t upload pourra flasher. Rien ne se rouvre avant « Reconnecter »." : {
       "localizations" : {
         "en" : {
@@ -3081,6 +3097,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Session (ping, json 1)"
+          }
+        }
+      }
+    },
+    "Session réseau fermée (json 0)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network session closed (json 0)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session réseau fermée (json 0)"
+          }
+        }
+      }
+    },
+    "Session réseau fermée : json 0 envoyé. « Reconnecter » pour reprendre." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network session closed: json 0 sent. Click “Reconnect” to resume."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session réseau fermée : json 0 envoyé. « Reconnecter » pour reprendre."
+          }
+        }
+      }
+    },
+    "Session réseau fermée. « Reconnecter » pour reprendre." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network session closed. Click “Reconnect” to resume."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session réseau fermée. « Reconnecter » pour reprendre."
           }
         }
       }
