@@ -1,0 +1,24 @@
+{
+  "sourceLanguage" : "fr",
+  "strings" : {
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Autorisation reseau local (source Reseau, section 10).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Halo Compagnon reaches the Halo bridge on the local network (Thread, through the border routers)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Halo Compagnon joint le pont Halo sur le réseau local (Thread, par les routeurs de bordure)."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
