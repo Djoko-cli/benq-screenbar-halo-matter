@@ -1185,6 +1185,22 @@
         }
       }
     },
+    "Empreinte incohérente avec la clé reçue : clé non rangée." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fingerprint does not match the received key: key not stored."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte incohérente avec la clé reçue : clé non rangée."
+          }
+        }
+      }
+    },
     "FIFO refusée" : {
       "localizations" : {
         "en" : {
@@ -1333,6 +1349,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The board left machine mode (lease expired): json 1 sent again."
+          }
+        }
+      }
+    },
+    "La carte refuse la nouvelle clé : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The board refuses the new key: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La carte refuse la nouvelle clé : %@"
           }
         }
       }
@@ -1627,6 +1659,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Response to json 1 lost: commands resume."
+          }
+        }
+      }
+    },
+    "Réponse sans clé lisible (64 hexa majuscules attendus) : clé non rangée." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply without a readable key (64 uppercase hex digits expected): key not stored."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réponse sans clé lisible (64 hexa majuscules attendus) : clé non rangée."
           }
         }
       }
