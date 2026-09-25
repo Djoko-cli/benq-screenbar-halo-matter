@@ -9,12 +9,13 @@ public enum EvenementTransport: Sendable, Equatable {
 }
 
 /// Transport d'octets : port serie USB (v1), rejeu de demonstration, UDP sur
-/// Thread plus tard (section 10). La couche protocole (tramage, session,
-/// correlation) ne connait que ce protocole.
+/// Thread (`TransportUDP`, section 10). La couche protocole (tramage,
+/// session, correlation) ne connait que ce protocole.
 ///
-/// Pour UDP, un datagramme = un message sans RS ni LF : l'adaptateur
-/// ajoutera RS et LF a chaque datagramme recu (et les retirera a l'envoi),
-/// pour que `RecepteurLignes` serve tel quel.
+/// Pour UDP, un datagramme = un message sans RS ni LF : `TransportUDP`
+/// ajoute RS et LF a chaque datagramme recu et scelle chaque ligne envoyee
+/// dans son propre datagramme (enveloppe H1, 10.4), pour que
+/// `RecepteurLignes` serve tel quel.
 public protocol Transport: AnyObject, Sendable {
     var genre: GenreTransport { get }
     /// Nom lisible (chemin du port, "Démo"...).

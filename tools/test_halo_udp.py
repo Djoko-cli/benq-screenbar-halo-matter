@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Tests de tools/halo_udp.py sans reseau ni trousseau reel : python3 tools/test_halo_udp.py"""
+import contextlib
+import io
 import os
 import subprocess
 import sys
@@ -90,11 +92,41 @@ class Cle(unittest.TestCase):
                     mock.patch.object(halo_udp, "KEY_PATH", fichier), \
                     mock.patch.object(halo_udp, "cle_du_trousseau", return_value=CLE):
                 self.assertEqual(halo_udp.load_key("561F9A6463953778.local"), CLE)
-            # Rien dans le trousseau : le fichier.
+            # Rien dans le trousseau : le fichier (avertissement, voir test_repli_previent).
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.object(halo_udp, "KEY_PATH", fichier), \
-                    mock.patch.object(halo_udp, "cle_du_trousseau", return_value=None):
+                    mock.patch.object(halo_udp, "cle_du_trousseau", return_value=None), \
+                    contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(halo_udp.load_key("561F9A6463953778.local"), bytes(range(1, 33)))
+
+    def test_repli_previent(self):
+        cle = bytes(range(1, 33))
+        env = {k: v for k, v in os.environ.items() if k != "HALO_CLE"}
+        with tempfile.TemporaryDirectory() as d:
+            fichier = os.path.join(d, "cle")
+            with open(fichier, "w") as f:
+                f.write(cle.hex().upper() + "\n")
+            # Trousseau sans cle (ou refus) : repli sur le fichier, avertissement sur stderr, jamais la cle.
+            erreur, sortie = io.StringIO(), io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(halo_udp, "KEY_PATH", fichier), \
+                    mock.patch.object(halo_udp, "cle_du_trousseau", return_value=None), \
+                    contextlib.redirect_stderr(erreur), contextlib.redirect_stdout(sortie):
+                self.assertEqual(halo_udp.load_key("561F9A6463953778.local"), cle)
+            self.assertIn(fichier, erreur.getvalue())
+            self.assertIn("perimee", erreur.getvalue())
+            self.assertEqual(sortie.getvalue(), "")
+            for texte in (erreur.getvalue(), sortie.getvalue()):
+                self.assertNotIn(cle.hex().upper(), texte)
+                self.assertNotIn(cle.hex(), texte)
+            # Cle du trousseau : aucun avertissement.
+            erreur = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(halo_udp, "KEY_PATH", fichier), \
+                    mock.patch.object(halo_udp, "cle_du_trousseau", return_value=CLE), \
+                    contextlib.redirect_stderr(erreur):
+                self.assertEqual(halo_udp.load_key("561F9A6463953778.local"), CLE)
+            self.assertEqual(erreur.getvalue(), "")
 
     def test_cle_exige_halo_cle(self):
         env = {k: v for k, v in os.environ.items() if k != "HALO_CLE"}

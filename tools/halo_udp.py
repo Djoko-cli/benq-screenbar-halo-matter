@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Client de banc du transport reseau du pont Halo (docs/PROTOCOLE-JSON.md, 10).
 
-En attendant la source "Reseau" de l'app : regler la cle par USB, puis ouvrir
-une session H1 (UDP sur Thread, a travers les routeurs de bordure) et suivre
-les lignes JSON du pont, ou lui envoyer des commandes de la liste blanche.
+Outil de banc, a cote de la source "Reseau" de l'app : ouvrir une session H1
+(UDP sur Thread, a travers les routeurs de bordure) avec la cle que l'app a
+creee et rangee dans le trousseau, suivre les lignes JSON du pont, ou lui
+envoyer des commandes de la liste blanche.
 
   cle <port serie>
       Nouvelle cle partagee (banc sans l'app, HALO_CLE obligatoire) : 'json cle nouvelle <alea>' par l'USB
       (ouverture sure du C6 : DTR = RTS = 0 en un seul appel, jamais RTS=1 DTR=0 qui le
-      redemarre). La cle est rangee dans ~/.config/halo-pont/cle (0600), jamais
-      affichee ; seule son empreinte l'est. L'app compagnon doit avoir libere
-      le port ("Liberer le port"). Toutes les sessions reseau tombent.
+      redemarre). La cle est rangee dans le fichier HALO_CLE (0600), jamais
+      affichee ; seule son empreinte l'est. La cle de l'app (trousseau) devient
+      perimee. L'app compagnon doit avoir libere le port ("Liberer le port").
+      Toutes les sessions reseau tombent.
 
   session <hote|adresse> [commande ...] [--duree s] [--brut] [--port p]
       Poignee de main (SALUT signe, DEFI verifie), 'json 1', puis chaque commande
@@ -20,7 +22,8 @@ les lignes JSON du pont, ou lui envoyer des commandes de la liste blanche.
       redemarre, session evincee), nouvelle poignee de main.
       Affiche un resume de chaque ligne (--brut : le JSON tel quel).
       Hote : le nom SRP du pont (ex. 561F9A6463953778.local), ou son adresse OMR.
-      Cle : HALO_CLE, sinon le trousseau (cle creee par l'app), sinon ~/.config/halo-pont/cle.
+      Cle : HALO_CLE, sinon le trousseau (cle creee par l'app), sinon ~/.config/halo-pont/cle
+      (ancien emplacement, peut-etre perime : un avertissement le dit sur stderr).
 
   refus <adresse> [port] [essais]
       UDP vers un port : REFUS (ICMPv6 port injoignable), DELAI (rien), pour
@@ -247,6 +250,10 @@ def load_key(hote=None):
     if key:
         return key
     if os.path.exists(KEY_PATH):
+        # Trousseau sans cle, ou acces refuse : ce fichier d'avant l'app peut etre
+        # perime (la cle de l'app est dans le trousseau). Jamais la cle elle-meme.
+        print(f"attention : cle absente du trousseau (ou acces refuse), repli sur {KEY_PATH}, "
+              "peut-etre perimee (cle de l'app : trousseau)", file=sys.stderr)
         return lire_fichier_cle(KEY_PATH)
     raise SystemExit("pas de cle : la creer dans l'app (carte Thread et Matter, par l'USB : Activer l'acces "
                      "reseau), ou HALO_CLE=<fichier> pour un banc sans l'app")
