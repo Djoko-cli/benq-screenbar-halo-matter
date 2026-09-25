@@ -194,12 +194,24 @@ def comptes_du_trousseau():
                 comptes.add(compte)
             service, compte = None, None
             continue
-        m = re.match(r'"(svce|acct)"<blob>="(.*)"$', ligne)
+        # Match: "attr"<blob>="text" or "attr"<blob>=0x<HEX> or "attr"<blob>=0x<HEX>  "text"
+        m = re.match(r'"(svce|acct)"<blob>(?:=0x([0-9A-Fa-f]+)(?:\s+"([^"]*)")?|="([^"]*)")$', ligne)
         if m:
-            if m.group(1) == "svce":
-                service = m.group(2)
+            attr_type = m.group(1)
+            hex_part = m.group(2)
+            quoted_from_hex = m.group(3)
+            quoted_direct = m.group(4)
+
+            if attr_type == "svce":
+                if hex_part:
+                    service = quoted_from_hex if quoted_from_hex else bytes.fromhex(hex_part).decode("utf-8", errors="replace")
+                else:
+                    service = quoted_direct
             else:
-                compte = m.group(2)
+                if hex_part:
+                    compte = quoted_from_hex if quoted_from_hex else bytes.fromhex(hex_part).decode("utf-8", errors="replace")
+                else:
+                    compte = quoted_direct
     return sorted(comptes)
 
 
