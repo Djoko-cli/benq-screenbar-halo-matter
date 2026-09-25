@@ -853,6 +853,22 @@
         }
       }
     },
+    "Clé absente de ce Mac pour %@.local : brancher le pont en USB, puis « Activer l'accès réseau »." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key on this Mac for %@.local: plug the bridge in over USB, then \"Enable network access\"."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé absente de ce Mac pour %@.local : brancher le pont en USB, puis « Activer l'accès réseau »."
+          }
+        }
+      }
+    },
     "Code d'appairage" : {
       "localizations" : {
         "en" : {
@@ -2905,6 +2921,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Network transport"
+          }
+        }
+      }
+    },
+    "Trousseau : %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keychain: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trousseau : %@"
           }
         }
       }
