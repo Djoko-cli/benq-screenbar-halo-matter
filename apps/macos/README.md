@@ -538,7 +538,8 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   attendre les 30 s de silence de l'ancienne (le `halo_udp.py` restant garde
   sa place). Vu le 25/09 (firmware rev 3) : poignée de main refaite toutes
   les 36,5 s ; le `json 0` ne libérait pas la place (`hello` 43 s après,
-  quand la session partie était muette depuis 30 s) ; corrigé en rev 4 (R9).
+  quand la session partie était muette depuis 30 s) ; corrigé en rev 4 (R9 :
+  `hello` 1 s après le `json 0` d'un client, vu le 27/09).
   Un `halo_udp.py` lancé en fond par un script ignore Ctrl-C (SIGINT ignoré
   hors d'un terminal) : le lancer dans un terminal.
 - **Libérer le port** sur la source réseau : note « Session réseau fermée :
@@ -546,10 +547,10 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   se rouvre avant « Reconnecter ». Vu le 25/09 : conforme.
 - **Voyant (U11, rev 4)** : la lueur blanche du voyant de l'app et celle de la
   carte en même temps, par l'USB et par le réseau, y compris après un éclat
-  vert (commande `lampe`) et après `led test`.
+  vert (commande `lampe`) et après `led test`. Vu le 27/09 : en phase.
 - **Menu Source** : seulement les cartes Espressif, « HALO1 · MAC » et le
   chemin `/dev/cu.…` en sous-titre ; pont réseau sous le même nom ; Réglages
   › Accès réseau Thread : ponts connus, « Oublier… », clé du pont branché ;
-  « Gérer… » de la carte Thread ouvre cet onglet.
+  « Gérer… » de la carte Thread ouvre cet onglet. Vu le 27/09 : conforme.
 - **`cc` avec le BM5602 branché** (firmware) : refusé avec son explication,
-  la carte ne plante plus (signalé le 27/09).
+  la carte ne plante plus (signalé et vérifié le 27/09).

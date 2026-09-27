@@ -54,3 +54,29 @@ Rejouer la balise d'appairage (`59 01 00 B0`, canal 5, `5A 5A / F5 C3 / CF 49`,
 accuse demande) pendant la fenetre d'appairage de la lampe (debranchee, capteur
 couvert, rebranchee) : la lampe retrouverait l'adresse `63 FD F0 4F` sans la
 telecommande.
+
+## Source reseau de l'app : petits points reportes (25-27/09/2026)
+
+Releves par les relectures de la phase 2 et au banc ; rien de bloquant.
+
+Firmware :
+- `udp.terminees` dans le bloc `reseau` `ip` : sessions terminees par `json 0`
+  encore comptees dans `udp.sessions` (rev 4).
+- Autres pertes de ligne sans `n` consomme (le `fin` de `leaveMachine`, les
+  evenements quand une ligne est deja en cours de formatage) : jamais vues,
+  a aligner sur `replyEmit` (2.3).
+
+App macOS :
+- Relance sans `hello` toutes les ~37 s alors que le bandeau dit « 30 s »,
+  et ~7 lignes de console par tour.
+- Nouvelle cle : l'app recree l'element du trousseau, donc macOS redemande
+  l'acces pour `security` (`halo_udp.py`) ; `SecItemUpdate` garderait l'ACL.
+- Lecture du trousseau sur l'acteur principal : une invite du trousseau fige
+  l'interface le temps d'y repondre.
+- Datagrammes ecartes par l'enveloppe H1 (MAC faux, rejeu) non montres.
+- Pas de couture d'injection du transport dans `Pont` : les scenarios reseau
+  de bout en bout ne se testent qu'au banc.
+- Reste de cle d'une reponse abimee coupee sur plusieurs lignes de log
+  (classee en texte apres deux lignes).
+- `NSLocalNetworkUsageDescription` en double (project.yml et
+  InfoPlist.xcstrings) sans controle d'egalite.
