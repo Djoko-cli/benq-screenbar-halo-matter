@@ -9,7 +9,8 @@ The ESP32 is a native **Matter node**: no Homebridge, no MQTT broker. Since
 Matter is multi-admin, the same device can be shared between several
 ecosystems at once — see the certification caveats below.
 
-The documentation under `docs/` is in French.
+Every document comes in English and in French (the `.fr.md` files), with a
+language switch at the top.
 
 ## What is exposed
 
