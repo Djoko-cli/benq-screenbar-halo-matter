@@ -89,6 +89,8 @@ public struct BlocSante: Codable, Sendable, Equatable {
     public struct Led: Codable, Sendable, Equatable {
         public var motif: MotifLed?
         public var test: Bool?
+        /// Age de la phase du motif a l'emission (rev 4) : le voyant de l'app s'y cale.
+        public var depuisMs: Int?
     }
 
     public struct Matter: Codable, Sendable, Equatable {

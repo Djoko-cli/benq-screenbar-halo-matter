@@ -36,8 +36,17 @@ public struct EtatPont: Sendable, Equatable {
     public private(set) var derniereRelance: Instantane<Relance>?
     public private(set) var dernierModule: Instantane<EvenementModule>?
 
-    /// Ancre du temps : heure locale <-> `ms` de la carte, posee a la reception d'un `hello`.
+    /// Ancre du temps : heure locale <-> `ms` de la carte. Posee a la reception
+    /// d'un `hello`, puis affinee : la ligne arrivee le plus vite parmi les
+    /// `fenetreAncre` dernieres (ecart a la prediction du `hello` le plus petit)
+    /// la remplace. Le transit ne fait que retarder une ligne (un `hello` en
+    /// tete d'un instantane de 6 Ko, par le reseau, part parfois tard) : la plus
+    /// rapide dit le mieux l'ecart des horloges, et la fenetre suit leur derive.
     public private(set) var ancre: (date: Date, ms: UInt32)?
+    /// Ancre du dernier `hello` : reference des ecarts de la fenetre.
+    private var ancreHello: (date: Date, ms: UInt32)?
+    private var echantillons: [(recueA: Date, ms: UInt32)] = []
+    static let fenetreAncre = 64
 
     public init() {}
 
@@ -58,11 +67,35 @@ public struct EtatPont: Sendable, Equatable {
         return ancre.date.addingTimeInterval(Double(ecart) / 1000)
     }
 
+    /// Ancre affinee par la ligne (ms, recueA) : voir `ancre`.
+    private mutating func affinerAncre(ms: UInt32, recueA: Date) {
+        guard let h = ancreHello else { return }
+        echantillons.append((recueA, ms))
+        if echantillons.count > Self.fenetreAncre { echantillons.removeFirst(echantillons.count - Self.fenetreAncre) }
+        func ecart(_ x: (recueA: Date, ms: UInt32)) -> TimeInterval {
+            x.recueA.timeIntervalSince(h.date) - Double(Int32(bitPattern: x.ms &- h.ms)) / 1000
+        }
+        if let meilleur = echantillons.min(by: { ecart($0) < ecart($1) }) { ancre = (meilleur.recueA, meilleur.ms) }
+    }
+
+    /// Depart de la phase du motif du voyant : `ms - depuis_ms`, date par
+    /// l'ancre (rev 4). nil sans `depuis_ms` (firmware plus ancien).
+    private func departPhase(ms: UInt32?, depuisMs: Int?, date: Date) -> Date? {
+        guard let depuisMs else { return nil }
+        guard let ms, ancre != nil else { return date.addingTimeInterval(-Double(depuisMs) / 1000) }
+        return dater(ms: ms &- UInt32(clamping: depuisMs), recueA: date)
+    }
+
     /// Applique une ligne machine ; renvoie sa date.
     @discardableResult
     public mutating func appliquer(_ l: LigneMachine, recueA: Date) -> Date {
         let e = l.enveloppe
-        if case .helloBase = l.message, let ms = e.ms { ancre = (recueA, ms) }
+        if case .helloBase = l.message, let ms = e.ms {
+            ancre = (recueA, ms)
+            ancreHello = (recueA, ms)
+            echantillons = []
+        }
+        if let ms = e.ms { affinerAncre(ms: ms, recueA: recueA) }
         let date = dater(ms: e.ms, recueA: recueA)
         func inst<T>(_ v: T) -> Instantane<T> { Instantane(valeur: v, n: e.n, ms: e.ms, date: date) }
         switch l.message {
@@ -73,9 +106,16 @@ public struct EtatPont: Sendable, Equatable {
         case .etatTranches(let v): tranches = inst(v)
         case .etatSante(let v):
             sante = inst(v)
-            if let m = v.led?.motif, m != motifLed {
-                motifLed = m
-                motifLedDepuis = date
+            if let m = v.led?.motif {
+                // Avec depuis_ms, la phase suit la carte a chaque ligne ; sans,
+                // elle part de la premiere ligne ou le motif change.
+                if let d = departPhase(ms: e.ms, depuisMs: v.led?.depuisMs, date: date) {
+                    motifLed = m
+                    motifLedDepuis = d
+                } else if m != motifLed {
+                    motifLed = m
+                    motifLedDepuis = date
+                }
             }
             ledTest = v.led?.test ?? false
         case .compteursPilote(let v): pilote = inst(v)
@@ -87,7 +127,7 @@ public struct EtatPont: Sendable, Equatable {
         case .battement(let v): battement = inst(v)
         case .led(let v):
             motifLed = v.motif
-            motifLedDepuis = date
+            motifLedDepuis = departPhase(ms: e.ms, depuisMs: v.depuisMs, date: date) ?? date
             ledTest = v.test ?? ledTest
         case .livraison(let v): derniereLivraison = inst(v)
         case .relance(let v): derniereRelance = inst(v)
