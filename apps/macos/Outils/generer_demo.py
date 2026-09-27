@@ -160,6 +160,10 @@ class Carte:
                         "attente_ms": 0, "relances": 0, "derniere": None}
         self.derniere_at = None
         self.led = "operationnel"
+        # Depart de la phase du voyant (led.depuis_ms, rev 4) : la carte est en
+        # ligne depuis ms 21357 (12.1 : depuis_ms 62160 a ms 83517).
+        self.net_at = 21357
+        self.led_at = self.net_at
         self.matter_sante = {"en_service": True, "connecte": True, "identify": False}
         self.sys = {"heap": 112640, "heap_min": 86016, "heap_bloc": 45056, "pile_boucle": 4380,
                     "boucle_max_ms": 3, "json_perdus": 0, "json_trop_longs": 0, "rejets": 0}
@@ -186,7 +190,7 @@ class Carte:
                        "srp": {"client": True, "hote": "Registered", "services": 1, "enregistres": 1,
                                "serveur": "fd93:fff3:b88f:1::1", "port": 53535}}
         self.matter_reseau = {"en_service": True, "connecte": True, "reseau": "thread", "wifi": False,
-                              "fabriques": 1, "code_manuel": None, "qr": None}
+                              "fabriques": 1, "code_manuel": "34970112332", "qr": "MT:Y.K9042C00KA0648G00"}
         self.abo = {"actifs": 1, "lectures": 0, "sauves": 1, "demandes": 1, "neufs": 1, "repris_pont": 0,
                     "repris_pile": 0, "termines": 0, "plafond_s": 20, "plafonnes": 1, "reprise_auto": True}
         self.reprise = {"passages": 1, "auto": 1, "sessions": 0, "ouvertes": 0, "echecs": 0,
@@ -250,7 +254,8 @@ class Carte:
                 "boot": BOOT, "up_s": self.up_s(),
                 "radio": {"presente": True, "perdue": False, "mode": self.radio_mode, "configuree": True,
                           "quartz": True, "calib": True},
-                "surveil": s, "led": {"motif": self.led, "test": False}, "matter": dict(self.matter_sante),
+                "surveil": s, "led": {"motif": self.led, "test": False, "depuis_ms": self.ms - self.led_at},
+                "matter": dict(self.matter_sante),
                 "sys": dict(self.sys)}),
             ("compteurs", "pilote", {"raz": 0, "tx": dict(self.tx), "tranches": dict(self.tr), "a": dict(self.a),
                                      "rx": dict(self.rx), "divers": dict(self.divers)}),
@@ -273,6 +278,8 @@ class Carte:
             s["derniere"] = dict(s["derniere"])
             s["derniere"].pop("il_y_a_s", None)
             c["surveil"] = s
+        if isinstance(c.get("led"), dict):
+            c["led"] = {k: v for k, v in c["led"].items() if k != "depuis_ms"}
         return json.dumps(c, sort_keys=True)
 
     def instantane(self, force=False):
@@ -288,7 +295,13 @@ class Carte:
     def led_evt(self, motif):
         avant = self.led
         self.led = motif
-        self.emet("led", {"motif": motif, "avant": avant, "test": False})
+        # Comme status_led : un evenement part de zero ; le retour en
+        # "operationnel" reprend la phase de la lueur, sauf apres "hors_reseau"
+        # (retour en ligne = nouveau depart, setNet).
+        if motif == "hors_reseau" or (motif == "operationnel" and avant == "hors_reseau"):
+            self.net_at = self.ms
+        self.led_at = self.net_at if motif == "operationnel" else self.ms
+        self.emet("led", {"motif": motif, "avant": avant, "test": False, "depuis_ms": self.ms - self.led_at})
 
     def _rx(self, pay, no_ack=False, crc_faux=False, type_=None, sens=None, source="ecoute"):
         self.pid = (self.pid + 1) & 3
@@ -493,7 +506,7 @@ def scenario():
     entete(c)
 
     # 0 s : instantane de connexion (12.1), sans la reponse : le rejeu la fabrique avec l'id de l'app.
-    hello_base = {"rev": 0, "fw": "0.4.0-1a2b3c4", "fw_desc": "0.4.0-1a2b3c4", "date": "Sep 24 2026",
+    hello_base = {"rev": 4, "fw": "0.4.0-1a2b3c4", "fw_desc": "0.4.0-1a2b3c4", "date": "Sep 24 2026",
                   "heure": "14:02:11", "env": "esp32c6thread", "build": "produit", "reseau_build": "thread",
                   "puce": "esp32c6", "idf": "v5.5.5", "arduino": "3.3.12", "boot": BOOT, "reset": "logiciel",
                   "reset_n": 3, "up_s": 83,
@@ -505,7 +518,8 @@ def scenario():
     c.emet("hello", {"boot": BOOT, "mac": "F0F5BD012345",
                      "id": {"fabricant": "Djoko-CLI", "produit": "Pont ScreenBar Halo", "serie": "HALO1-F0F5BD012345",
                             "nom": "Halo", "hw": 1, "hw_txt": "ESP32-C6 SuperMini + BM5602"},
-                     "caps": ["matter", "thread", "garde", "led", "lampe_async", "trames", "log"]}, "identite")
+                     "caps": ["matter", "thread", "garde", "led", "lampe_async", "trames", "log", "udp", "cle"]},
+           "identite")
     c.avance(1)
     c.emet("config", {"lampe": {"adresse": "4FF0FD63", "air": "63FDF04F", "canal": 5, "debit_kbps": 125},
                       "reglages": {"paquets": 3, "accuses_min": 2, "paquets_max": 5, "ecart_ms": 100,

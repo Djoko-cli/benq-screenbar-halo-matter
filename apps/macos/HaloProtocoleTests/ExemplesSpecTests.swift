@@ -122,7 +122,9 @@ struct ExemplesSpecTests {
         #expect(th.thread?.role == "child")
         #expect(th.thread?.parentRssi == -48)
         #expect(th.thread?.srp?.hote == "Registered")
-        #expect(th.matter?.codeManuel == nil)
+        // Rev 3 : les codes partent aussi une fois en service (session USB).
+        #expect(th.matter?.codeManuel == "34970112332")
+        #expect(th.matter?.qr == "MT:Y.K9042C00KA0648G00")
 
         guard case .reseauAbonnements(let a) = l[10].message else { Issue.record("abonnements"); return }
         #expect(a.abonnements?.actifs == 1)
