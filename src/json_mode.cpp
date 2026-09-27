@@ -505,11 +505,11 @@ static void etatSante(uint8_t o, uint32_t now) {
   sW.obj("led");
   statusled::Pattern p;
   bool testing = false;
-  uint32_t depuis = 0;
-  if (statusLedState(&p, &testing, &depuis)) {
+  uint32_t phaseAt = 0;
+  if (statusLedState(&p, &testing, &phaseAt)) {
     sW.str("motif", statusled::patternCode(p));
     sW.boolean("test", testing);
-    sW.u32("depuis_ms", depuis);
+    sW.u32("depuis_ms", now - phaseAt);  // sur le ms de la ligne
   } else {
     sW.null("motif");
     sW.null("test");
@@ -776,7 +776,8 @@ static void replyEmit(uint8_t o, const Reply &r, bool cache) {
     reply(sW, sSinks[o].n, millis(), r);
     send(o);
   } else {
-    // Ligne en cours (jamais vu) : perdue, n consomme et compte comme ailleurs.
+    // Ligne deja en cours de formatage (jamais vu) : perdue, n consomme et
+    // compte (2.3 : n compte toute ligne produite, ecrite ou perdue).
     sSinks[o].n++;
     sSinks[o].lost++;
   }
@@ -1012,6 +1013,9 @@ bool jsonRemoteAdmit(uint32_t id, const char *shown) {
     return true;
   }
   k.topId = id;
+  // Nouvelle commande : la session sert de nouveau, meme apres un 'json 0'
+  // (qui, s'il est cette commande, la termine ensuite a son tour).
+  netUdpResume((uint8_t)(o - 1));
   return false;
 #endif
 }
@@ -1422,11 +1426,12 @@ static bool onLampLog(bool trace, const char *line) { return jsonLog("lampe", tr
 static const LampHooks kLampHooks = {onLampRx, onLampTx, onLampRelaunch, onLampModule, onLampLog};
 
 static void onLed(statusled::Pattern now, statusled::Pattern before, bool testing) {
-  uint32_t depuis = 0;
-  statusLedState(nullptr, nullptr, &depuis);
+  uint32_t phaseAt = 0;
+  statusLedState(nullptr, nullptr, &phaseAt);
   for (uint8_t o = 0; o < kSinks; o++) {
     if (!sSinks[o].machine || !claim()) continue;
-    led(sW, sSinks[o].n, millis(), statusled::patternCode(now), statusled::patternCode(before), testing, depuis);
+    const uint32_t ms = millis();
+    led(sW, sSinks[o].n, ms, statusled::patternCode(now), statusled::patternCode(before), testing, ms - phaseAt);
     send(o);
   }
 }

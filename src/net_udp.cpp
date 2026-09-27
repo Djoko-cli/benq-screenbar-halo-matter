@@ -203,6 +203,8 @@ uint8_t netUdpFreeSlots() { return sOpen ? (uint8_t)(kTxN - sTxN) : 0; }
 
 void netUdpEnd(uint8_t slot) { sTable.end(slot); }
 
+void netUdpResume(uint8_t slot) { sTable.resume(slot); }
+
 // Remet a OpenThread les datagrammes en tete, sous verrou pris sans attente.
 // Sous ce verrou : seulement des appels OpenThread.
 static void txFlush() {

@@ -364,7 +364,41 @@ static void testSessions() {
   CHECK(establish(t, 86, 902000, 3) == 0 && t.slot(1).ended, "deux terminees : la plus ancienne cede");
   t.end(7);  // hors bornes : sans effet
   CHECK(t.established() == 2, "end hors bornes : rien ne change");
+  // Une terminee passe avant une muette depuis 30 s, meme plus ancienne.
   t.clear();
+  CHECK(establish(t, 87, 1000000, 1) == 0 && establish(t, 88, 1001000, 2) == 1, "deux sessions");
+  const Session f1 = t.slot(1);
+  CHECK(data(t, msgA(f1, 2, "id=2 json ping"), 1040000, &slot, &fresh, 2) == Verdict::Ok && slot == 1, "1 active");
+  t.end(1);  // 0 muette depuis 40 s, 1 terminee mais active a l'instant
+  CHECK(establish(t, 89, 1040100, 3) == 1 && t.slot(0).sid == 87, "la terminee avant la muette");
+  // Nouvelle commande de la session terminee : elle sert de nouveau.
+  t.clear();
+  CHECK(establish(t, 90, 1100000, 1) == 0 && establish(t, 91, 1101000, 2) == 1, "deux sessions");
+  t.end(0);
+  t.resume(0);
+  CHECK(!t.slot(0).ended, "resume leve la marque");
+  CHECK(salutV(t, salut(92), 92, 1102000, 3) == Verdict::Ok, "troisieme client");
+  CHECK(data(t, msgA(t.provisional(), 1, "id=1 json 1"), 1102100, &slot, &fresh, 3) == Verdict::Full,
+        "session reprise : sa place est protegee comme les autres");
+  // Egalite d'age entre deux terminees : l'emplacement le plus bas.
+  t.clear();
+  CHECK(establish(t, 93, 1200000, 1) == 0, "0");
+  CHECK(establish(t, 94, 1201000, 2) == 1, "1");
+  CHECK(data(t, msgA(t.slot(0), 2, "id=2 json ping"), 1202000, &slot, &fresh, 1) == Verdict::Ok, "0 a 1202 s");
+  CHECK(data(t, msgA(t.slot(1), 2, "id=2 json ping"), 1202000, &slot, &fresh, 2) == Verdict::Ok, "1 a 1202 s");
+  t.end(0);
+  t.end(1);
+  CHECK(establish(t, 95, 1203000, 3) == 0, "egalite : l'emplacement 0");
+  // end() sur une place libre, oubli et clear : la marque ne survit pas.
+  t.clear();
+  t.end(0);
+  CHECK(!t.slot(0).used && !t.slot(0).ended, "end sur une place libre : rien");
+  CHECK(establish(t, 96, 1300000, 1) == 0, "session");
+  t.end(0);
+  CHECK(t.expire(1300000 + kForgetMs) == 0x01 && !t.slot(0).ended, "oubliee : marque effacee");
+  CHECK(establish(t, 97, 1400000, 1) == 0, "session");
+  t.end(0);
+  CHECK(t.clear() == 0x01 && !t.slot(0).ended, "clear : marque effacee");
 
   // wipe
   uint8_t secret[8] = {1, 2, 3, 4, 5, 6, 7, 8};

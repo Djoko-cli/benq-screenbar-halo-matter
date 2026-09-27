@@ -36,7 +36,8 @@ constexpr uint32_t kProvisionalMs = 30000;     // poignee de main sans premier m
 constexpr uint8_t kDefiPerSecond = 2;          // DEFI emis au plus, EN TOUT
 constexpr uint8_t kSlots = 2;                  // sessions etablies
 // Une session etablie active depuis moins longtemps n'est jamais evincee par
-// une nouvelle : trois clients pour deux places ne se chassent pas en boucle.
+// une nouvelle (sauf terminee par 'json 0' : Table::end) : trois clients pour
+// deux places ne se chassent pas en boucle.
 constexpr uint32_t kEvictIdleMs = 30000;
 constexpr uint8_t kSeenNa = 16;                // na des derniers SALUT acceptes (rejeu d'un SALUT)
 // "H1 " sid " " ctr " " mac " " : 3 + 8 + 1 + 10 + 1 + 32 + 1
@@ -134,7 +135,7 @@ struct Session {
   uint32_t tx = 0;       // dernier ctr emis par la carte
   uint32_t since = 0;    // creation (provisoire) ou promotion (etablie)
   uint32_t lastAt = 0;   // dernier message au MAC juste (ou SALUT pour la provisoire)
-  bool ended = false;    // 'json 0' execute : sa place se reprend sans attendre kEvictIdleMs
+  bool ended = false;    // 'json 0' execute : place reprenable tout de suite (end, resume)
   Peer peer;
 };
 
@@ -147,7 +148,7 @@ enum class Verdict : uint8_t {
   UnknownSid,  // aucune session ne porte ce sid
   BadMac,
   Replay,      // ctr deja vu ou hors fenetre ; SALUT deja vu (meme na)
-  Full,        // premier message, mais les deux places sont actives (kEvictIdleMs)
+  Full,        // premier message, mais les deux places sont actives (kEvictIdleMs) et aucune terminee
 };
 const char *verdictText(Verdict v);
 
@@ -177,10 +178,14 @@ class Table {
   Verdict onData(const Parsed &p, const Peer &from, uint32_t now, uint8_t *slot, bool *fresh);
 
   // L'app a termine la session slot ('json 0') : elle reste etablie (ses
-  // dernieres lignes partent, un renvoi du json 0 recoit sa reponse), mais sa
-  // place revient au prochain client sans attendre kEvictIdleMs. Pour de bon :
-  // l'app ne reprend jamais une session apres 'json 0', elle en ouvre une autre.
+  // dernieres lignes partent tant que sa place n'est pas reprise, un renvoi du
+  // json 0 recoit sa reponse), mais sa place revient au prochain client sans
+  // attendre kEvictIdleMs.
   void end(uint8_t slot);
+  // Nouvelle commande admise de la session slot (jamais un renvoi servi par le
+  // cache) : elle sert de nouveau, sa place est protegee comme les autres
+  // (halo_udp.py session X "json 0" "json 1").
+  void resume(uint8_t slot);
 
   // En-tete d'un message de la carte pour l'emplacement slot, MAC calcule sur
   // payload : "H1 <sid> <ctr> <mac> " dans hdr, longueur rendue (0 : pas de

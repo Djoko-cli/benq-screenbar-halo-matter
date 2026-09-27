@@ -273,10 +273,12 @@ static void monoWrite(bool on) { digitalWrite(PIN_STATUS_LED, STATUS_LED_ACTIVE_
 // N'ecrit que si ce qui se voit change : 16 ecritures par lueur de 600 ms
 // toutes les 10 s, 25 par seconde pendant l'arc-en-ciel, sinon une par
 // changement de motif ou demi-periode de clignotement.
-static void show(const Frame &f) {
+static void show(const Frame &f, uint32_t phaseAt) {
   const Pattern before = sFrame.p;
-  const bool changed = sFrameValid && f.p != before;
+  // Nouveau motif, ou meme motif dont la phase repart : l'app recale son voyant.
+  const bool changed = sFrameValid && (f.p != before || phaseAt != sPhaseAt);
   sFrame = f;
+  sPhaseAt = phaseAt;  // avant l'observateur : l'evenement 'led' porte la nouvelle phase
   sFrameValid = true;
   if (changed && sObserver) sObserver(f.p, before, sLed.testing());
 #ifdef PIN_RGB_STATUS_LED
@@ -341,8 +343,7 @@ void statusLedPoll() {
     sLed.unreachable(now);
   }
   const Frame f = sLed.frame(now);
-  sPhaseAt = now - f.t;  // avant show() : l'evenement 'led' porte deja la bonne phase
-  show(f);
+  show(f, now - f.t);
 #endif
 }
 
@@ -354,16 +355,16 @@ void statusLedSetObserver(StatusLedObserver fn) {
 #endif
 }
 
-bool statusLedState(Pattern *p, bool *testing, uint32_t *depuisMs) {
+bool statusLedState(Pattern *p, bool *testing, uint32_t *phaseAt) {
 #ifndef DIAG_ONLY
   if (p) *p = sFrame.p;
   if (testing) *testing = sLed.testing();
-  if (depuisMs) *depuisMs = millis() - sPhaseAt;
+  if (phaseAt) *phaseAt = sPhaseAt;
   return true;
 #else
   (void)p;
   (void)testing;
-  (void)depuisMs;
+  (void)phaseAt;
   return false;
 #endif
 }

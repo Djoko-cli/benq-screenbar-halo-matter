@@ -177,11 +177,14 @@ void statusLedCommand(const char *arg);
 // reseau (le texte humain bloquerait la boucle si l'hote USB ne lit plus).
 // false en build diagnostic (aucun voyant).
 bool statusLedTest(bool start);
-// Motif affiche au dernier statusLedPoll(), test en cours et age de la phase
-// du motif (ms, a l'instant de l'appel : l'app cale son voyant dessus) ; false
-// en build diagnostic (aucun voyant). Chaque pointeur peut etre nul.
-bool statusLedState(statusled::Pattern *p, bool *testing, uint32_t *depuisMs = nullptr);
-// Appele par statusLedPoll() quand le motif choisi change (evenement 'led' du
-// protocole JSON). nullptr : aucun. Jamais appele en build diagnostic.
+// Motif affiche au dernier statusLedPoll(), test en cours et depart de la
+// phase du motif (millis() : led.depuis_ms = ms de la ligne - phaseAt, l'app
+// cale son voyant dessus) ; false en build diagnostic (aucun voyant). Chaque
+// pointeur peut etre nul.
+bool statusLedState(statusled::Pattern *p, bool *testing, uint32_t *phaseAt = nullptr);
+// Appele par statusLedPoll() quand le motif choisi change, ou que sa phase
+// repart sans changer de motif (eclat relance, fin de 'led test' sur le meme
+// motif) : evenement 'led' du protocole JSON. nullptr : aucun. Jamais appele
+// en build diagnostic.
 using StatusLedObserver = void (*)(statusled::Pattern now, statusled::Pattern before, bool testing);
 void statusLedSetObserver(StatusLedObserver fn);

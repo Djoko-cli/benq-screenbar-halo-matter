@@ -350,10 +350,10 @@ Verdict Table::onData(const Parsed &p, const Peer &from, uint32_t now, uint8_t *
     return Verdict::Ok;
   }
   // Premier message au MAC juste de la poignee de main : la session devient
-  // etablie, dans un emplacement libre, sinon a la place de la moins
-  // recemment active si elle est muette depuis kEvictIdleMs. Des SALUT du
-  // LAN (sans la cle) ne touchent a rien ; trois clients pour deux places ne se
-  // chassent pas en boucle.
+  // etablie, dans un emplacement libre, sinon a la place d'une session
+  // terminee par 'json 0', sinon a celle de la moins recemment active si elle
+  // est muette depuis kEvictIdleMs. Des SALUT du LAN (sans la cle) ne touchent
+  // a rien ; trois clients pour deux places ne se chassent pas en boucle.
   uint8_t k = 0;
   bool found = false;
   for (uint8_t i = 0; i < kSlots && !found; i++)
@@ -417,6 +417,10 @@ size_t Table::seal(uint8_t slot, const uint8_t *payload, size_t n, char hdr[kHea
 
 void Table::end(uint8_t slot) {
   if (slot < kSlots && est_[slot].used) est_[slot].ended = true;
+}
+
+void Table::resume(uint8_t slot) {
+  if (slot < kSlots) est_[slot].ended = false;
 }
 
 uint8_t Table::expire(uint32_t now) {

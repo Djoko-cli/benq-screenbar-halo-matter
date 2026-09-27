@@ -46,6 +46,9 @@ uint8_t netUdpFreeSlots();
 // 'json 0' execute pour la session slot : sa place revient au prochain client
 // sans attendre 30 s de silence (h1::Table::end).
 void netUdpEnd(uint8_t slot);
+// Nouvelle commande admise de la session slot : elle sert de nouveau
+// (h1::Table::resume).
+void netUdpResume(uint8_t slot);
 
 // Bloc 'reseau' 'ip' (section 5.5) : nom d'hote SRP, adresses, transport UDP.
 void netUdpJson(jsonp::Writer &w, uint32_t now);
