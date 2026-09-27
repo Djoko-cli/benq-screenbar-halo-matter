@@ -362,15 +362,19 @@ Verdict Table::onData(const Parsed &p, const Peer &from, uint32_t now, uint8_t *
       found = true;
     }
   if (!found) {
+    // Une session terminee ('json 0') d'abord, la moins recemment active parmi
+    // elles ; sinon la moins recemment active de toutes.
     uint32_t oldest = 0;
+    bool ended = false;
     for (uint8_t i = 0; i < kSlots; i++) {
       const uint32_t age = now - est_[i].lastAt;
-      if (i == 0 || age > oldest) {
+      if (i == 0 || (est_[i].ended && !ended) || (est_[i].ended == ended && age > oldest)) {
         oldest = age;
+        ended = est_[i].ended;
         k = i;
       }
     }
-    if (oldest < kEvictIdleMs) {
+    if (!ended && oldest < kEvictIdleMs) {
       // Rien de promu, mais ce ctr est brule : un rejeu de ce message ne
       // promouvra jamais la session vers l'adresse d'un autre. L'app renvoie
       // avec un ctr neuf.
@@ -409,6 +413,10 @@ size_t Table::seal(uint8_t slot, const uint8_t *payload, size_t n, char hdr[kHea
   hdr[k++] = ' ';
   hdr[k] = 0;
   return k;
+}
+
+void Table::end(uint8_t slot) {
+  if (slot < kSlots && est_[slot].used) est_[slot].ended = true;
 }
 
 uint8_t Table::expire(uint32_t now) {

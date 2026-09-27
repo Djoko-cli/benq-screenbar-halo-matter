@@ -337,6 +337,35 @@ static void testSessions() {
   CHECK(establish(t, 63, 700200, 8) == 0, "cle remise");
   CHECK(t.clear() == 0x01 && t.established() == 0, "clear rend le masque");
 
+  // 'json 0' (end) : la place revient au client suivant sans attendre 30 s.
+  // Poignees de main espacees d'une seconde (2 DEFI par seconde au plus).
+  CHECK(establish(t, 80, 800000, 1) == 0 && establish(t, 81, 801000, 2) == 1, "deux sessions actives");
+  const Session e0 = t.slot(0);
+  t.end(0);
+  CHECK(t.slot(0).ended && !t.slot(1).ended, "seule la 0 est terminee");
+  CHECK(data(t, msgA(e0, 2, "id=9 json 0"), 802000, &slot, &fresh) == Verdict::Ok && slot == 0 && t.slot(0).ended,
+        "terminee : ses messages passent encore (renvoi du json 0), la marque reste");
+  CHECK(salutV(t, salut(82), 82, 803000, 3) == Verdict::Ok, "troisieme client : poignee de main");
+  const Session e2 = t.provisional();
+  CHECK(data(t, msgA(e2, 1, "id=1 json 1"), 803100, &slot, &fresh, 3) == Verdict::Ok && fresh && slot == 0,
+        "session terminee : sa place tout de suite, meme active il y a 1 s");
+  CHECK(!t.slot(0).ended && t.slot(0).sid == 82 && t.slot(1).sid == 81, "la nouvelle a la place, l'autre intacte");
+  CHECK(data(t, msgA(e0, 3, "id=10 json ping"), 803200, &slot, &fresh) == Verdict::UnknownSid, "l'ancienne est partie");
+  CHECK(salutV(t, salut(83), 83, 804000, 4) == Verdict::Ok, "quatrieme client");
+  CHECK(data(t, msgA(t.provisional(), 1, "id=1 json 1"), 804100, &slot, &fresh, 4) == Verdict::Full,
+        "aucune terminee, les deux actives : complet, comme avant");
+  // Une place libre passe avant une session terminee ; entre deux terminees,
+  // la moins recemment active cede.
+  t.clear();
+  CHECK(establish(t, 84, 900000, 1) == 0, "une session");
+  t.end(0);
+  CHECK(establish(t, 85, 901000, 2) == 1 && t.slot(0).ended, "place libre d'abord : la terminee reste");
+  t.end(1);
+  CHECK(establish(t, 86, 902000, 3) == 0 && t.slot(1).ended, "deux terminees : la plus ancienne cede");
+  t.end(7);  // hors bornes : sans effet
+  CHECK(t.established() == 2, "end hors bornes : rien ne change");
+  t.clear();
+
   // wipe
   uint8_t secret[8] = {1, 2, 3, 4, 5, 6, 7, 8};
   wipe(secret, sizeof(secret));

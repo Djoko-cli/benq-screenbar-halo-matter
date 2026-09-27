@@ -1828,6 +1828,17 @@ static void testStatusLed() {
   CHECK(rgbIs(render(P::Online, kGlowMs / 2), kGlowMax, kGlowMax, kGlowMax), "lueur : sommet a 8");
   CHECK(dark(render(P::Online, kGlowMs)) && dark(render(P::Online, kGlowPeriodMs - 1)), "eteinte entre deux lueurs");
   CHECK(rgbIs(render(P::Online, kGlowPeriodMs + kGlowMs / 2), kGlowMax, kGlowMax, kGlowMax), "lueur suivante a 10 s");
+  // Age de la phase (Frame.t, 'led.depuis_ms') : depuis le passage en ligne,
+  // depuis le debut d'un evenement ; apres l'eclat vert, la lueur reprend sa
+  // phase d'avant, elle ne repart pas de zero.
+  {
+    Logic l;
+    l.setNet(Net::Online, 1000);
+    CHECK(l.frame(13500).p == P::Online && l.frame(13500).t == 12500, "en ligne : age depuis le passage en ligne");
+    l.delivered(14000);
+    CHECK(l.frame(14100).p == P::Delivered && l.frame(14100).t == 100, "eclat vert : age depuis l'eclat");
+    CHECK(l.frame(20000).p == P::Online && l.frame(20000).t == 19000, "retour en ligne : la phase d'avant continue");
+  }
 
   // Evenements bornes : vert 150 ms, rouge trois fois, puis noir.
   CHECK(rgbIs(render(P::Delivered, 0), 0, kMax, 0) && rgbIs(render(P::Delivered, kDeliveredMs - 1), 0, kMax, 0),

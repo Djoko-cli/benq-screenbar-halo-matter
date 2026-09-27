@@ -28,8 +28,9 @@ constexpr uint8_t kVersion = 1;         // v : version majeure
 // redemarrage, log src bouton (bouton BOOT). 2 : transport reseau (section
 // 10 : caps udp et cle, session.transport udp, bloc reseau ip, reponse cle et
 // empreinte, code interdite). 3 : reseau.thread.matter.code_manuel et qr
-// aussi une fois le pont mis en service (USB seulement).
-constexpr uint8_t kRev = 3;
+// aussi une fois le pont mis en service (USB seulement). 4 : led.depuis_ms
+// (bloc sante et evenement led) ; 'json 0' par le reseau rend sa place.
+constexpr uint8_t kRev = 4;
 constexpr size_t kLineMax = 1024;       // RS et LF compris
 constexpr size_t kBudget = 896;         // pire cas vise par message (marge de 128 pour les ajouts)
 constexpr size_t kCmdMax = 127;         // ligne de l'hote, prefixe id= compris
@@ -117,7 +118,7 @@ void relaunch(Writer &w, uint32_t n, uint32_t ms, const halo1::RelaunchEvent &e)
 void module(Writer &w, uint32_t n, uint32_t ms, const halo1::ModuleEvent &e);
 void heartbeat(Writer &w, uint32_t n, uint32_t ms, uint32_t boot, uint32_t upS, uint32_t lost);
 void sessionEnd(Writer &w, uint32_t n, uint32_t ms, const char *cause);  // t "fin" : commande, bail
-void led(Writer &w, uint32_t n, uint32_t ms, const char *motif, const char *before, bool test);
+void led(Writer &w, uint32_t n, uint32_t ms, const char *motif, const char *before, bool test, uint32_t depuisMs);
 void logLine(Writer &w, uint32_t n, uint32_t ms, const char *src, const char *niv, const char *txt, uint32_t skipped);
 
 // Message reponse (section 6.3).

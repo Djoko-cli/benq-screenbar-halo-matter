@@ -478,7 +478,7 @@ cas (957 octets) depassait le budget de 896 (2.2).
 
 | Champ | Type | Sens | Source |
 |---|---|---|---|
-| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) ; 2 = transport reseau (section 10 : caps `udp` et `cle`, `session.transport` `udp`, bloc `reseau` `ip`, `reponse` `cle` et `empreinte`, code `interdite`) ; 3 = `reseau.thread.matter.code_manuel` et `qr` aussi une fois en service (USB) | `jsonp::kRev` (`json_out.h`) |
+| `rev` | entier | revision mineure du protocole : 0 en v1.0 ; 1 = motifs `led` `desappairage` et `redemarrage`, `log` de `src` `bouton` (bouton BOOT, 24/09) ; 2 = transport reseau (section 10 : caps `udp` et `cle`, `session.transport` `udp`, bloc `reseau` `ip`, `reponse` `cle` et `empreinte`, code `interdite`) ; 3 = `reseau.thread.matter.code_manuel` et `qr` aussi une fois en service (USB) ; 4 = `led.depuis_ms` (bloc `sante` et evenement `led`), `json 0` par le reseau rend sa place (10.4) | `jsonp::kRev` (`json_out.h`) |
 | `fw` | chaine | version complete du firmware, ex. `0.4.0-1a2b3c4` | `FW_VERSION_FULL` (`fw_version.h`) |
 | `fw_desc` | chaine | version du descripteur d'application, celle que Matter publie ; doit egaler `fw` | `esp_app_get_description()->version` |
 | `date`, `heure` | chaines | compilation | `esp_app_get_description()->date`, `->time` |
@@ -605,6 +605,7 @@ en sortent.
 | `surveil.derniere` | objet ou null | `cause`, `il_y_a_s` | `history(&e, 1)` |
 | `led.motif` | voir `led` (7.9) | motif affiche ; null en diag | `statusLedPoll` : `sFrame.p` (a ajouter) |
 | `led.test` | booleen | `led test` en cours ; null en diag | `Logic::testing()` |
+| `led.depuis_ms` | entier | age de la phase du motif (ms) a l'emission : l'app cale son voyant dessus (en `operationnel`, lueur de 600 ms quand `depuis_ms % 10000 < 600`) ; null en diag (rev 4) | `statusLedState` : `millis()` moins le depart de phase note au dernier `statusLedPoll` (`Frame.t`) |
 | `matter` | objet ou null | `en_service`, `connecte`, `identify` | `matterIsCommissioned()`, `matterIsConnected()`, `matterIdentifying()` ; null en diag |
 | `sys.heap`, `heap_min`, `heap_bloc` | octets | tas libre, minimum historique, plus grand bloc | `esp_get_free_heap_size()`, `esp_get_minimum_free_heap_size()`, `heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)` |
 | `sys.pile_boucle` | octets | pile de la tache loop jamais utilisee | `uxTaskGetStackHighWaterMark(NULL)` |
@@ -1046,7 +1047,10 @@ des roles intermediaires sont perdus.
 ### 7.9 `led` : motif du voyant
 
 Source : `statusLedPoll()`, quand le motif choisi (`Logic::frame(now).p`)
-change. Champs : `motif`, `avant` (motif precedent), `test`.
+change. Champs : `motif`, `avant` (motif precedent), `test`, `depuis_ms`
+(rev 4 : age de la phase du motif, comme `sante.led.depuis_ms` ; 0 au debut
+d'un evenement, mais au retour en `operationnel` apres un eclat, la lueur
+reprend sa phase d'avant : `depuis_ms` compte depuis le passage en ligne).
 
 | `motif` | `statusled::Pattern` | Voyant |
 |---|---|---|
@@ -1380,11 +1384,19 @@ Sessions :
 - une poignee de main n'ouvre qu'une session **provisoire** (1 place, la
   suivante la remplace, oubliee apres 30 s) ; elle devient une des **2
   sessions etablies** au premier message de l'app au MAC juste (en general
-  `id=1 json 1`), dans une place libre, sinon a la place de la moins
-  recemment active **si elle est muette depuis 30 s** ; sinon le message est
-  ignore (verdict `complet`, rien ne change : l'app le renverra) : trois
-  clients pour deux places ne se chassent pas en boucle, et des `SALUT` du
-  LAN, sans la cle, ne touchent a rien ;
+  `id=1 json 1`), dans une place libre, sinon a la place d'une session
+  **terminee par `json 0`** (rev 4 ; la moins recemment active s'il y en a
+  deux), sinon a la place de la moins recemment active **si elle est muette
+  depuis 30 s** ; sinon le message est ignore (verdict `complet`, rien ne
+  change : l'app le renverra) : trois clients pour deux places ne se chassent
+  pas en boucle, et des `SALUT` du LAN, sans la cle, ne touchent a rien ;
+- une session terminee par `json 0` reste etablie (ses dernieres lignes
+  partent, un renvoi du `json 0` recoit sa reponse) : seule sa place devient
+  reprenable tout de suite. L'app et `tools/halo_udp.py` terminent leurs
+  sessions par `json 0` et n'y reviennent jamais : une nouvelle connexion
+  refait une poignee de main. Avant la rev 4, la place ne revenait qu'apres
+  30 s de silence (banc du 25/09 : `hello` 43 s apres le `json 0` d'un
+  client, au lieu de l'essai suivant) ;
 - **2 `DEFI` par seconde au plus, EN TOUT** (pas par source : adresses
   usurpables) ;
 - adresse et port de l'app : ceux du plus recent message au MAC juste (`ctr`
@@ -1547,7 +1559,7 @@ Carte -> app :
 <RS>{"v":1,"t":"config","n":2,"ms":83514,"lampe":{"adresse":"4FF0FD63","air":"63FDF04F","canal":5,"debit_kbps":125},"reglages":{"paquets":3,"accuses_min":2,"paquets_max":5,"ecart_ms":100,"reprise_ms":1000,"reprises":2,"rearm_ms":100,"silence_ms":500,"rearm_fort":false,"leger":false,"garde":true,"gamma_c":200},"seuils":{"delais_suite":3,"deluge_trames":100,"deluge_pct":90,"fenetre_ms":10000,"sourd_hors_rx":1000,"sans_guerison":3,"ecart_ms":60000,"repli_ms":600000},"matter":{"endpoints":{"principal":1,"avant":2,"arriere":3},"lampes_en":"lumieres","mired_min":153,"mired_max":370,"niveau_plancher":4,"med":1,"med_boot":1,"maxint_s":20,"reprise_auto":true}}
 <RS>{"v":1,"t":"etat","n":3,"ms":83515,"bloc":"lampe","boot":"3FA2C901","up_s":83,"consigne":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"cru":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"a_livrer":[],"confirme":["marche","lum","temp"],"version":12,"phase":"repos","reprise_ms":null,"echecs":0,"lien":"ok","accuse_ms":41210,"dernier_a":0,"a_entendus":0,"memoire":"deux","livrees":4,"abandons":0,"sauve_attente":false,"ecoute":true,"trace":false}
 <RS>{"v":1,"t":"etat","n":4,"ms":83516,"bloc":"tranches","boot":"3FA2C901","up_s":83,"tranches":[]}
-<RS>{"v":1,"t":"etat","n":5,"ms":83517,"bloc":"sante","boot":"3FA2C901","up_s":83,"radio":{"presente":true,"perdue":false,"mode":"ecoute","configuree":true,"quartz":true,"calib":true},"surveil":{"panne":false,"defaut":false,"symptome":null,"delais_suite":0,"fen_trames":0,"fen_crc_faux":0,"hors_rx_10s":0,"sans_guerison":0,"attente_ms":0,"relances":0,"derniere":null},"led":{"motif":"operationnel","test":false},"matter":{"en_service":true,"connecte":true,"identify":false},"sys":{"heap":112640,"heap_min":86016,"heap_bloc":45056,"pile_boucle":4380,"boucle_max_ms":3,"json_perdus":0,"json_trop_longs":0,"rejets":0}}
+<RS>{"v":1,"t":"etat","n":5,"ms":83517,"bloc":"sante","boot":"3FA2C901","up_s":83,"radio":{"presente":true,"perdue":false,"mode":"ecoute","configuree":true,"quartz":true,"calib":true},"surveil":{"panne":false,"defaut":false,"symptome":null,"delais_suite":0,"fen_trames":0,"fen_crc_faux":0,"hors_rx_10s":0,"sans_guerison":0,"attente_ms":0,"relances":0,"derniere":null},"led":{"motif":"operationnel","test":false,"depuis_ms":62160},"matter":{"en_service":true,"connecte":true,"identify":false},"sys":{"heap":112640,"heap_min":86016,"heap_bloc":45056,"pile_boucle":4380,"boucle_max_ms":3,"json_perdus":0,"json_trop_longs":0,"rejets":0}}
 <RS>{"v":1,"t":"compteurs","n":6,"ms":83518,"bloc":"pilote","raz":0,"tx":{"consignes":6,"paquets":21,"accuses":19,"ack_trame":0,"max_rt":2,"delais":0,"fifo":0,"total":21},"tranches":{"faibles":0,"preemptees":1,"annulees":0,"reprises":0,"abandons":0,"attentes":0},"a":{"livres":0,"refuses":0},"rx":{"trames":148,"etat":36,"a":0,"accuses_lampe":36,"service":76,"favori":0,"invalides":0,"crc_faux":0},"divers":{"sauvegardes":3,"traces_perdues":0,"relances_module":0}}
 <RS>{"v":1,"t":"compteurs","n":7,"ms":83519,"bloc":"radio","raz":0,"radio":{"configs":161,"reconf_silence":139,"reconf_tx":2,"verif_ratees":0,"rearm":560,"rearm_hors_rx":3,"brutes":148,"bascules":0},"garde":{"active":true,"gardes":21,"refus":0,"attentes":4,"plafonnees":0,"max_us":2380},"relances":{"total":0,"verif":0,"delais":0,"bruit":0,"sourde":0}}
 <RS>{"v":1,"t":"compteurs","n":8,"ms":83520,"bloc":"matter","fenetres":5,"ignorees":1,"reflets":11,"ecritures":14,"echecs":0,"verrou":2,"traces_perdues":0,"identify":0}
@@ -1568,8 +1580,8 @@ id=2 lampe niveau 200
 <RS>{"v":1,"t":"tx","n":73,"ms":95104,"num":22,"tranche":"lum","charge":"C5BA","essai":2,"paquets":3,"accuses":2,"verdict":"ack","us":1612,"rt2":"00","irq1":"2E","status":"11"}
 <RS>{"v":1,"t":"tx","n":75,"ms":95204,"num":23,"tranche":"lum","charge":"C5BA","essai":3,"paquets":3,"accuses":3,"verdict":"ack","us":1617,"rt2":"00","irq1":"2E","status":"11"}
 <RS>{"v":1,"t":"livraison","n":76,"ms":95206,"issue":"livree","derniere":"lum","version":13,"consigne":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"cru":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"a_livrer":[],"ids":[2],"ids_perdus":0,"attente_ms":204,"livrees":5,"abandons":0}
-<RS>{"v":1,"t":"led","n":77,"ms":95207,"motif":"livree","avant":"operationnel","test":false}
-<RS>{"v":1,"t":"led","n":78,"ms":95357,"motif":"operationnel","avant":"livree","test":false}
+<RS>{"v":1,"t":"led","n":77,"ms":95207,"motif":"livree","avant":"operationnel","test":false,"depuis_ms":0}
+<RS>{"v":1,"t":"led","n":78,"ms":95357,"motif":"operationnel","avant":"livree","test":false,"depuis_ms":74000}
 ```
 
 La tranche finit au troisieme paquet : 3 paquets par trame (`repeats`) et 2
@@ -1604,7 +1616,7 @@ abandon : la consigne revient a l'etat cru (version 17).
 ```
 <RS>{"v":1,"t":"tx","n":208,"ms":120450,"num":40,"tranche":"lum","charge":"C580","essai":1,"paquets":3,"accuses":0,"verdict":"max_rt","us":11476,"rt2":"10","irq1":"1E","status":"01"}
 <RS>{"v":1,"t":"livraison","n":251,"ms":124970,"issue":"abandon","cause":"injoignable","version":17,"consigne":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"cru":{"marche":true,"lampes":"deux","lum":186,"niveau":200,"temp":53,"mired":268},"a_livrer":[],"ids":[7],"ids_perdus":0,"attente_ms":4520,"livrees":5,"abandons":1}
-<RS>{"v":1,"t":"led","n":252,"ms":124971,"motif":"injoignable","avant":"operationnel","test":false}
+<RS>{"v":1,"t":"led","n":252,"ms":124971,"motif":"injoignable","avant":"operationnel","test":false,"depuis_ms":0}
 ```
 
 Puce sourde (incident du 24/09) : relance, puis EN PANNE plus tard :
