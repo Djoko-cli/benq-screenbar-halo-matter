@@ -1,167 +1,171 @@
+[Français](README.fr.md) · **English**
+
 # BenQ ScreenBar Halo → Matter
 
-Pilote une **BenQ ScreenBar Halo (1re génération)** depuis n'importe quelle app
-domotique, en faisant passer un ESP32 pour sa télécommande 2,4 GHz.
+Control a **BenQ ScreenBar Halo (1st generation)** from any home-automation
+app, by having an ESP32 pose as its 2.4 GHz remote.
 
-L'ESP32 est un **nœud Matter** natif : pas de Homebridge, pas de broker MQTT.
-Matter étant multi-admin, le même appareil peut être partagé entre plusieurs
-écosystèmes à la fois — voir les réserves sur la certification plus bas.
+The ESP32 is a native **Matter node**: no Homebridge, no MQTT broker. Since
+Matter is multi-admin, the same device can be shared between several
+ecosystems at once — see the certification caveats below.
 
-## Ce qui est exposé
+The documentation under `docs/` is in French.
 
-| Endpoint | Type Matter | Réglages |
+## What is exposed
+
+| Endpoint | Matter type | Controls |
 |---|---|---|
-| EP1 "Halo" | Color Temperature Light | marche/arret, luminosite, temperature 153-370 mireds |
-| EP2 "Halo avant" | On/Off Light | lampe avant allumee (marche ET lampe avant) |
-| EP3 "Halo arriere" | On/Off Light | lampe arriere allumee (marche ET lampe arriere) |
-| ~~EP4 "Halo auto"~~ | On/Off Plug-in Unit | **desactive par defaut** (voir plus bas) : appui sur le bouton A (mode auto), revient seul a off apres 1 s (`matter impulsion <ms>`) ; un appui A sur la telecommande y fait la meme impulsion |
+| EP1 "Halo" | Color Temperature Light | on/off, brightness, temperature 153-370 mireds |
+| EP2 "Halo avant" | On/Off Light | front lamp on (power AND front lamp) |
+| EP3 "Halo arriere" | On/Off Light | back lamp on (power AND back lamp) |
+| ~~EP4 "Halo auto"~~ | On/Off Plug-in Unit | **disabled by default** (see below): presses button A (auto mode), turns itself back off after 1 s (`matter impulsion <ms>`); pressing A on the remote triggers the same pulse |
 
-- Une trame radio ne porte qu'une valeur : les deux lampes partagent la
-  luminosite et la temperature, d'ou un seul curseur de chaque sur EP1.
-- Allumer EP1 retrouve la derniere selection de lampes, comme le bouton marche
-  de la telecommande. Eteindre EP2 puis EP3 eteint la lampe.
-- EP4, s'il est reactive, est ignore quand la lampe est eteinte, et quand il
-  arrive avec un ordre marche ou lampe (commande de piece, tuile regroupee) :
-  dans Apple Home, afficher les accessoires en tuiles separees.
-- Les noms se donnent dans l'app. Les Kelvin (~6500 a ~2700 K) sont nominaux,
-  non mesures.
-- Dans `src/config.h` : `HALO1_SELECTORS_AS_LIGHTS 0` expose EP2 et EP3 en
-  prises (un "eteins les lumieres" de piece n'y touche plus).
-- Rien n'est emis vers la lampe au demarrage : le noeud reprend l'etat sauve,
-  et seul un ordre (Matter ou `lampe ...`) fait emettre.
+- A radio frame carries a single value: both lamps share brightness and
+  temperature, hence a single slider of each on EP1.
+- Turning EP1 on restores the last lamp selection, like the remote's power
+  button. Turning off EP2 then EP3 turns the lamp off.
+- EP4, if re-enabled, is ignored when the lamp is off, and when it arrives
+  together with a power or lamp command (room command, grouped tile): in
+  Apple Home, show the accessories as separate tiles.
+- Names are set in the app. The Kelvin values (~6500 to ~2700 K) are
+  nominal, not measured.
+- In `src/config.h`: `HALO1_SELECTORS_AS_LIGHTS 0` exposes EP2 and EP3 as
+  outlets (a room-wide "turn off the lights" no longer touches them).
+- Nothing is sent to the lamp at startup: the node restores the saved state,
+  and only a command (Matter or `lampe ...`) triggers a transmission.
 
-> **Passage a la 0.3.0 depuis EP1..EP4** (Halo, avant, arriere, auto) : flasher
-> par-dessus le meme environnement (`pio run -e esp32c6thread -t upload` pour le
-> noeud Thread d'Apple Home), sans `-t erase` ni `decommission` : l'appairage
-> est garde, seul EP4 disparait.
+> **Upgrading to 0.3.0 from EP1..EP4** (Halo, front, back, auto): flash over
+> the same environment (`pio run -e esp32c6thread -t upload` for the Apple
+> Home Thread node), without `-t erase` or `decommission`: the pairing is
+> kept, only EP4 disappears.
 >
-> **Depuis l'ancienne disposition des endpoints** (alimentation, lumiere avant,
-> halo arriere, capteur, mode auto) : il faut remettre le noeud en service.
-> Retirer l'accessoire de chaque app, lancer `decommission` (ou appui de 8 s
-> sur BOOT, puis relacher), puis l'ajouter a nouveau avec le code d'appairage
-> (`matter`).
+> **From the old endpoint layout** (power, front light, back halo, sensor,
+> auto mode): the node must be commissioned again. Remove the accessory from
+> each app, run `decommission` (or hold BOOT for 8 s, then release), then add
+> it again with the pairing code (`matter`).
 
-### EP4 "Halo auto" : desactive pour l'instant
+### EP4 "Halo auto": disabled for now
 
-Depuis la 0.3.0 (decision du 23/09), `HALO1_EXPOSE_AUTO` vaut 0 par defaut :
-le bouton A n'est plus expose dans Matter. Le code reste, compile hors du
-firmware : ni endpoint, ni miroir des A de la telecommande, ni reglage
-d'impulsion (`matter impulsion` le dit, `matter` affiche « bouton A (EP4) :
-desactive »). EP1 a EP3 gardent leurs numeros (EP4 etait cree en dernier).
-Le bouton A reste accessible a la console : `lampe auto`.
+Since 0.3.0 (decision of Sep 23), `HALO1_EXPOSE_AUTO` defaults to 0: button A
+is no longer exposed in Matter. The code remains, but is compiled out of the
+firmware: no endpoint, no mirroring of the remote's A presses, no pulse
+setting (`matter impulsion` says so, `matter` shows « bouton A (EP4) :
+desactive »). EP1 to EP3 keep their numbers (EP4 was created last). Button A
+remains available from the console: `lampe auto`.
 
-Sur un noeud deja appaire, EP4 disparait de la liste des endpoints du noeud ;
-la facon dont Apple Home retire la tuile « Halo auto » reste a verifier sur le
-terrain.
+On a node that is already paired, EP4 disappears from the node's endpoint
+list; how Apple Home removes the "Halo auto" tile remains to be checked in
+the field.
 
-Pour le **remettre**, ajouter `-DHALO1_EXPOSE_AUTO=1` aux `build_flags` de
-l'environnement (par exemple `[env:esp32c6thread]` dans `platformio.ini`), ou
-changer la valeur par defaut dans `src/config.h`, puis reflasher le meme
-environnement (`pio run -e esp32c6thread -t upload`, sans effacement). EP4 revient
-avec le meme numero, sa duree d'impulsion sauvee en NVS (`halo1/impulsion`) est
-reprise, et l'app le montre comme un nouvel accessoire a ranger.
+To **bring it back**, add `-DHALO1_EXPOSE_AUTO=1` to the environment's
+`build_flags` (for example `[env:esp32c6thread]` in `platformio.ini`), or
+change the default in `src/config.h`, then reflash the same environment
+(`pio run -e esp32c6thread -t upload`, without erasing). EP4 comes back with
+the same number, its pulse duration saved in NVS (`halo1/impulsion`) is
+restored, and the app shows it as a new accessory to place.
 
-### Identite du noeud
+### Node identity
 
-Le cluster Basic Information (EP0) porte l'identite du produit, posee a chaque
-demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
-`MATTER_*`, surchargeables par `-D`) :
+The Basic Information cluster (EP0) carries the product identity, set at
+every boot before `Matter.begin()` (values in `src/config.h`, `MATTER_*`
+macros, overridable with `-D`):
 
-| Attribut | Valeur |
+| Attribute | Value |
 |---|---|
 | VendorName | `Djoko-CLI` |
 | ProductName | `Pont ScreenBar Halo` |
-| NodeLabel | `Halo` (reecrit a chaque demarrage : un nom pose par un controleur dans cet attribut est remplace) |
-| SerialNumber | `HALO1-` + l'adresse MAC d'usine en 12 chiffres hexa, unique par carte |
+| NodeLabel | `Halo` (rewritten at every boot: a name written to this attribute by a controller is replaced) |
+| SerialNumber | `HALO1-` + the factory MAC address as 12 hex digits, unique per board |
 | HardwareVersion / HardwareVersionString | `1` / `ESP32-C6 SuperMini + BM5602` |
-| SoftwareVersionString | `0.4.0-<commit>` (« Programme interne » dans Apple Home) |
+| SoftwareVersionString | `0.4.0-<commit>` ("Firmware" in Apple Home) |
 
-- Le VID et le PID ne changent pas (`0xFFF1` / `0x8000`, certificat de test),
-  ni le discriminateur et le code d'appairage : pas de remise en service. Une
-  app peut mettre un moment a relire ces valeurs.
-- `SoftwareVersionString` est la version du descripteur d'application
-  (`esp_app_desc`), que `src/app_desc.c` remplace : sans lui, c'etait le commit
-  du lib-builder d'Arduino (`6671d0b`). `FW_VERSION` se regle dans
-  `platformio.ini` (`build_src_flags`) ; le commit vient de `tools/git_rev.py`,
-  suivi de `-dirty` si un fichier suivi etait modifie a la compilation, ou si
-  un fichier non suivi trainait dans `src/`, `include/` ou `lib/`.
-- `matter` affiche ces valeurs telles que la pile les rapporte (lignes
-  `identite` et `versions`), sauf le NodeLabel (valeur demandee, non relue),
-  et signale toute valeur refusee. Le demarrage affiche
-  `firmware 0.4.0-<commit>` et alerte si le descripteur lu dans l'image flashee
-  differe. Sans carte, la meme version (`App version`) se lit avec :
+- The VID and PID do not change (`0xFFF1` / `0x8000`, test certificate), nor
+  do the discriminator and the pairing code: no re-commissioning. An app may
+  take a while to re-read these values.
+- `SoftwareVersionString` is the version from the application descriptor
+  (`esp_app_desc`), which `src/app_desc.c` replaces: without it, it was the
+  commit of Arduino's lib-builder (`6671d0b`). `FW_VERSION` is set in
+  `platformio.ini` (`build_src_flags`); the commit comes from
+  `tools/git_rev.py`, followed by `-dirty` if a tracked file was modified at
+  build time, or if an untracked file was lying in `src/`, `include/` or
+  `lib/`.
+- `matter` shows these values as the stack reports them (`identite` and
+  `versions` lines), except the NodeLabel (requested value, not read back),
+  and flags any rejected value. Boot prints `firmware 0.4.0-<commit>` and
+  warns if the descriptor read from the flashed image differs. Without a
+  board, the same version (`App version`) can be read with:
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 
-## Matériel
+## Hardware
 
-| Élément | Rôle | Prix indicatif |
+| Part | Role | Approx. price |
 |---|---|---|
-| **ESP32-C6 SuperMini** (ou C3 / S3) | MCU + Wi-Fi + Matter | ~5 € |
-| **Module RF Holtek BM5602-60-1** | transceiver 2,4 GHz | ~3–4 $ |
-| 100 nF + 10 µF | découplage de l'alim du module | — |
+| **ESP32-C6 SuperMini** (or C3 / S3) | MCU + Wi-Fi + Matter | ~€5 |
+| **Holtek BM5602-60-1 RF module** | 2.4 GHz transceiver | ~$3–4 |
+| 100 nF + 10 µF | decoupling of the module's supply | — |
 
-### Évite l'ESP32 classique
+### Avoid the classic ESP32
 
-`CONFIG_ENABLE_CHIPOBLE` — la mise en service Matter par Bluetooth — **n'est pas
-activé dans les bibliothèques précompilées d'Arduino pour l'ESP32 classique**
-(la pile Bluedroid ne rentre pas). Il l'est sur C3, S3 et C6.
+`CONFIG_ENABLE_CHIPOBLE` — Matter commissioning over Bluetooth — **is not
+enabled in Arduino's precompiled libraries for the classic ESP32** (the
+Bluedroid stack does not fit). It is on C3, S3 and C6.
 
-Concrètement :
+In practice:
 
-| Cible | Mise en service | Taille firmware |
+| Target | Commissioning | Firmware size |
 |---|---|---|
-| **ESP32-C6 SuperMini** ✅ | BLE : le contrôleur fournit le Wi-Fi | 2,48 Mo |
-| ESP32-C3 ✅ | BLE | 1,79 Mo |
-| ESP32-S3 ✅ | BLE | 1,97 Mo |
-| ESP32 classique ⚠️ | IP : Wi-Fi à donner avant (`wifi <ssid> <mdp>`) | 1,81 Mo |
+| **ESP32-C6 SuperMini** ✅ | BLE: the controller provides the Wi-Fi | 2.48 MB |
+| ESP32-C3 ✅ | BLE | 1.79 MB |
+| ESP32-S3 ✅ | BLE | 1.97 MB |
+| Classic ESP32 ⚠️ | IP: the Wi-Fi must be set first (`wifi <ssid> <mdp>`) | 1.81 MB |
 
-Taille C6 relevée le 24/09 (`esp32c6supermini`, 2 601 484 octets ; le pont
-Thread `esp32c6thread` fait 2 616 992 octets). Les trois autres cibles n'ont
-pas été recompilées depuis : ces chiffres sont plus anciens.
+C6 size measured on Sep 24 (`esp32c6supermini`, 2,601,484 bytes; the
+`esp32c6thread` Thread bridge is 2,616,992 bytes). The three other targets
+have not been rebuilt since: those figures are older.
 
-L'ESP32 classique reste utilisable — la commande série `wifi` enregistre les
-identifiants en NVS, sans recompilation — mais c'est une étape en plus.
+The classic ESP32 remains usable — the `wifi` serial command stores the
+credentials in NVS, without recompiling — but it is one more step.
 
-### Pourquoi le BM5602 et pas un CC2500 ou un nRF24L01+
+### Why the BM5602 and not a CC2500 or an nRF24L01+
 
-Le BenQ émet en **GFSK à 125 kbps**, avec un format de trame Enhanced
-ShockBurst : préambule, adresse de 4 octets, PCF de 9 bits, CRC, et surtout
-**auto-ACK matériel** — la lampe ne répond *que* dans le slot ACK.
+The BenQ transmits **GFSK at 125 kbps**, with an Enhanced ShockBurst frame
+format: preamble, 4-byte address, 9-bit PCF, CRC, and above all **hardware
+auto-ACK** — the lamp answers *only* in the ACK slot.
 
-| Puce | 125 kbps | Sync word 32 bits arbitraire | Auto-ACK ESB |
+| Chip | 125 kbps | Arbitrary 32-bit sync word | ESB auto-ACK |
 |---|---|---|---|
-| nRF24L01+ / BK2425 | ❌ 250 k / 1 M / 2 M seulement | ✅ | ✅ |
-| CC2500 | ✅ | ❌ le mode 32 bits répète le mot de 16 bits | ❌ à faire en logiciel |
+| nRF24L01+ / BK2425 | ❌ 250 k / 1 M / 2 M only | ✅ | ✅ |
+| CC2500 | ✅ | ❌ the 32-bit mode repeats the 16-bit word | ❌ must be done in software |
 | **BC5602 / BM5602-60-1** | ✅ 125 / 250 / 500 k | ✅ | ✅ |
 
-Le nRF24 est éliminé d'office : il ne descend pas à 125 kbps. Le CC2500 y
-arrive, mais il faudrait réimplémenter en logiciel le CRC nRF24 (calculé sur
-adresse + PCF + payload, pas celui du CC2500), contourner la limite du sync
-word, et produire l'ACK dans une fenêtre d'environ 130 µs. Faisable sur le
-papier, très douloureux en pratique.
+The nRF24 is ruled out right away: it cannot go down to 125 kbps. The CC2500
+can, but you would have to reimplement the nRF24 CRC in software (computed
+over address + PCF + payload, not the CC2500's), work around the sync word
+limit, and produce the ACK within a window of about 130 µs. Doable on paper,
+very painful in practice.
 
-Le BC5602 est **exactement la puce qui se trouve dans la lampe et dans la
-télécommande** (confirmé par les dossiers FCC et par un teardown du PCB). Tout
-le protocole est géré en matériel.
+The BC5602 is **exactly the chip inside the lamp and the remote** (confirmed
+by the FCC filings and by a PCB teardown). The whole protocol is handled in
+hardware.
 
-### Où l'acheter
+### Where to buy it
 
-Le module est la principale friction du projet — ce n'est pas un composant de
-grande distribution.
+The module is the project's main friction point — it is not a mass-market
+part.
 
 - [Best Modules Corp](https://www.bestmodulescorp.com/en/bm5602-60-1.html) —
-  filiale de Holtek, ~3,10–4,28 $
+  a Holtek subsidiary, ~$3.10–4.28
 - [Sourcengine](https://www.sourcengine.com/part-info/BM5602-60-1-145144816391)
-- Distributeurs Holtek officiels
-- [Fiche produit Holtek](https://www.holtek.com/page/vg/BM5602-60-1)
+- Official Holtek distributors
+- [Holtek product page](https://www.holtek.com/page/vg/BM5602-60-1)
 
-Prends-en deux : à ~4 $ pièce, ça évite de se demander si le module est mort
-quand quelque chose ne marche pas.
+Buy two: at ~$4 each, it saves you wondering whether the module is dead when
+something does not work.
 
-## Câblage
+## Wiring
 
-Voir [docs/WIRING.md](docs/WIRING.md). En résumé, sur ESP32-C6 SuperMini
-(la cible par défaut) :
+See [docs/WIRING.md](docs/WIRING.md). In short, on the ESP32-C6 SuperMini
+(the default target):
 
 | BM5602 | C6 SuperMini |
 |---|---|
@@ -171,331 +175,338 @@ Voir [docs/WIRING.md](docs/WIRING.md). En résumé, sur ESP32-C6 SuperMini
 | `SDIO` | IO20 (MOSI) |
 | `CSN` | IO14 |
 
-> `GIO2` sert de MISO : le firmware bascule le module en SPI 4 fils à l'init.
-> Le module n'a aucun marquage : l'ordre de ses pastilles est dans
+> `GIO2` serves as MISO: the firmware switches the module to 4-wire SPI at
+> init. The module has no markings: the order of its pads is in
 > [docs/WIRING.md](docs/WIRING.md#brochage-du-module-bm5602-60-1).
 
-## Compilation
+## Building
 
 ```bash
 pio run -t upload -t monitor
 ```
 
-La cible par défaut est `esp32c6supermini` (Matter sur Wi-Fi). Les autres se
-sélectionnent avec `-e` : `esp32c6thread` (Matter sur Thread), `esp32c3`,
+The default target is `esp32c6supermini` (Matter over Wi-Fi). The others are
+selected with `-e`: `esp32c6thread` (Matter over Thread), `esp32c3`,
 `esp32s3`, `esp32dev`.
 
-> Un nœud appairé en Thread (Apple Home) se reflashe avec
-> `pio run -e esp32c6thread -t upload -t monitor`. La commande sans `-e` y
-> mettrait le build Wi-Fi : l'appairage reste en NVS, mais le nœud devient
-> injoignable jusqu'au retour du build Thread.
+> A node paired over Thread (Apple Home) is reflashed with
+> `pio run -e esp32c6thread -t upload -t monitor`. The command without `-e`
+> would put the Wi-Fi build on it: the pairing stays in NVS, but the node
+> becomes unreachable until the Thread build comes back.
 
-Si la carte boucle au démarrage juste après le flash, c'est la mémoire flash du
-clone qui n'aime pas le mode QIO : ajoute `board_build.flash_mode = dio` dans
-l'environnement.
+If the board boot-loops right after flashing, the clone's flash memory does
+not like QIO mode: add `board_build.flash_mode = dio` to the environment.
 
-Deux contraintes de build, toutes deux déjà réglées dans `platformio.ini` :
+Two build constraints, both already set in `platformio.ini`:
 
-- **La plateforme est le fork [pioarduino](https://github.com/pioarduino/platform-espressif32).**
-  La bibliothèque Matter est livrée avec le core Arduino-ESP32 3.x (rien à
-  installer via `lib_deps`), or la plateforme officielle de PlatformIO est
-  restée au core 2.0.x qui n'a pas Matter du tout.
-- **Partitions `huge_app.csv`** (3 Mo APP). La pile Matter pèse à elle seule
-  ~1,4 Mo. Conséquence assumée : **pas d'OTA** sur une flash de 4 Mo.
-  `min_spiffs.csv` laisserait la place à l'OTA mais ne tient que sur C3 et
-  ESP32 classique, avec ~150 Ko de marge — ça déborde sur S3 et C6.
+- **The platform is the [pioarduino](https://github.com/pioarduino/platform-espressif32) fork.**
+  The Matter library ships with the Arduino-ESP32 3.x core (nothing to
+  install through `lib_deps`), whereas PlatformIO's official platform stayed
+  on core 2.0.x, which has no Matter at all.
+- **`huge_app.csv` partitions** (3 MB APP). The Matter stack alone weighs
+  ~1.4 MB. Accepted consequence: **no OTA** on a 4 MB flash.
+  `min_spiffs.csv` would leave room for OTA but only fits on the C3 and the
+  classic ESP32, with ~150 KB of headroom — it overflows on the S3 and C6.
 
-## Mise en service
+## Commissioning
 
-### 1. Verifier le lien avec la lampe
+### 1. Check the link with the lamp
 
-Le firmware connait deja l'adresse de lien de la lampe : `63 FD F0 4F` sur
-l'air, soit `4FF0FD63` dans l'ordre d'ecriture du BM5602, canal 5 (2405 MHz),
-125 kbps. `lampe adresse` l'affiche. Rien a chercher.
+The firmware already knows the lamp's link address: `63 FD F0 4F` on air,
+i.e. `4FF0FD63` in the BM5602's write order, channel 5 (2405 MHz), 125 kbps.
+`lampe adresse` shows it. Nothing to search for.
 
-Dans le moniteur serie, ecoute la telecommande pendant que tu la manipules
-(30 s par defaut) :
+In the serial monitor, listen to the remote while you use it (30 s by
+default):
 
 ```
 ecoute 4FF0FD63 5
 ```
 
-Chaque geste doit afficher des trames decodees au CRC juste (`C4 xx` a la
-molette, par exemple). Puis `lampe` montre l'etat du pilote : consigne, etat
-cru, champs a livrer, lien et radio. Une premiere commande, `lampe on` ou
-`lampe lum A0`, doit finir sur une ligne `ok ... accuses`.
+Every gesture should print frames decoded with a correct CRC (`C4 xx` for
+the dial, for example). Then `lampe` shows the driver state: target, raw
+state, fields to deliver, link and radio. A first command, `lampe on` or
+`lampe lum A0`, should end with an `ok ... accuses` line.
 
-L'adresse de lien depend de la telecommande (elle vient de l'appairage BenQ).
-Pour une autre paire lampe/telecommande, `lampe adresse XXXXXXXX` (ordre
-d'ecriture) l'enregistre en NVS. Comment elle a ete trouvee :
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+The link address depends on the remote (it comes from BenQ's pairing). For
+another lamp/remote pair, `lampe adresse XXXXXXXX` (write order) stores it
+in NVS. How it was found: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-### 2. Appairer le nœud Matter
+### 2. Pair the Matter node
 
-Le code d'appairage est affiché au démarrage, et `matter` le rappelle :
+The pairing code is printed at boot, and `matter` shows it again:
 
 ```
 code manuel : 34970112332
 ```
 
-Un contrôleur Matter est nécessaire — HomePod, Apple TV, Google Nest,
-Echo, ou le module *Matter Server* de Home Assistant.
+A Matter controller is required — HomePod, Apple TV, Google Nest, Echo, or
+Home Assistant's *Matter Server* add-on.
 
-Un appui de 8 s sur le bouton **BOOT**, relâché ensuite, ou la commande
-`decommission`, retire toutes les fabriques pour ré-appairer de zéro (voir
-« 4. Bouton BOOT »).
+Holding the **BOOT** button for 8 s, then releasing it, or the
+`decommission` command, removes all fabrics so you can re-pair from scratch
+(see "4. BOOT button").
 
-### 3. LED d'etat
+### 3. Status LED
 
-Le voyant du produit est la LED RGB (WS2812) de la carte, sur IO8, dans les
-builds `esp32c6thread` et `esp32c6supermini`. Intensite basse, puisqu'elle vit
-sous le bureau : 24/255 au plus par canal, 8/255 pour la lueur blanche.
+The product's indicator is the board's RGB LED (WS2812), on IO8, in the
+`esp32c6thread` and `esp32c6supermini` builds. Low brightness, since it
+lives under the desk: 24/255 at most per channel, 8/255 for the white glow.
 
-| LED | Signification |
+| LED | Meaning |
 |---|---|
-| bleu clignotant (2 Hz) | pas encore mis en service : ajouter l'accessoire depuis l'app |
-| orange lent (1 s allumee, 1 s eteinte) | mis en service, mais reseau absent (Thread perdu ; Wi-Fi pour `esp32c6supermini`) |
-| eteinte, breve lueur blanche toutes les 10 s | tout va bien (signe de vie) ; une lueur aussi au retour du reseau |
-| rouge fixe | module radio en panne : relances automatiques sans effet (voir plus bas), ou module perdu ; dure jusqu'a la guerison |
-| eclat vert (150 ms) | une consigne vient d'etre livree a la lampe (accusee) |
-| rouge, 3 clignements | lampe injoignable : le pilote abandonne la consigne (aussi quand le module radio est perdu ou en panne) |
-| arc-en-ciel | « Identifier » demande depuis Apple Home (cluster Identify), pendant toute l'identification |
-| rouge, noir, violet, noir, vite | bouton BOOT tenu 8 s : relacher pour desappairer, puis desappairage en cours jusqu'au redemarrage (voir « 4. Bouton BOOT ») |
-| eclat blanc (150 ms) | bouton BOOT, appui court relache : redemarrage |
+| blinking blue (2 Hz) | not commissioned yet: add the accessory from the app |
+| slow orange (1 s on, 1 s off) | commissioned, but no network (Thread lost; Wi-Fi for `esp32c6supermini`) |
+| off, brief white glow every 10 s | all good (sign of life); also a glow when the network comes back |
+| steady red | radio module failed: automatic restarts did not help (see below), or module lost; lasts until it recovers |
+| green flash (150 ms) | a command has just been delivered to the lamp (acknowledged) |
+| red, 3 blinks | lamp unreachable: the driver gives up the command (also when the radio module is lost or failed) |
+| rainbow | "Identify" requested from Apple Home (Identify cluster), for the whole identification |
+| red, black, purple, black, fast | BOOT button held 8 s: release to unpair, then unpairing in progress until the reboot (see "4. BOOT button") |
+| white flash (150 ms) | BOOT button, short press released: reboot |
 
-Priorite : arc-en-ciel > bouton BOOT > rouge x3 > rouge fixe > vert > etat du
-reseau (les noirs des trois clignements restent visibles sur le rouge fixe).
-Au banc, `led test` joue chaque motif a tour de role (21 s ; le bouton passe
-par-dessus) et `led` dit le motif en
-cours et l'etat du module radio. Si le
-vert et le rouge sont inverses, la WS2812 de la carte n'est pas en GRB :
-`-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` dans `platformio.ini`.
+Priority: rainbow > BOOT button > red ×3 > steady red > green > network state
+(the blacks of the three blinks remain visible over the steady red). On the
+bench, `led test` plays each pattern in turn (21 s; the button takes over)
+and `led` reports the current pattern and the radio module state. If green
+and red are swapped, the board's WS2812 is not GRB:
+`-DSTATUS_RGB_ORDER=LED_COLOR_ORDER_RGB` in `platformio.ini`.
 
-La petite LED d'IO15 reste en entree, donc eteinte quelle que soit sa
-polarite : un seul voyant. En entree, elle ne gene pas non plus GDO2 du CC2500,
-qui arrive sur IO15 quand la carte de capture est branchee. Le build diagnostic
-ne fait que mettre la WS2812 au noir au demarrage : elle garde sa derniere
-couleur a travers un reset ou un flash, et le bleu d'un build produit resterait
-allume sur le banc. Parmi les autres cibles, seule `esp32dev` fait clignoter sa
-LED simple (IO2) avec les memes motifs, sans la lueur ; sur les DevKit C3 et S3,
-`PIN_STATUS_LED` (IO8, IO48) est la broche de leur WS2812, non declaree : pas de
-voyant visible.
+The small LED on IO15 stays an input, so it is off whatever its polarity: a
+single indicator. As an input, it also does not interfere with the CC2500's
+GDO2, which lands on IO15 when the capture board is plugged in. The
+diagnostic build only sets the WS2812 to black at boot: it keeps its last
+color across a reset or a flash, and a product build's blue would otherwise
+stay lit on the bench. Among the other targets, only `esp32dev` blinks its
+simple LED (IO2) with the same patterns, without the glow; on the C3 and S3
+DevKits, `PIN_STATUS_LED` (IO8, IO48) is the pin of their WS2812, not
+declared: no visible indicator.
 
-**Relance automatique du module radio.** Le 24/09, une pointe de pied a
-coulisse metallique posee sur le quartz du BM5602 l'a bloque ~70 min : tous
-les envois en delai (186 de suite a la fin), l'ecoute sourde (aucune trame a
-la fin, apres ~96 000 trames au CRC faux depuis le demarrage), alors que sa
-configuration se relisait juste ; seul `rfinit` l'a gueri. Le pilote relance
-donc seul le module (`halo.begin()`, ~300 ms, jusqu'a ~0,5 s si le quartz ou
-la calibration ne repondent pas) sur trois symptomes de puce : 3 envois de
-suite sans TX_DS ni MAX_RT (delai de 30 ms) ; en ecoute, au moins 100 trames
-en 10 s dont au moins 90 % au CRC faux (la molette de la telecommande en donne
-~9 par seconde, au CRC juste) ; ou une ecoute sourde, au moins 1000
-rearmements en moins de 10 s sur une puce qui ne reste pas en reception
-(l'incident en donnait ~450 par seconde, vus en ~2-3 s ; d'ordinaire estime a
-bien moins d'un par seconde, deduit des totaux, a confirmer par « hors RX »
-dans `lampe stats`). Une lampe debranchee (MAX_RT, silence) ne fait jamais
-relancer. Une relance au plus par minute ; apres 3 relances de suite sans
-guerison (un accuse, une fenetre d'ecoute surtout au CRC juste, ou, apres une
-relance pour surdite, 10 s d'ecoute ou la puce reste en reception sans envoi
-en delai),
-si le symptome revient, le module est **EN PANNE** : rouge fixe, un essai
-toutes les 10 min. Chaque relance ecrit des lignes `[lampe] BM5602 : ...` sur
-la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`
-montre l'etat et la derniere relance, `lampe stats` les relances par cause et
-les dernieres, datees. Detail et seuils :
+**Automatic radio module restart.** On Sep 24, the metal tip of a sliding
+caliper resting on the BM5602's crystal locked it up for ~70 min: every
+transmission timed out (186 in a row at the end), listening went deaf (no
+frame at the end, after ~96,000 frames with a bad CRC since boot), while its
+configuration still read back correctly; only `rfinit` cured it. So the
+driver restarts the module on its own (`halo.begin()`, ~300 ms, up to
+~0.5 s if the crystal or the calibration do not respond) on three chip
+symptoms: 3 transmissions in a row with neither TX_DS nor MAX_RT (30 ms
+timeout); while listening, at least 100 frames in 10 s, of which at least
+90 % with a bad CRC (the remote's dial produces ~9 per second, with a
+correct CRC); or deaf listening, at least 1000 re-arms in less than 10 s on
+a chip that does not stay in receive mode (the incident produced ~450 per
+second, seen within ~2-3 s; normally estimated at well under one per second,
+inferred from the totals, to be confirmed with « hors RX » in
+`lampe stats`). An unplugged lamp (MAX_RT, silence) never triggers a
+restart. At most one restart per minute; after 3 restarts in a row without
+recovery (an acknowledgement, a listening window with mostly correct CRCs,
+or, after a restart for deafness, 10 s of listening during which the chip
+stays in receive mode with no timed-out transmission), if the symptom comes
+back, the module is **FAILED**: steady red, one attempt every 10 min. Each
+restart writes `[lampe] BM5602 : ...` lines on the console (never blocking:
+lost if the serial buffer is full); `lampe` shows the state and the last
+restart, `lampe stats` the restarts by cause and the latest ones, with
+timestamps. Details and thresholds:
 [docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
 
-### 4. Bouton BOOT
+### 4. BOOT button
 
-Dans le boitier imprime, seul **BOOT** (IO9, marque B) reste accessible : pas
-de RST. Il sert donc a redemarrer et a desappairer. Tout se decide **au
-relachement** :
+In the 3D-printed case, only **BOOT** (IO9, marked B) remains accessible: no
+RST. So it is used to reboot and to unpair. Everything is decided **on
+release**:
 
-| Appui | LED pendant l'appui | Au relachement |
+| Press | LED during the press | On release |
 |---|---|---|
-| moins de 2 s | rien de special | eclat blanc (150 ms), puis **redemarrage** (etat de la lampe sauve d'abord, comme `reboot`) |
-| de 2 a 8 s | rien de special | **annule** : rien ne se passe (garde-fou contre une erreur) |
-| 8 s ou plus | rouge, noir, violet, noir, vite (100 ms chacun) des 8 s : « relache pour desappairer » | **desappairage** : retrait de toutes les fabriques Matter (l'accessoire sort d'Apple Home), puis redemarrage ; la LED garde le rouge/violet jusqu'au redemarrage |
+| less than 2 s | nothing special | white flash (150 ms), then **reboot** (lamp state saved first, like `reboot`) |
+| 2 to 8 s | nothing special | **cancelled**: nothing happens (safeguard against a mistake) |
+| 8 s or more | red, black, purple, black, fast (100 ms each) from 8 s: "release to unpair" | **unpairing**: removal of all Matter fabrics (the accessory leaves Apple Home), then reboot; the LED keeps the red/purple until the reboot |
 
-IO9 est une broche de strapping : **tenue basse au moment d'un reset, elle
-fait demarrer le C6 en mode telechargement**, ou il reste inerte jusqu'a une
-coupure d'alimentation. Le firmware n'agit donc jamais bouton enfonce : il
-attend le relachement (anti-rebond de 30 ms), puis 100 ms de releves hauts sans
-interruption, et relit encore la broche 100 ms juste avant l'action (rappuye
-et tenu a ce moment, l'action est abandonnee). Enfin, **tout** redemarrage
-logiciel (bouton, `reboot`, `decommission`, et la fin du desappairage, que la
-pile Matter declenche elle-meme un moment apres) attend la broche relue haute
-50 ms de suite : BOOT tenu pendant un redemarrage le retarde jusqu'au
-relachement, sans limite (un bouton coince bloque la carte, qui repart des
-qu'on le relache, au lieu de la laisser en mode telechargement). D'autres
-garde-fous :
-- un bouton deja enfonce au demarrage est ignore jusqu'a son relachement ;
-- un nouvel appui pendant l'attente d'une action l'abandonne : il compte seul ;
-- pendant le desappairage, le bouton est inerte (un redemarrage en plein
-  effacement laisserait Matter a moitie retire) ; si la carte tourne encore
-  10 s apres, elle redemarre d'elle-meme ;
-- si `loop()` a ete bloquee plus de 100 ms pendant l'appui ou a l'un de ses
-  fronts (outil de banc, relance du module radio), la duree est incertaine :
-  l'appui est ignore (sauf un appui long deja arme, certain) ;
-- chaque decision est annoncee sur la console, `[bouton] ...` (message `log`,
-  `src` `bouton`, en mode `json log 1`, hors plafond des logs).
+IO9 is a strapping pin: **held low at reset, it makes the C6 boot into
+download mode**, where it stays inert until a power cycle. So the firmware
+never acts while the button is pressed: it waits for the release (30 ms
+debounce), then 100 ms of uninterrupted high readings, and reads the pin
+again 100 ms right before acting (pressed and held again at that moment, the
+action is abandoned). Finally, **every** software reboot (button, `reboot`,
+`decommission`, and the end of unpairing, which the Matter stack triggers
+itself a while later) waits until the pin has read high for 50 ms in a row:
+BOOT held during a reboot delays it until release, with no limit (a stuck
+button blocks the board, which restarts as soon as it is released, instead
+of leaving it in download mode). Other safeguards:
+- a button already pressed at boot is ignored until it is released;
+- a new press while an action is pending abandons it: it counts on its own;
+- during unpairing, the button is inert (a reboot in the middle of the erase
+  would leave Matter half removed); if the board is still running 10 s
+  later, it reboots on its own;
+- if `loop()` was blocked for more than 100 ms during the press or at one of
+  its edges (bench tool, radio module restart), the duration is uncertain:
+  the press is ignored (except a long press already armed, which is
+  certain);
+- every decision is announced on the console, `[bouton] ...` (`log`
+  message, `src` `bouton`, in `json log 1` mode, outside the log cap).
 
-Build diagnostic (sans Matter ni LED) : l'appui court redemarre ; l'appui long
-ne fait que l'expliquer sur la console. Logique pure, testee sur l'hote :
+Diagnostic build (no Matter, no LED): a short press reboots; a long press
+only explains itself on the console. Pure logic, tested on the host:
 `src/boot_button.*`.
 
-### Certification : ce qui marche et ce qui demande une étape en plus
+### Certification: what works and what needs an extra step
 
-Le firmware utilise les **certificats de test du SDK Matter** :
-`VID 0xFFF1`, `PID 0x8000`. C'est le mode de développement normal, mais chaque
-écosystème le traite différemment :
+The firmware uses the **Matter SDK test certificates**: `VID 0xFFF1`,
+`PID 0x8000`. This is the normal development mode, but each ecosystem
+treats it differently:
 
-| Écosystème | Comportement |
+| Ecosystem | Behavior |
 |---|---|
-| **Home Assistant** | accepte directement (Matter Server) |
-| **Apple Home** | ajoute l'accessoire en affichant un avertissement « accessoire non certifié », qu'il suffit de confirmer |
-| **Google Home** | refuse, sauf à créer un projet dans la [Google Home Developer Console](https://developers.home.google.com/matter/get-started) déclarant le même couple VID/PID de test |
-| **Alexa** | non vérifié |
+| **Home Assistant** | accepts it directly (Matter Server) |
+| **Apple Home** | adds the accessory while showing an "uncertified accessory" warning, which you just confirm |
+| **Google Home** | refuses it, unless you create a project in the [Google Home Developer Console](https://developers.home.google.com/matter/get-started) declaring the same test VID/PID pair |
+| **Alexa** | not checked |
 
-Faire disparaître complètement l'avertissement demanderait un VID attribué par
-la CSA et une certification — hors de portée d'un projet perso.
+Removing the warning entirely would require a CSA-assigned VID and a
+certification — out of reach for a personal project.
 
-## Commandes série
+## Serial commands
 
-`help` liste tout.
+`help` lists everything. Commands and their output are in French.
 
-| Commande | Effet |
+| Command | Effect |
 |---|---|
-| `info` | materiel, configuration radio, etat du pilote |
-| `matter` | etat Matter, code d'appairage, identite du noeud et versions, compteurs du pont, demandes Identify |
-| `matter impulsion [300..15000]` | duree de l'impulsion d'EP4 en ms, gardee en NVS (EP4 reactive seulement ; sinon un message le dit) |
-| `matter reprise` | (Thread) relance tout de suite la reprise des abonnements sauves d'Apple Home |
-| `matter reprise auto [0\|1]` | (Thread) relance seule apres un redemarrage : Thread + SRP prets depuis 10 s, pas avant 50 s (plus le plancher sauve), pour chaque abonne sauve sans abonnement actif ; session CASE d'abord (un echec ne coute rien a la pile), reprise ensuite ; puis 30 s, 60 s, 5 min apres chaque echec, et un coup d'oeil toutes les 5 min tant qu'un abonnement est actif (NVS) |
-| `matter med [0\|1\|2]` | (Thread) type au prochain demarrage : 0 routeur, 1 MED des l'init (sans nouvelle attache), 2 MED apres `Matter.begin()` (ancien) (NVS) |
-| `matter maxint [0\|10..3600]` | (Thread) plafond de l'intervalle max des abonnements neufs, 20 s par defaut, 0 = celui du controleur (NVS). Ne vaut qu'a partir du prochain abonnement neuf d'Apple : un abonnement repris garde son intervalle sauve |
-| `lampe` | pilote Halo 1 : consigne, etat cru, champs a livrer, lien, radio |
-| `lampe on` / `lampe off` | allumer / eteindre, memes regles que Matter |
-| `lampe avant on\|off` / `lampe arriere on\|off` | une lampe (comme EP2 / EP3) |
-| `lampe mode avant\|arriere\|deux` | lampes allumees (et allumage) |
-| `lampe lum 4C..FE` / `lampe niveau 1..254` | luminosite brute (hexa) / niveau Matter |
-| `lampe temp 0..100` / `lampe mired 153..370` | temperature : 0 froid, 100 chaud / en mireds |
-| `lampe auto` | bouton A (refuse lampe eteinte) |
-| `lampe sync` | renvoie tout ce qui est connu |
-| `lampe trace 0\|1` / `lampe stats` | journal par evenement / compteurs, dont les relances automatiques du module par cause |
-| `lampe adresse [8 hexa]` | adresse de la lampe (ordre d'ecriture), en NVS |
-| `lampe help` | toutes les commandes `lampe` (reglages et banc) |
-| `led` | LED d'etat : motif en cours, couleur affichee, etat du module radio |
-| `led test` / `led stop` | joue chaque motif de la LED a tour de role (21 s), sans bloquer / l'arrete |
-| `ecoute 4FF0FD63 5 [ms]` | ecoute passive de la telecommande, sans jamais accuser |
-| `txack <adr> <canal> <charge> [n] [ms]` | banc : emission au format standard, accuse automatique, verdict par essai |
-| `regs` | dump des registres du BC5602 |
-| `rfinit` | re-teste le module apres correction du cablage, sans reflasher |
-| `wifi <ssid> <mdp>` | identifiants Wi-Fi (ESP32 classique uniquement) |
-| `decommission` | retire toutes les fabriques Matter |
-| `reboot` | sauve l'etat de la lampe, puis redemarre |
+| `info` | hardware, radio configuration, driver state |
+| `matter` | Matter state, pairing code, node identity and versions, bridge counters, Identify requests |
+| `matter impulsion [300..15000]` | duration of the EP4 pulse in ms, kept in NVS (only when EP4 is re-enabled; otherwise a message says so) |
+| `matter reprise` | (Thread) immediately restarts the resumption of Apple Home's saved subscriptions |
+| `matter reprise auto [0\|1]` | (Thread) restarts on its own after a reboot: Thread + SRP ready for 10 s, not before 50 s (plus the saved floor), for each saved subscriber with no active subscription; CASE session first (a failure costs the stack nothing), then resumption; then 30 s, 60 s, 5 min after each failure, and a check every 5 min as long as a subscription is active (NVS) |
+| `matter med [0\|1\|2]` | (Thread) device type at the next boot: 0 router, 1 MED from init (no new attach), 2 MED after `Matter.begin()` (old behavior) (NVS) |
+| `matter maxint [0\|10..3600]` | (Thread) cap on the max interval of new subscriptions, 20 s by default, 0 = the controller's (NVS). Only applies from Apple's next new subscription: a resumed subscription keeps its saved interval |
+| `lampe` | Halo 1 driver: target, raw state, fields to deliver, link, radio |
+| `lampe on` / `lampe off` | turn on / off, same rules as Matter |
+| `lampe avant on\|off` / `lampe arriere on\|off` | one lamp, front or back (like EP2 / EP3) |
+| `lampe mode avant\|arriere\|deux` | lamps lit (and power on) |
+| `lampe lum 4C..FE` / `lampe niveau 1..254` | raw brightness (hex) / Matter level |
+| `lampe temp 0..100` / `lampe mired 153..370` | temperature: 0 cold, 100 warm / in mireds |
+| `lampe auto` | button A (refused when the lamp is off) |
+| `lampe sync` | resends everything known |
+| `lampe trace 0\|1` / `lampe stats` | per-event log / counters, including the automatic module restarts by cause |
+| `lampe adresse [8 hex]` | lamp address (write order), in NVS |
+| `lampe help` | all `lampe` commands (settings and bench) |
+| `led` | status LED: current pattern, displayed color, radio module state |
+| `led test` / `led stop` | plays each LED pattern in turn (21 s), without blocking / stops it |
+| `ecoute 4FF0FD63 5 [ms]` | passive listening to the remote, never acknowledging |
+| `txack <adr> <canal> <charge> [n] [ms]` | bench: standard-format transmission, automatic acknowledgement, verdict per attempt |
+| `regs` | dump of the BC5602 registers |
+| `rfinit` | re-tests the module after fixing the wiring, without reflashing |
+| `wifi <ssid> <mdp>` | Wi-Fi credentials (classic ESP32 only) |
+| `decommission` | removes all Matter fabrics |
+| `reboot` | saves the lamp state, then reboots |
 
-`help` liste aussi les outils de banc et de retro-ingenierie : `prxack`,
-sondes de la puce, du spectre et de GIO3, module CC2500. `addr` et `chan` ne
-reglent que ces outils ; le pilote a sa propre adresse (`lampe adresse`).
+`help` also lists the bench and reverse-engineering tools: `prxack`, chip,
+spectrum and GIO3 probes, CC2500 module. `addr` and `chan` only configure
+those tools; the driver has its own address (`lampe adresse`).
 
-Une ligne de plus de 127 caracteres est refusee (`Ligne refusee (trop_long)`),
-au lieu d'etre tronquee puis executee ; Ctrl-U vide la ligne en cours.
+A line longer than 127 characters is refused (`Ligne refusee (trop_long)`),
+instead of being truncated and then executed; Ctrl-U clears the current
+line.
 
-### Mode machine (app compagnon, depuis la 0.4.0)
+### Machine mode (companion app, since 0.4.0)
 
-L'app de supervision (macOS d'abord) parle a la carte par le meme port USB,
-avec le protocole de [docs/PROTOCOLE-JSON.md](docs/PROTOCOLE-JSON.md) : elle
-envoie les commandes de la console prefixees de `id=<n> `, la carte repond par
-des lignes machine (octet RS 0x1E + un objet JSON compact + LF, 1024 octets au
-plus), melees au texte habituel. Sans `json 1` et sans `id=`, la console
-humaine est inchangee.
+The supervision app (macOS first) talks to the board over the same USB
+port, or over the Thread network (UDP, section 10), with the protocol in
+[docs/PROTOCOLE-JSON.md](docs/PROTOCOLE-JSON.md): it sends console commands
+prefixed with `id=<n> `, and the board answers with machine lines (RS byte
+0x1E + a compact JSON object + LF, 1024 bytes at most), mixed with the usual
+text. Without `json 1` and without `id=`, the human console is unchanged.
 
-| Commande | Effet |
+| Command | Effect |
 |---|---|
-| `json` | etat de la session, en texte |
-| `json 1 [bail 0\|10..600]` | mode machine : echo, invite et `Serial.flush()` coupes ; `hello`, `config` puis l'instantane complet ; bail de 30 s par defaut, renouvele par toute ligne recue (`json ping`) ; `bail 0` au banc : jusqu'a `json 0` |
-| `json 0` | retour au mode humain (message `fin`, puis l'invite) ; par le reseau, rend aussi la place de la session (rev 4) |
-| `json etat` / `json hello` | instantane (`etat`, `compteurs`, `reseau`) / `hello` et `config`, une fois, meme en mode humain |
-| `json periode\|compteurs\|reseau <ms>` | periodes des `etat` (0 ou 200..60000, 1000 par defaut), `compteurs` (idem), `reseau` (0 ou 1000..60000, 5000) ; `hb` toutes les 2 s si les `etat` sont coupes ou lents |
-| `json trames 0\|1` / `json log 0\|1` | evenements `rx` et `tx` (oui par defaut) / annonces `[lampe]` et `[matter]` en messages `log` au lieu du texte |
+| `json` | session state, as text |
+| `json 1 [bail 0\|10..600]` | machine mode: echo, prompt and `Serial.flush()` disabled; `hello`, `config`, then the full snapshot; 30 s lease by default, renewed by any received line (`json ping`); `bail 0` on the bench: until `json 0` |
+| `json 0` | back to human mode (`fin` message, then the prompt); over the network, also frees the session's slot (rev 4) |
+| `json etat` / `json hello` | snapshot (`etat`, `compteurs`, `reseau`) / `hello` and `config`, once, even in human mode |
+| `json periode\|compteurs\|reseau <ms>` | periods of the `etat` messages (0 or 200..60000, 1000 by default), `compteurs` (same), `reseau` (0 or 1000..60000, 5000); `hb` every 2 s if the `etat` messages are off or slow |
+| `json trames 0\|1` / `json log 0\|1` | `rx` and `tx` events (on by default) / `[lampe]` and `[matter]` announcements as `log` messages instead of text |
 
-- Avec `id=`, toute ligne recoit une `reponse` ; les commandes `lampe` d'etat
-  (`on`, `off`, `avant`, `arriere`, `mode`, `lum`, `niveau`, `temp`, `mired`,
-  `auto`, `sync`) deviennent asynchrones : `reponse` tout de suite (code
-  `accepte`, `differe` ou `ok`), puis `livraison` quand le pilote a fini. Les
-  autres commandes gardent leur texte, entre `reponse debut` et `reponse fin`.
-- La carte n'attend jamais l'app : une ligne qui ne tient pas dans le tampon
-  d'emission est perdue et comptee (`etat.sante.sys.json_perdus`), et `n`
-  saute. Seule exception, sans bloquer la boucle : une `reponse` differee
-  (apres l'instantane de `json 1`, `json etat`, `json hello`, ou la `fin`
-  d'une commande dont le texte a rempli le tampon, comme `help`) attend en
-  file la place d'une ligne entiere. Au plus 20 lignes par seconde de l'hote
+- With `id=`, every line receives a `reponse`; the `lampe` state commands
+  (`on`, `off`, `avant`, `arriere`, `mode`, `lum`, `niveau`, `temp`,
+  `mired`, `auto`, `sync`) become asynchronous: `reponse` right away (code
+  `accepte`, `differe` or `ok`), then `livraison` when the driver is done.
+  The other commands keep their text, between `reponse debut` and
+  `reponse fin`.
+- The board never waits for the app: a line that does not fit in the
+  transmit buffer is lost and counted (`etat.sante.sys.json_perdus`), and
+  `n` skips. One exception, without blocking the loop: a deferred `reponse`
+  (after the snapshot of `json 1`, `json etat`, `json hello`, or the `fin` of
+  a command whose text filled the buffer, such as `help`) waits in a queue
+  for room for a whole line. At most 20 lines per second from the host
   (`cadence`).
-- Rien n'est persiste : chaque demarrage repart en mode humain. `json cle`
-  (transport reseau, section 10) n'existe pas encore.
-- Au banc, `python3 tools/json_check.py <capture>` verifie une capture brute
-  du port (tramage, types, champs obligatoires, tailles, trous de `n`) ; un
-  champ inconnu de la v1 n'est qu'un avertissement (`--strict` : une erreur).
+- Nothing is persisted: every boot starts in human mode. `json cle` sets the
+  network transport key (section 10.4), over USB only.
+- On the bench, `python3 tools/json_check.py <capture>` checks a raw capture
+  of the port (framing, types, required fields, sizes, gaps in `n`); a field
+  unknown to v1 is only a warning (`--strict`: an error).
 
-## Protocole du Halo 1
+## Halo 1 protocol
 
-Le protocole est etabli, et verifie par emission sur la lampe : trame BC5602
-standard (adresse de 4 octets, PCF de 9 bits, CRC-16 materiel), charge de deux
-octets (drapeaux marche / lampes / selecteur, puis valeur), accuse vide. On ne
-peut donc pas lire l'etat de la lampe : le pilote suit celui qu'il lui envoie
-et ce qu'il entend de la telecommande. Detail, preuves et questions encore
-ouvertes : [docs/PROTOCOL.md](docs/PROTOCOL.md) (bloc d'en-tete, puis les
-sections Halo 1 a la fin).
+The protocol is established, and verified by transmitting to the lamp:
+standard BC5602 frame (4-byte address, 9-bit PCF, hardware CRC-16), two-byte
+payload (power / lamps / selector flags, then value), empty
+acknowledgement. So the lamp's state cannot be read: the driver tracks the
+state it sends and what it hears from the remote. Details, evidence and
+still-open questions: [docs/PROTOCOL.md](docs/PROTOCOL.md) (header block,
+then the Halo 1 sections at the end).
 
-## Structure
+## Layout
 
 ```
-platformio.ini            4 cibles ESP32, plateforme pioarduino, partitions huge_app
-src/config.h              broches, reglages du pilote Halo 1, identite Matter
-src/fw_version.h          version du firmware (FW_VERSION + revision git)
-src/app_desc.c            descripteur d'application : version rapportee par Matter
-src/bc5602.{h,cpp}        pilote bas niveau du transceiver
-src/cc2500.{h,cpp}        pilote minimal du CC2500 : ecoute brute (commandes cc*)
-src/swd.{h,cpp}           SWD en bit-banging (commande swd)
-src/halo.{h,cpp}          demarrage du module (aussi relance du pilote), outils de banc
-src/halo1_proto.{h,cpp}   protocole Halo 1 pur : trames, CRC, planification
-src/halo1_map.{h,cpp}     correspondances Matter <-> lampe, regles d'intention
-src/halo1_radio.{h,cpp}   sequences BC5602 prouvees, reconfiguration non bloquante
-src/halo1_watch.{h,cpp}   quand relancer le module sur symptome de puce (logique pure, testee sur l'hote)
-src/halo1_lamp.{h,cpp}    pilote : consigne, rafales accusees, suivi de la telecommande
-src/cli_lampe.cpp         commandes 'lampe ...'
-src/matter_bridge.{h,cpp} endpoints Matter, boite d'intentions, reflet de la consigne, Identify
-src/matter_resume.h       calendrier de relance des abonnements Matter (pont Thread)
-src/halo1_events.h        evenements du pilote en donnees simples (trames, paquets, relances, module)
-src/json_out.{h,cpp}      protocole JSON : ecrivain de lignes machine, messages, file (pur, teste sur l'hote)
-src/json_mode.{h,cpp}     mode machine : session, commandes 'json', etat periodique, evenements, livraisons
-src/status_led.{h,cpp}    LED d'etat : motifs et priorites (logique pure, testee sur l'hote)
-src/boot_button.{h,cpp}   bouton BOOT : appui court = redemarrage, 8 s = desappairage (logique pure, testee sur l'hote)
-src/net.{h,cpp}           Wi-Fi pour les cibles sans commissioning BLE
-src/cli.{h,cpp}           console série de rétro-ingénierie
-src/main.cpp              assemblage
-docs/PROTOCOL.md          protocole radio, connu / à confirmer, méthodes de capture
-docs/PROTOCOLE-JSON.md    protocole JSON entre la carte et l'app compagnon (mode machine)
-docs/WIRING.md            câblage et pièges matériels
-docs/AUDIT-2026-09-23.md  audit du format de trame et des bogues, avec leur statut
-docs/PLAN-PILOTE-HALO1.md plan du pilote Halo 1, etapes et resultats du banc
-docs/BRIEF-BOITIER.md     brief du boitier imprime 3D
-docs/PISTES-FUTURES.md    idees hors du perimetre actuel
-tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module, de la LED d'etat, du bouton BOOT et du protocole JSON, sans carte
-tools/json_check.py       verifie des lignes machine capturees (et les exemples de docs/PROTOCOLE-JSON.md)
-tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
+platformio.ini            4 ESP32 targets, pioarduino platform, huge_app partitions
+src/config.h              pins, Halo 1 driver settings, Matter identity
+src/fw_version.h          firmware version (FW_VERSION + git revision)
+src/app_desc.c            application descriptor: version reported by Matter
+src/bc5602.{h,cpp}        low-level transceiver driver
+src/cc2500.{h,cpp}        minimal CC2500 driver: raw listening (cc* commands)
+src/swd.{h,cpp}           bit-banged SWD (swd command)
+src/halo.{h,cpp}          module startup (also the driver's restart), bench tools
+src/halo1_proto.{h,cpp}   pure Halo 1 protocol: frames, CRC, scheduling
+src/halo1_map.{h,cpp}     Matter <-> lamp mappings, intent rules
+src/halo1_radio.{h,cpp}   proven BC5602 sequences, non-blocking reconfiguration
+src/halo1_watch.{h,cpp}   when to restart the module on a chip symptom (pure logic, tested on the host)
+src/halo1_lamp.{h,cpp}    driver: target, acknowledged bursts, tracking of the remote
+src/cli_lampe.cpp         'lampe ...' commands
+src/matter_bridge.{h,cpp} Matter endpoints, intent box, mirror of the target, Identify
+src/matter_resume.h       resumption schedule of Matter subscriptions (Thread bridge)
+src/halo1_events.h        driver events as plain data (frames, packets, restarts, module)
+src/json_out.{h,cpp}      JSON protocol: machine line writer, messages, queue (pure, tested on the host)
+src/json_mode.{h,cpp}     machine mode: session, 'json' commands, periodic state, events, deliveries
+src/h1_proto.{h,cpp}      H1 envelope of the network transport: sessions, MAC, replay (pure, tested on the host)
+src/h1_crypto.cpp         HMAC-SHA256 and SHA-256 (mbedTLS)
+src/net_udp.{h,cpp}       network transport: UDP over Thread, port 5480, key in NVS
+src/status_led.{h,cpp}    status LED: patterns and priorities (pure logic, tested on the host)
+src/boot_button.{h,cpp}   BOOT button: short press = reboot, 8 s = unpair (pure logic, tested on the host)
+src/net.{h,cpp}           Wi-Fi for targets without BLE commissioning
+src/cli.{h,cpp}           reverse-engineering serial console
+src/main.cpp              assembly
+docs/PROTOCOL.md          radio protocol, known / to confirm, capture methods
+docs/PROTOCOLE-JSON.md    JSON protocol between the board and the companion app (machine mode)
+docs/WIRING.md            wiring and hardware pitfalls
+docs/AUDIT-2026-09-23.md  audit of the frame format and of the bugs, with their status
+docs/PLAN-PILOTE-HALO1.md Halo 1 driver plan, steps and bench results
+docs/BRIEF-BOITIER.md     brief for the 3D-printed case
+docs/PISTES-FUTURES.md    ideas outside the current scope
+docs/ETUDE-THREAD-COMPAGNON.md  study of the network transport and of the companion app
+apps/macos/               macOS companion app (SwiftUI): USB and Thread network
+tools/test_halo1.sh       host tests of the Halo 1 protocol, module watchdog, status LED, BOOT button and JSON protocol, without a board
+tools/json_check.py       checks captured machine lines (and the examples in docs/PROTOCOLE-JSON.md)
+tools/git_rev.py          git revision for FW_GIT_REV (PlatformIO dynamic flag)
+tools/halo_udp.py         bench client of the network transport (key, session, refusal)
+tools/macos/halo-routes/  macOS system helper that keeps the Thread route (kernel bug)
 ```
 
-## Crédits
+## Credits
 
-Le protocole du Halo 2 a été rétro-conçu par
+The Halo 2 protocol was reverse-engineered by
 [kuzmin-no](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration)
-(MicroPython, Raspberry Pi Pico W, sortie MQTT). Ce projet est parti d'un
-portage C++ de ce travail, pour ESP32 avec Matter natif ; le Halo 1 s'est
-révélé parler un autre protocole (charge de deux octets, accusé vide), et la
-couche Halo 2 a été retirée une fois le pilote Halo 1 validé.
+(MicroPython, Raspberry Pi Pico W, MQTT output). This project started as a
+C++ port of that work, for ESP32 with native Matter; the Halo 1 turned out to
+speak a different protocol (two-byte payload, empty acknowledgement), and the
+Halo 2 layer was removed once the Halo 1 driver was validated.
 
-L'identification du BC5602 dans le Halo 1 revient à `hertzg` et le teardown du
-PCB à `b4shful`, sur le
-[fil Home Assistant](https://community.home-assistant.io/t/benq-screenbar-support/490864).
+Identifying the BC5602 in the Halo 1 is credited to `hertzg`, and the PCB
+teardown to `b4shful`, on the
+[Home Assistant thread](https://community.home-assistant.io/t/benq-screenbar-support/490864).
