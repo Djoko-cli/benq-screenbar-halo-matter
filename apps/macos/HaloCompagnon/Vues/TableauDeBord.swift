@@ -297,7 +297,7 @@ private struct CarteThread: View {
             }
             if pont.accesReseau != .inconnu {
                 Divider()
-                AccesReseau()
+                ResumeAccesReseau()
             }
             // Deja en service : l'etiquette du pont, a la demande (hors service,
             // elle a sa propre carte en tete du tableau de bord).
@@ -318,38 +318,33 @@ private struct CarteThread: View {
     }
 }
 
-/// Cle du transport reseau, par l'USB (10.4) : etat et creation.
-private struct AccesReseau: View {
+/// Etat de la cle du transport reseau, en lecture seule : la gestion (creer,
+/// renouveler, oublier) est dans Reglages › Acces reseau Thread.
+private struct ResumeAccesReseau: View {
     @Environment(Pont.self) private var pont
-    @State private var confirmation = false
+    @Environment(\.openSettings) private var ouvrirReglages
+    @AppStorage(OngletReglages.cle) private var onglet: OngletReglages = .general
 
     var body: some View {
         HStack {
             switch pont.accesReseau {
             case .sansCle:
                 Text("Accès réseau : aucune clé").foregroundStyle(.secondary)
-                Spacer()
-                Button("Activer l'accès réseau…") { confirmation = true }
             case .cleConnue(_, let e):
                 Text("Clé \(e) connue de ce Mac").foregroundStyle(.secondary)
-                Spacer()
-                Button("Nouvelle clé…") { confirmation = true }
             case .cleInconnue(_, let e):
                 Text("Clé \(e) inconnue de ce Mac").foregroundStyle(.orange)
-                Spacer()
-                Button("Nouvelle clé…") { confirmation = true }
             case .inconnu:
                 EmptyView()
+            }
+            Spacer()
+            Button("Gérer…") {
+                onglet = .accesReseau
+                ouvrirReglages()
             }
         }
         .font(.callout)
         .controlSize(.small)
-        .disabled(!pont.peutCommander)
-        .confirmationDialog("Créer une nouvelle clé réseau ?", isPresented: $confirmation) {
-            Button("Créer la clé") { pont.creerCle() }
-        } message: {
-            Text("La carte remplace sa clé : les sessions réseau en cours tombent. La nouvelle clé est rangée dans le trousseau de ce Mac ; halo_udp.py l'y relira.")
-        }
     }
 }
 
