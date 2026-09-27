@@ -5,3 +5,6 @@ logs/
 __pycache__/
 # Journaux de pio device monitor (log2file) : ils peuvent contenir une session complete.
 platformio-device-monitor-*.log
+
+# Images disque de l app (fabriquees localement, jamais versionnees)
+*.dmg
