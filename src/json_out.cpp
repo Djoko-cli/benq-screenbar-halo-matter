@@ -383,11 +383,12 @@ void sessionEnd(Writer &w, uint32_t n, uint32_t ms, const char *cause) {
   w.str("cause", cause);
 }
 
-void led(Writer &w, uint32_t n, uint32_t ms, const char *motif, const char *before, bool test) {
+void led(Writer &w, uint32_t n, uint32_t ms, const char *motif, const char *before, bool test, uint32_t depuisMs) {
   w.begin("led", n, ms);
   w.str("motif", motif);
   w.str("avant", before);
   w.boolean("test", test);
+  w.u32("depuis_ms", depuisMs);
 }
 
 void logLine(Writer &w, uint32_t n, uint32_t ms, const char *src, const char *niv, const char *txt,

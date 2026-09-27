@@ -505,12 +505,15 @@ static void etatSante(uint8_t o, uint32_t now) {
   sW.obj("led");
   statusled::Pattern p;
   bool testing = false;
-  if (statusLedState(&p, &testing)) {
+  uint32_t depuis = 0;
+  if (statusLedState(&p, &testing, &depuis)) {
     sW.str("motif", statusled::patternCode(p));
     sW.boolean("test", testing);
+    sW.u32("depuis_ms", depuis);
   } else {
     sW.null("motif");
     sW.null("test");
+    sW.null("depuis_ms");
   }
   sW.end();
 #ifndef DIAG_ONLY
@@ -772,6 +775,10 @@ static void replyEmit(uint8_t o, const Reply &r, bool cache) {
   if (claim()) {
     reply(sW, sSinks[o].n, millis(), r);
     send(o);
+  } else {
+    // Ligne en cours (jamais vu) : perdue, n consomme et compte comme ailleurs.
+    sSinks[o].n++;
+    sSinks[o].lost++;
   }
   if (cache) cacheReply(o, r);
 }
@@ -1230,6 +1237,10 @@ void jsonCommand(char *arg, const JsonCmd &c) {
       replyNow(c, true, "ok", k.machine ? nullptr : "deja en mode humain");
       if (k.machine) leaveMachine(o, false, now);
       else if (!c.hasId) Serial.println("json : mode machine deja coupe");
+#if MATTER_NET_THREAD
+      // Le client s'en va : sa place revient au suivant sans attendre 30 s (10.4).
+      if (remote(o)) netUdpEnd((uint8_t)(o - 1));
+#endif
       return;
     }
   } else if (!strcmp(sub, "etat")) {
@@ -1411,9 +1422,11 @@ static bool onLampLog(bool trace, const char *line) { return jsonLog("lampe", tr
 static const LampHooks kLampHooks = {onLampRx, onLampTx, onLampRelaunch, onLampModule, onLampLog};
 
 static void onLed(statusled::Pattern now, statusled::Pattern before, bool testing) {
+  uint32_t depuis = 0;
+  statusLedState(nullptr, nullptr, &depuis);
   for (uint8_t o = 0; o < kSinks; o++) {
     if (!sSinks[o].machine || !claim()) continue;
-    led(sW, sSinks[o].n, millis(), statusled::patternCode(now), statusled::patternCode(before), testing);
+    led(sW, sSinks[o].n, millis(), statusled::patternCode(now), statusled::patternCode(before), testing, depuis);
     send(o);
   }
 }

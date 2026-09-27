@@ -207,7 +207,7 @@ Pattern Logic::pick(uint32_t now, uint32_t &t) {
 Frame Logic::frame(uint32_t now) {
   uint32_t t = 0;
   const Pattern p = pick(now, t);
-  return Frame{p, render(p, t), renderMono(p, t)};
+  return Frame{p, render(p, t), renderMono(p, t), t};
 }
 
 uint32_t effectEnd(uint32_t end, uint8_t effect, uint32_t now) {
@@ -249,7 +249,8 @@ using namespace statusled;
 #ifndef DIAG_ONLY
 static constexpr uint32_t kNetSampleMs = 200;  // etat Matter releve 5 fois par seconde, pas a chaque tour
 static Logic sLed;
-static Frame sFrame{Pattern::Unpaired, Rgb{}, false};  // image du dernier tour ('led')
+static Frame sFrame{Pattern::Unpaired, Rgb{}, false, 0};  // image du dernier tour ('led')
+static uint32_t sPhaseAt = 0;                              // millis() du depart de sa phase
 static bool sFrameValid = false;                        // sFrame vient d'un tour de statusLedPoll()
 static bool sShownValid = false;                        // quelque chose a deja ete ecrit
 static StatusLedObserver sObserver = nullptr;
@@ -339,7 +340,9 @@ void statusLedPoll() {
     sSeenGiveUps = giveUps;
     sLed.unreachable(now);
   }
-  show(sLed.frame(now));
+  const Frame f = sLed.frame(now);
+  sPhaseAt = now - f.t;  // avant show() : l'evenement 'led' porte deja la bonne phase
+  show(f);
 #endif
 }
 
@@ -351,14 +354,16 @@ void statusLedSetObserver(StatusLedObserver fn) {
 #endif
 }
 
-bool statusLedState(Pattern *p, bool *testing) {
+bool statusLedState(Pattern *p, bool *testing, uint32_t *depuisMs) {
 #ifndef DIAG_ONLY
   if (p) *p = sFrame.p;
   if (testing) *testing = sLed.testing();
+  if (depuisMs) *depuisMs = millis() - sPhaseAt;
   return true;
 #else
   (void)p;
   (void)testing;
+  (void)depuisMs;
   return false;
 #endif
 }

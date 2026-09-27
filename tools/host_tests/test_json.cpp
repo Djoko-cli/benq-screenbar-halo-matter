@@ -379,8 +379,8 @@ static void testEvents() {
     expectLine(gW, want, names[i]);
   }
 
-  led(gW, 77, 95207, "livree", "operationnel", false);
-  expectLine(gW, "{\"v\":1,\"t\":\"led\",\"n\":77,\"ms\":95207,\"motif\":\"livree\",\"avant\":\"operationnel\",\"test\":false}",
+  led(gW, 77, 95207, "livree", "operationnel", false, 0);
+  expectLine(gW, "{\"v\":1,\"t\":\"led\",\"n\":77,\"ms\":95207,\"motif\":\"livree\",\"avant\":\"operationnel\",\"test\":false,\"depuis_ms\":0}",
              "led (12.2)");
   logLine(gW, 640, 200100, "lampe", "notice", "[lampe] injoignable : consigne abandonnee", 0);
   expectLine(gW,
@@ -617,7 +617,7 @@ static void testWorstCases() {
   checkBudget("log", &worst);
   heartbeat(gW, M, M, M, M, M);
   checkBudget("hb", &worst);
-  led(gW, M, M, "identification", "identification", true);
+  led(gW, M, M, "identification", "identification", true, M);
   checkBudget("led", &worst);
   printf("  pire cas des evenements : %zu octets (budget %zu)\n", worst, kBudget);
 }

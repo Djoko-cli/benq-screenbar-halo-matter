@@ -134,6 +134,7 @@ struct Session {
   uint32_t tx = 0;       // dernier ctr emis par la carte
   uint32_t since = 0;    // creation (provisoire) ou promotion (etablie)
   uint32_t lastAt = 0;   // dernier message au MAC juste (ou SALUT pour la provisoire)
+  bool ended = false;    // 'json 0' execute : sa place se reprend sans attendre kEvictIdleMs
   Peer peer;
 };
 
@@ -169,10 +170,17 @@ class Table {
   // Message de l'app. Ok : *slot = session etablie (0..kSlots-1) ; *fresh vrai si
   // elle vient d'y etre promue (premier message au MAC juste de la poignee de
   // main) : l'etat de session JSON de cet emplacement repart de zero. La session
-  // provisoire promue prend un emplacement libre, sinon celui de la session la
-  // moins recemment active, si elle est muette depuis kEvictIdleMs ; sinon Full
-  // (rien n'est promu ; ce ctr est brule, l'app renvoie avec un ctr neuf).
+  // provisoire promue prend un emplacement libre, sinon celui d'une session
+  // terminee (end), sinon celui de la session la moins recemment active, si
+  // elle est muette depuis kEvictIdleMs ; sinon Full (rien n'est promu ; ce ctr
+  // est brule, l'app renvoie avec un ctr neuf).
   Verdict onData(const Parsed &p, const Peer &from, uint32_t now, uint8_t *slot, bool *fresh);
+
+  // L'app a termine la session slot ('json 0') : elle reste etablie (ses
+  // dernieres lignes partent, un renvoi du json 0 recoit sa reponse), mais sa
+  // place revient au prochain client sans attendre kEvictIdleMs. Pour de bon :
+  // l'app ne reprend jamais une session apres 'json 0', elle en ouvre une autre.
+  void end(uint8_t slot);
 
   // En-tete d'un message de la carte pour l'emplacement slot, MAC calcule sur
   // payload : "H1 <sid> <ctr> <mac> " dans hdr, longueur rendue (0 : pas de

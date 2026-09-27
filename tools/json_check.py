@@ -293,7 +293,7 @@ SCHEMAS = {
                     "derniere": Null(Obj({"cause": Enum("verif", "delais", "bruit", "sourde", "l3"), "il_y_a_s": U32})),
                 }
             ),
-            "led": Obj({"motif": Null(LED), "test": Null(BOOL)}),
+            "led": Obj({"motif": Null(LED), "test": Null(BOOL), "depuis_ms": Opt(Null(U32))}),
             "matter": Null(Obj({"en_service": BOOL, "connecte": BOOL, "identify": BOOL})),
             "sys": counters(
                 "heap", "heap_min", "heap_bloc", "pile_boucle", "boucle_max_ms", "json_perdus", "json_trop_longs",
@@ -624,7 +624,7 @@ SCHEMAS = {
             "total": U32,
         }
     ),
-    ("led", None): Obj({"motif": LED, "avant": LED, "test": BOOL}),
+    ("led", None): Obj({"motif": LED, "avant": LED, "test": BOOL, "depuis_ms": Opt(U32)}),
     ("log", None): Obj(
         {
             "src": Enum("lampe", "matter", "bouton"),
