@@ -441,6 +441,22 @@
         }
       }
     },
+    "Accès réseau Thread" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread Network Access"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accès réseau Thread"
+          }
+        }
+      }
+    },
     "Actifs" : {
       "localizations" : {
         "en" : {
@@ -607,28 +623,50 @@
         }
       }
     },
-    "Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)" : {
+    "Aucun pont : Réglages › Accès réseau Thread, pont branché en USB" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No bridge: \"Enable network access\" over USB (Thread and Matter card)"
+            "value" : "No bridge: Settings › Thread Network Access, with the bridge plugged in over USB"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Aucun pont : « Activer l'accès réseau » par l'USB (carte Thread et Matter)"
+            "value" : "Aucun pont : Réglages › Accès réseau Thread, pont branché en USB"
           }
         }
       }
     },
-    "Aucun port /dev/cu.*" : {
+    "Aucun pont : brancher un pont en USB, le connecter (menu Source), puis « Activer l'accès réseau… » ci-dessous." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No /dev/cu.* port"
+            "value" : "No bridge: plug a bridge in over USB, connect to it (Source menu), then use “Enable network access…” below."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun pont : brancher un pont en USB, le connecter (menu Source), puis « Activer l'accès réseau… » ci-dessous."
+          }
+        }
+      }
+    },
+    "Aucun pont branché en USB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No bridge plugged in over USB"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun pont branché en USB"
           }
         }
       }
@@ -735,6 +773,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A Button (Auto Mode)"
+          }
+        }
+      }
+    },
+    "Brancher le pont en USB et le connecter (menu Source) pour créer ou renouveler sa clé." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plug the bridge in over USB and connect to it (Source menu) to create or renew its key."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brancher le pont en USB et le connecter (menu Source) pour créer ou renouveler sa clé."
           }
         }
       }
@@ -1691,6 +1745,38 @@
         }
       }
     },
+    "Général" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "General"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Général"
+          }
+        }
+      }
+    },
+    "Gérer…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gérer…"
+          }
+        }
+      }
+    },
     "Halo Compagnon" : {
       "localizations" : {
         "en" : {
@@ -1899,6 +1985,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "La clé de %@ est retirée du trousseau de ce Mac ; le pont garde la sienne. Pour revenir : « Activer l'accès réseau » par l'USB crée une nouvelle clé."
+          }
+        }
+      }
+    },
+    "La clé ne passe que par l'USB. Elle est rangée dans le trousseau de ce Mac, où halo_udp.py la relit : à chaque nouvelle clé, macOS redemande l'accès pour security." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key only travels over USB. It is stored in this Mac's keychain, where halo_udp.py reads it back: after each new key, macOS asks again to allow security."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La clé ne passe que par l'USB. Elle est rangée dans le trousseau de ce Mac, où halo_udp.py la relit : à chaque nouvelle clé, macOS redemande l'accès pour security."
           }
         }
       }
@@ -2367,18 +2469,18 @@
         }
       }
     },
-    "Oublier un pont…" : {
+    "Oublier…" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Forget a bridge…"
+            "value" : "Forget…"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Oublier un pont…"
+            "value" : "Oublier…"
           }
         }
       }
@@ -2555,6 +2657,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Longest loop() pass"
+          }
+        }
+      }
+    },
+    "Pont Halo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Halo Bridge"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pont Halo"
+          }
+        }
+      }
+    },
+    "Pont branché en USB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bridge Plugged In over USB"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pont branché en USB"
+          }
+        }
+      }
+    },
+    "Ponts connus de ce Mac" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bridges Known to This Mac"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ponts connus de ce Mac"
           }
         }
       }

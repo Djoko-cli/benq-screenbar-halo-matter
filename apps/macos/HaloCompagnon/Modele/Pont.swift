@@ -72,6 +72,11 @@ final class Pont {
     private(set) var alerteReseau: AlerteReseau?
     /// Ponts dont ce Mac a la cle (trousseau).
     private(set) var pontsConnus: [PontConnu] = []
+    /// Ponts deja vus (modele et nom SRP par MAC) : noms du menu Source,
+    /// gardes dans les preferences de l'app.
+    private(set) var repertoire = RepertoirePonts()
+    @ObservationIgnored private let preferences: UserDefaults
+    static let cleRepertoire = "repertoirePonts"
     private(set) var derniereReception: Date?
     /// Commande de banc de plus de 20 min : proposer de fermer le port (6.5).
     var propositionFermeture = false
@@ -115,11 +120,17 @@ final class Pont {
     /// Delais de reouverture apres une fermeture : 300 ms, puis 1 s, 2 s, 5 s (3.1).
     static let delaisReconnexion: [Double] = [0.3, 1, 2, 5]
 
-    init(trousseau: any TrousseauCles = TrousseauSysteme(), trousseauDemo: any TrousseauCles = TrousseauMemoire()) {
+    init(trousseau: any TrousseauCles = TrousseauSysteme(), trousseauDemo: any TrousseauCles = TrousseauMemoire(),
+         preferences: UserDefaults = .standard) {
         self.trousseau = trousseau
         self.trousseauDemo = trousseauDemo
+        self.preferences = preferences
         pontsConnus = trousseau.lister()
-        ports = SurveillantUSB.lister()
+        if let d = preferences.data(forKey: Self.cleRepertoire),
+           let r = try? JSONDecoder().decode(RepertoirePonts.self, from: d) {
+            repertoire = r
+        }
+        ports = Self.portsVisibles(SurveillantUSB.lister())
         surveillant.changement = { [weak self] ports in self?.portsChanges(ports) }
         surveillant.demarrer()
         cheminReseau.pathUpdateHandler = { [weak self] chemin in
@@ -491,8 +502,35 @@ final class Pont {
 
     /// Arrivee ou depart d'un port (IOKit) : on rouvre des que la carte revient,
     /// meme apres l'abandon des essais minutes (etat `.erreur`).
+    /// Ports du menu Source : les cartes Espressif seulement (USB Serial/JTAG
+    /// du C6, VID 303A) ; ni Bluetooth, ni console de debogage, ni ecrans.
+    static func portsVisibles(_ tous: [PortUSB]) -> [PortUSB] { tous.filter(\.estEspressif) }
+
+    /// Titre d'un port : "HALO1 · 58:E6:C5:DD:7E:F0" (son numero de serie USB
+    /// est la MAC) ; sans MAC, son nom de port.
+    func titre(port p: PortUSB) -> String {
+        guard let mac = RepertoirePonts.mac(p.serie) else { return p.chemin.replacingOccurrences(of: "/dev/cu.", with: "") }
+        return repertoire.titre(mac: mac)
+    }
+
+    /// Titre d'un pont du trousseau : celui de sa carte si le repertoire la
+    /// connait (vue au moins une fois, par l'USB ou le reseau).
+    func titre(pont p: PontConnu) -> String {
+        guard let mac = repertoire.mac(pourSrp: p.nom) else { return tr("Pont Halo") }
+        return repertoire.titre(mac: mac)
+    }
+
+    /// Identite et bloc ip d'une vraie carte (jamais la demo) : le repertoire
+    /// apprend son modele et son nom SRP.
+    private func noterRepertoire() {
+        guard genreTransport == .usb || genreTransport == .udp else { return }
+        let id = etat.identite?.valeur
+        guard repertoire.noter(mac: id?.mac, serie: id?.id?.serie, srp: etat.ip?.valeur.srp?.nom) else { return }
+        if let d = try? JSONEncoder().encode(repertoire) { preferences.set(d, forKey: Self.cleRepertoire) }
+    }
+
     private func portsChanges(_ nouveaux: [PortUSB]) {
-        ports = nouveaux
+        ports = Self.portsVisibles(nouveaux)
         guard reconnexionAuto, case .serie(let chemin, let serie)? = source else { return }
         switch etatTransport {
         case .attente, .erreur: break
@@ -584,6 +622,12 @@ final class Pont {
     private func traiterMachine(_ l: LigneMachine, historique: Bool) {
         let recueA = Date()
         let date = historique ? etat.dater(ms: l.enveloppe.ms, recueA: recueA) : etat.appliquer(l, recueA: recueA)
+        if !historique {
+            switch l.message {
+            case .helloIdentite, .reseauIp: noterRepertoire()
+            default: break
+            }
+        }
         let c = etat.correspondance
         switch l.message {
         case .compteursPilote(let v) where !historique:

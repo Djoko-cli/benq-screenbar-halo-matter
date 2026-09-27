@@ -2,6 +2,31 @@ import HaloProtocole
 import SwiftUI
 
 /// Fenetre Reglages (⌘,) : la langue de l'interface.
+/// Onglets de la fenetre Reglages ; le choix est garde, et la carte Thread
+/// du tableau de bord ouvre directement "Acces reseau Thread".
+enum OngletReglages: String {
+    case general, accesReseau
+    static let cle = "reglages.onglet"
+}
+
+/// Fenetre Reglages : Général (langue) et Accès réseau Thread (cles des ponts).
+struct FenetreReglages: View {
+    @AppStorage(OngletReglages.cle) private var onglet: OngletReglages = .general
+
+    var body: some View {
+        TabView(selection: $onglet) {
+            Tab("Général", systemImage: "gearshape", value: OngletReglages.general) {
+                Reglages()
+            }
+            Tab("Accès réseau Thread", systemImage: "point.3.connected.trianglepath.dotted",
+                value: OngletReglages.accesReseau) {
+                ReglagesAccesReseau()
+            }
+        }
+    }
+}
+
+/// Onglet Général : langue de l'app.
 struct Reglages: View {
     @AppStorage(ReglageLangue.cle) private var choix: ChoixLangue = .systeme
 

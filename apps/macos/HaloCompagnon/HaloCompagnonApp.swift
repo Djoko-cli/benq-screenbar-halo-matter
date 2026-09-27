@@ -49,7 +49,8 @@ struct HaloCompagnonApp: App {
         }
 
         Settings {
-            Reglages()
+            FenetreReglages()
+                .environment(pont)
                 .langueDeLInterface()
         }
     }
