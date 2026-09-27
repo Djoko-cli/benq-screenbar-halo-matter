@@ -196,8 +196,9 @@ Corriger la section 10 avant d'ecrire du code (details en fin de section).
 
 ## Phase 2 : app macOS
 
-Implementee le 25/09/2026 sur la branche `source-reseau` (essais au banc a
-venir ; voir docs/PROTOCOLE-JSON.md 10 et le README de l'app). Ecart assume
+Implementee le 25/09/2026 sur la branche `source-reseau`, fusionnee puis
+essayee au banc avec Djoko le 25/09 (resultats ci-dessous et dans le README
+de l'app ; voir aussi docs/PROTOCOLE-JSON.md 10). Ecart assume
 par rapport au plan ci-dessous : pas de nouveau framework `HaloReseau`
 separe ; `EnveloppeH1`, `ErreurReseau` et `TransportUDP` vivent dans
 `HaloProtocole` (`Reseau/`, `Transport/TransportUDP.swift`), qui deviendra
@@ -384,6 +385,13 @@ Deux erreurs dans les rapports :
 - Seule la partie bac à sable est prouvée : `network.client` est nécessaire et suffit pour un UDP connecté.
 
 **Test :** l'app réelle signée Apple Development, lancée depuis le Finder. Vérifier l'alerte, puis le cas de refus (`.waiting` avec `localNetworkDenied`). Refaire sur un vrai iPhone (le simulateur ne gère pas cette autorisation).
+
+**Banc du 25/09 (macOS 27, app signée Apple Development) :**
+- L'alerte apparaît bien à la première connexion réseau.
+- Refus : ni `localNetworkDenied` ni `PolicyDenied`. La résolution de `<nom>.local` rend `NoSuchRecord` (-65554) en 6 à 12 ms, chemin `satisfied`. Un nom `.local` absent, lui, ne rend rien (12 s sans réponse avec `dns-sd`) : l'app lit donc ce `NoSuchRecord` rapide sur un `.local` comme un refus.
+- Une session déjà ouverte continue après le refus : le flux routé vers l'ULA du pont n'est pas coupé. De même, un flux `NWConnection` ouvert survit au retrait de la route IPv6 (Network.framework garde son saut suivant ; `lsof` ne voit aucune socket).
+- Réautorisation : la connexion en attente repart seule, prête 20 ms après.
+- Sans route, une nouvelle connexion : `ENETDOWN` pour `NWConnection`, `EHOSTUNREACH` pour une socket ; la connexion en attente ne repart pas quand la route revient (aucun évènement de chemin).
 
 ## Identifier le nœud sans flasher
 

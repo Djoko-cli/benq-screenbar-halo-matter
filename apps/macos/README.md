@@ -281,11 +281,13 @@ pair UDP local, ce qu'un test hébergé dans le bac à sable de l'app ne permet
 pas.
 
 **Créer la clé (USB uniquement).** Le pont ne parle en réseau que s'il
-partage une clé avec ce Mac. Carte « Thread et Matter », ligne « Transport
-réseau » : pont sans clé → bouton « Activer l'accès réseau… » ; clé du pont
-= clé de ce Mac (même empreinte) → « Clé connue de ce Mac » et « Nouvelle
-clé… » en option ; autre clé → « Clé inconnue de ce Mac » (en orange) et le
-même bouton. La confirmation prévient que les sessions réseau en cours
+partage une clé avec ce Mac. **Réglages › Accès réseau Thread**, section
+« Pont branché en USB » (le pont connecté par l'USB) : pont sans clé →
+bouton « Activer l'accès réseau… » ; clé du pont = clé de ce Mac (même
+empreinte) → « Clé connue de ce Mac » et « Nouvelle clé… » en option ; autre
+clé → « Clé inconnue de ce Mac » (en orange) et le même bouton. La carte
+« Thread et Matter » du tableau de bord montre cet état en lecture seule, avec
+« Gérer… », qui ouvre cet onglet. La confirmation prévient que les sessions réseau en cours
 tombent. La clé créée est rangée dans le trousseau de ce Mac et n'apparaît
 jamais ailleurs (console, journal, suivi des commandes) : la commande
 s'affiche sans son aléa, et le champ `cle` de la réponse est masqué partout où
@@ -296,11 +298,18 @@ fois le précédent terminé. Le mode démo simule un pont « DEMO-HALO » avec 
 propre trousseau en mémoire, isolé du vrai trousseau, de la section « Réseau »
 et du choix de la source par défaut.
 
-**Se connecter.** Barre latérale, menu de la source, section « Réseau » : un
-clic sur un pont connu (`<nom>.local`, son empreinte) s'y connecte
-directement. Un sous-menu « Oublier un pont… » retire sa clé du trousseau de
-ce Mac après confirmation (le pont garde la sienne ; « Activer l'accès
-réseau » par l'USB en recrée une).
+**Se connecter.** Barre latérale, menu de la source. « Ports série » ne
+liste que les cartes Espressif (VID `303A` : ni Bluetooth, ni console de
+débogage, ni écrans), sous le nom de la carte : son modèle, tiré de son
+numéro de série (`id.serie` `HALO1-<MAC>` du `hello`, appris par MAC à la
+première connexion et gardé dans les préférences ; « ESP32 » avant), puis sa
+MAC (« HALO1 · 58:E6:C5:66:5B:CE »), le chemin du port en sous-titre
+(`/dev/cu.usbmodem…`). « Réseau » : un clic sur un pont connu s'y connecte
+directement ; même nom (« Pont Halo » tant que la carte n'a jamais été vue),
+« `<nom>.local` · clé XXXXXXXX » en sous-titre. Réglages › Accès réseau
+Thread liste les ponts connus ; « Oublier… » retire la clé d'un pont du
+trousseau de ce Mac après confirmation (le pont garde la sienne ; « Activer
+l'accès réseau » par l'USB en recrée une).
 
 **Ce qui est permis à distance.** Le pont applique sa propre liste blanche
 (section 10.5) : `json 1/0/etat/hello/ping`, les réglages de période dans
@@ -463,22 +472,24 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
 - **U5** : Mac en veille ou app suspendue 60 s : fragments classés comme tels
   au réveil (`NSWorkspace.didWakeNotification`), bail échu puis `json 1` renvoyé.
 - Le bac à sable face aux `ioctl` de `PortSerie` (`TIOCEXCL`, `TIOCMSET`).
-- **Clé réseau** : app connectée par l'USB, carte « Thread et Matter » →
+- **Clé réseau** : app connectée par l'USB, Réglages › Accès réseau Thread →
   « Activer l'accès réseau… » → « Clé XXXXXXXX connue de ce Mac » ; puis
   `python3 tools/halo_udp.py session <nom SRP>.local --duree 10` (macOS
   demande d'autoriser `security` : « Toujours autoriser ») → session ouverte
   avec la clé de l'app.
 - **Source réseau** : « Libérer le port », puis menu de la source → section
   « Réseau » → connexion (autorisation réseau local à la première fois) →
-  `hello` rev 3 transport `udp`, `etat` toutes les 2 s ; `lampe niveau 200`
+  `hello` rev 4 transport `udp`, `etat` toutes les 2 s ; `lampe niveau 200`
   depuis l'app, livrée ; `lampe stats raz` grisée.
 - **R5** : redémarrer le pont (USB : `reboot`, depuis l'app ou
-  `pio device monitor` sans `json cle`) → l'app reprend seule en ~15 s.
+  `pio device monitor` sans `json cle`) → l'app reprend seule en ~15 s. Vu
+  le 25/09 (coupure de courant) : 4,5 s après le rebranchement.
 - **Première autorisation réseau local** : sur un Mac où l'app n'a encore
   jamais joint le réseau local, première connexion réseau → invite de macOS ;
   noter ce que l'app montre pendant l'invite, puis cliquer « Autoriser » :
   l'app reprend-elle seule (le moniteur de chemin `NWPathMonitor` rappelle-t-il
-  au changement d'autorisation ?) ou faut-il « Reconnecter » ?
+  au changement d'autorisation ?) ou faut-il « Reconnecter » ? Vu le 25/09 :
+  l'invite est bien apparue à la première connexion.
 - **R7** : Réglages Système › Confidentialité et sécurité › Réseau local :
   couper Halo Compagnon → une session ouverte continue (le flux routé vers
   l'ULA du pont n'est pas coupé) ; « Reconnecter » → bandeau « Accès au
@@ -497,14 +508,25 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   Noter l'errno vu : le message le dit (« Pas de route » : `EHOSTUNREACH`,
   `ENETUNREACH` ou `ENETDOWN` ; « Pont introuvable » : `EHOSTDOWN` ou échec de
   la résolution) ; `python3 tools/halo_udp.py refus <adresse OMR> 5480`
-  affiche l'errno brut.
+  affiche l'errno brut. Vu le 25/09 : une socket reçoit `EHOSTUNREACH`,
+  l'app `ENETDOWN` (Network.framework) ; **une session ouverte continue sans
+  route** (son flux garde son saut suivant) : seules les nouvelles connexions
+  échouent. Assistant actif : trou de 0,3 s, rien de visible. Pour voir la
+  ligne d'état, arrêter l'assistant (`sudo launchctl bootout
+  system/fr.djoko.halo.routes` : il retire ses routes en partant), puis
+  « Déconnecter » et « Reconnecter » ; le relancer (`sudo launchctl bootstrap
+  system /Library/LaunchDaemons/fr.djoko.halo.routes.plist`) : reprise 8 s
+  après le retour de la route le 25/09, au plus un délai de reconnexion
+  depuis (une connexion sans route abandonne tout de suite).
 - **Pont sans clé** : `json cle efface` par l'USB, puis connexion réseau →
-  soit « Le pont n'a plus de clé… » (ICMPv6 port injoignable,
-  `ECONNREFUSED`) : bandeau, arrêt sans boucle de tentatives ; soit, si
-  l'ICMPv6 ne revient pas, « Aucune réponse du pont… » (aucun DEFI) dans la
-  ligne d'état, avec reprise automatique (boucle de tentatives). Noter lequel
-  des deux ; `python3 tools/halo_udp.py refus <adresse OMR> 5480` : `REFUS`
-  attendu.
+  « Aucune réponse du pont… » (aucun DEFI) dans la ligne d'état, avec reprise
+  automatique : vu le 25/09, le pont sans clé reste muet (le port reste tenu
+  par OpenThread : ni ICMPv6 ni `ECONNREFUSED`, `refus` rend DELAI comme avec
+  une clé), et « Le pont n'a plus de clé… » n'apparaît pas avec ce firmware.
+  Puis recréer la clé (Réglages › Accès réseau Thread) : macOS redemande
+  l'accès au trousseau pour `security` à la première lecture par
+  `halo_udp.py` (« Toujours autoriser » ; sans réponse, l'invite expire et
+  `halo_udp.py` se rabat sur `~/.config/halo-pont/cle`, en le disant).
 - **Trois clients** : deux sessions déjà ouvertes (deux
   `python3 tools/halo_udp.py session <nom SRP>.local --duree 300`), puis
   l'app → DEFI mais aucun `hello` (verdict `complet` côté carte, `udp.rejets`
@@ -514,7 +536,20 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   `hello` au prochain essai, bandeau effacé. Puis un nouveau clic sur le pont
   déjà connecté : `json 0` d'abord, la nouvelle session a son `hello` sans
   attendre les 30 s de silence de l'ancienne (le `halo_udp.py` restant garde
-  sa place).
+  sa place). Vu le 25/09 (firmware rev 3) : poignée de main refaite toutes
+  les 36,5 s ; le `json 0` ne libérait pas la place (`hello` 43 s après,
+  quand la session partie était muette depuis 30 s) ; corrigé en rev 4 (R9).
+  Un `halo_udp.py` lancé en fond par un script ignore Ctrl-C (SIGINT ignoré
+  hors d'un terminal) : le lancer dans un terminal.
 - **Libérer le port** sur la source réseau : note « Session réseau fermée :
   json 0 envoyé… », ligne d'état « Session réseau fermée (json 0) », rien ne
-  se rouvre avant « Reconnecter ».
+  se rouvre avant « Reconnecter ». Vu le 25/09 : conforme.
+- **Voyant (U11, rev 4)** : la lueur blanche du voyant de l'app et celle de la
+  carte en même temps, par l'USB et par le réseau, y compris après un éclat
+  vert (commande `lampe`) et après `led test`.
+- **Menu Source** : seulement les cartes Espressif, « HALO1 · MAC » et le
+  chemin `/dev/cu.…` en sous-titre ; pont réseau sous le même nom ; Réglages
+  › Accès réseau Thread : ponts connus, « Oublier… », clé du pont branché ;
+  « Gérer… » de la carte Thread ouvre cet onglet.
+- **`cc` avec le BM5602 branché** (firmware) : refusé avec son explication,
+  la carte ne plante plus (signalé le 27/09).
