@@ -1,280 +1,282 @@
-# Protocole radio BenQ ScreenBar Halo
+[Français](PROTOCOL.fr.md) · **English**
 
-## ETAT AU 24/09/2026 -- A LIRE AVANT TOUT LE RESTE
+# BenQ ScreenBar Halo radio protocol
 
-Ce bloc fait foi. Le reste du document est le journal chronologique de la
-retro-ingenierie, Halo 2 puis Halo 1 : il contient des conclusions depuis
-refutees (liste en fin de bloc). Preuves : [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md)
-et `tools/audit/` (modele unifie `indep_pll/t3.py`, trames attendues
-`synthese/chk.py`) pour le format ; sections « Semantique CONFIRMEE par
-emission » et « Appairage Halo 1 » ci-dessous pour la charge ; resultats du
-banc a la fin de [PLAN-PILOTE-HALO1.md](PLAN-PILOTE-HALO1.md) pour le pilote.
+## STATE AS OF Sep 24, 2026 -- READ BEFORE ANYTHING ELSE
 
-**Lien radio : format BC5602 standard (type ShockBurst), etabli par l'audit
-puis verifie par emission sur la lampe.**
+This block is authoritative. The rest of the document is the chronological log
+of the reverse engineering, Halo 2 then Halo 1: it contains conclusions since
+refuted (list at the end of the block). Evidence: [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md)
+and `tools/audit/` (unified model `indep_pll/t3.py`, expected frames
+`synthese/chk.py`) for the format; sections "Semantics CONFIRMED by
+transmission" and "Halo 1 pairing" below for the payload; bench results at
+the end of [PLAN-PILOTE-HALO1.md](PLAN-PILOTE-HALO1.md) for the driver.
+
+**Radio link: standard BC5602 format (ShockBurst type), established by the
+audit then verified by transmission on the lamp.**
 
 ```
 preambule 01010101 | adresse 63 FD F0 4F | PCF 9 bits | charge | CRC-16
 ```
 
-- Canal 5 (2405 MHz), 125 kbps, preambule d'un octet.
-- **Adresse sur l'air `63 FD F0 4F`, a ecrire `4F F0 FD 63`** dans le BM5602
-  (ordre inverse). Elle est propre a la paire telecommande/lampe et vient de
-  l'appairage ; `lampe adresse` la change. `8F F7 C1 3C`, utilise jusqu'au
-  22/09, n'en est qu'une vue decalee de deux bits : bon pour correler en
-  reception, faux pour emettre (0 accuse sur 10).
-- **PCF de 9 bits** : longueur de charge (6 bits), PID (2 bits), NO_ACK (1 bit).
-- **CRC-16/CCITT 0x1021, etat initial 0xFFFF**, sur adresse + PCF + charge :
-  le CRC materiel du BC5602. Les etats 0xDFBE, 0xF55A (Halo 1) et 0xEFDF
-  (projet Halo 2) ne sont que 0xFFFF avance d'un ou deux bits.
-- **Commande** (telecommande -> lampe) : longueur 2, NO_ACK=0.
-  **Accuse** (lampe -> telecommande) : longueur 0, meme PID, NO_ACK=1. L'accuse
-  est **vide** : l'etat de la lampe ne se lit pas. Le pilote suit ce qu'il
-  envoie et ce qu'il entend de la telecommande ; la lampe n'emet rien d'autre
-  que ses accuses.
-- Le PID avance apres chaque trame accusee (vu sur l'air, banc T1). D'apres le
-  datasheet, un recepteur ecarte une trame de meme PID et meme CRC que la
-  precedente, tout en l'accusant.
-- 23/09, telecommande sans piles : `txack` de `C4 FE` sur `4F F0 FD 63`,
-  10 accuses sur 10 et la lampe passe du minimum au quasi-maximum ; temoin sur
-  l'adresse decalee `3C C1 F7 8F`, 0 sur 10.
+- Channel 5 (2405 MHz), 125 kbps, one-byte preamble.
+- **Address on air `63 FD F0 4F`, to be written as `4F F0 FD 63`** in the
+  BM5602 (reverse order). It is specific to the remote/lamp pair and comes
+  from pairing; `lampe adresse` changes it. `8F F7 C1 3C`, used until Sep 22,
+  is only a view of it shifted by two bits: good for correlating on
+  reception, wrong for transmitting (0 acknowledgements out of 10).
+- **9-bit PCF**: payload length (6 bits), PID (2 bits), NO_ACK (1 bit).
+- **CRC-16/CCITT 0x1021, initial state 0xFFFF**, over address + PCF +
+  payload: the BC5602's hardware CRC. The states 0xDFBE, 0xF55A (Halo 1) and
+  0xEFDF (Halo 2 project) are only 0xFFFF advanced by one or two bits.
+- **Command** (remote -> lamp): length 2, NO_ACK=0.
+  **Acknowledgement** (lamp -> remote): length 0, same PID, NO_ACK=1. The
+  acknowledgement is **empty**: the lamp's state cannot be read from it. The
+  driver tracks what it sends and what it hears from the remote; the lamp
+  emits nothing other than its acknowledgements.
+- The PID advances after each acknowledged frame (seen on air, bench T1). Per
+  the datasheet, a receiver discards a frame with the same PID and same CRC
+  as the previous one, while still acknowledging it.
+- Sep 23, remote without batteries: `txack` of `C4 FE` on `4F F0 FD 63`,
+  10 acknowledgements out of 10 and the lamp goes from minimum to
+  near-maximum; control on the shifted address `3C C1 F7 8F`, 0 out of 10.
 
-**Charge : deux octets, drapeaux puis valeur. Semantique confirmee par
-emission (23/09) et par le pilote au banc (T1-T3, T8).**
+**Payload: two bytes, flags then value. Semantics confirmed by transmission
+(Sep 23) and by the driver at the bench (T1-T3, T8).**
 
-| bit du 1er octet | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+| bit of the 1st byte | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
 |---|---|---|---|---|---|---|---|---|
-| sens | marche | lampe avant | bouton A | reserve | reserve | luminosite | temperature | lampe arriere |
+| meaning | on | front lamp | button A | reserved | reserved | brightness | temperature | back lamp |
 
-- Chaque trame d'etat est **absolue** : marche et lampes a chaque fois, plus
-  exactement un selecteur (bit 5, 2 ou 1) qui dit ce que porte le 2e octet.
-  Exemples : `C3 35` les deux lampes, temperature 35 ; `C2 35` avant seule ;
-  `83 35` arriere seule ; `C5 A5` les deux, luminosite A5 ; `42 64` eteinte.
-  Le bouton marche de la telecommande renvoie sa derniere trame d'etat, bit 7
-  inverse ; le switch de lampes, son dernier type de reglage avec les
-  nouveaux bits de lampe.
-- **Luminosite** (bit 2) : `4C` a `FE`. `4C` est le plancher reel de la
-  lampe (rien ne change en dessous) ; perception logarithmique. Changer de
-  lampes par une trame de luminosite marche (`C4 A5` = avant seule, T2).
-  Chaque lampe garde-t-elle sa propre luminosite : ouvert (banc T7).
-- **Temperature** (bit 1) : `00` le plus froid a `64` (100) le plus chaud.
-- **Bouton A** (bit 5) : le 2e octet est un numero d'appui (01, 02...). Un
-  numero deja traite est ignore, un nouveau relance l'effet : la lampe baisse
-  puis remonte (mode automatique ; bascule ou relance, non tranche). Une
-  trame A ne vaut pas etat (vu `60 01`, bit 7 a zero). `E1 01`, jamais emis
-  par la telecommande, est compris : c'est bien un champ de bits.
-- **Bits 3 et 4** : vus seulement dans le rappel du favori (`91 00`,
-  `89 xx`), sans effet visible a l'emission : jamais emis. Le favori rejoue un
-  etat complet (mode, luminosite, puis `91`, `89`).
-- **Trames de service** : `FF 00`, `FE 00`, `FD 00` (reveil, NO_ACK=0) et
-  `FA xx`, seule trame a NO_ACK=1 (`A8`, puis `F8` apres remise des piles).
-- Cadence : les boutons emettent chaque etat en 3 copies a ~100 ms, la
-  molette une trame isolee toutes les ~112 ms. Une trame seule n'a pas suffi
-  une fois (test 1), trois oui : le pilote emet chaque trame 3 fois a 100 ms
-  (T1). Les essais « `txack ... 3 300` » du 23/09 ont en fait tourne a
-  **500 ms** : la CLI borne l'ecart a 500 ms sur le canal 5.
-- Apres une coupure d'alimentation (USB debranche), la lampe reste eteinte et
-  garde ses reglages (T6).
+- Every state frame is **absolute**: on/off and lamps every time, plus
+  exactly one selector (bit 5, 2, or 1) that says what the 2nd byte carries.
+  Examples: `C3 35` both lamps, temperature 35; `C2 35` front only; `83 35`
+  back only; `C5 A5` both, brightness A5; `42 64` off. The remote's on/off
+  button replays its last state frame with bit 7 flipped; the lamp switch,
+  its last setting type with the new lamp bits.
+- **Brightness** (bit 2): `4C` to `FE`. `4C` is the lamp's actual floor
+  (nothing changes below it); perception is logarithmic. Switching lamps via
+  a brightness frame works (`C4 A5` = front only, T2). Whether each lamp
+  keeps its own brightness: open (bench T7).
+- **Temperature** (bit 1): `00` coldest to `64` (100) warmest.
+- **Button A** (bit 5): the 2nd byte is a press number (01, 02...). A number
+  already handled is ignored, a new one re-triggers the effect: the lamp dims
+  then comes back up (automatic mode; toggle or re-trigger, not settled). An
+  A frame does not carry state (seen `60 01`, bit 7 at zero). `E1 01`, never
+  emitted by the remote, is understood correctly: it really is a bit field.
+- **Bits 3 and 4**: seen only in the favorite recall (`91 00`, `89 xx`), with
+  no visible effect when transmitted: never emitted [otherwise]. The
+  favorite replays a complete state (mode, brightness, then `91`, `89`).
+- **Service frames**: `FF 00`, `FE 00`, `FD 00` (wake-up, NO_ACK=0) and
+  `FA xx`, the only frame with NO_ACK=1 (`A8`, then `F8` after the batteries
+  are replaced).
+- Rate: the buttons emit each state in 3 copies at ~100 ms, the dial a single
+  frame every ~112 ms. A single frame was not enough once (test 1), three
+  was: the driver emits each frame 3 times at 100 ms (T1). The
+  "`txack ... 3 300`" tests from Sep 23 actually ran at **500 ms**: the CLI
+  clamps the gap to 500 ms on channel 5.
+- After a power cut (USB unplugged), the lamp stays off and keeps its
+  settings (T6).
 
-**Appairage.** La telecommande emet une balise sur `59 01 00 B0` (a ecrire
-`B0 00 01 59`), canal 5, 125 kbps, charges `5A 5A`, `F5 C3`, `CF 49` en
-cycle ; la lampe en mode appairage l'accuse (accuse vide). L'adresse de lien
-en derive par une fonction inconnue ; elle n'a pas change apres un
-re-appairage. Ne jamais emettre ni accuser sur une adresse d'appairage (Halo 1,
-ni Halo 2 `E2 08 00 B0`) : `txack`, `prxack`, `addr` et le pilote les
-refusent. Pour observer : `ecoute B0000159 5`.
+**Pairing.** The remote emits a beacon on `59 01 00 B0` (to be written as
+`B0 00 01 59`), channel 5, 125 kbps, payloads `5A 5A`, `F5 C3`, `CF 49`
+cycling; the lamp in pairing mode acknowledges it (empty acknowledgement).
+The link address derives from it via an unknown function; it did not change
+after a re-pairing. Never transmit or acknowledge on a pairing address
+(Halo 1, nor Halo 2's `E2 08 00 B0`): `txack`, `prxack`, `addr`, and the
+driver refuse them. To observe: `ecoute B0000159 5`.
 
-**Outils.** Produit : le pilote (`lampe ...`, `src/halo1_*`) et le pont
-Matter. Banc : `txack` (emission standard, accuse automatique, verdict
-TX_DS/MAX_RT), `ecoute` (reception passive qui n'accuse jamais, decodee par
-`halo1::decodeAir`, le decodeur du pilote), `prxack` (recepteur de banc qui
-accuse). La couche Halo 2 d'origine (charge de 10 octets, etat relu dans
-l'accuse, interrogation toutes les 5 s) et ses outils sont retires (etape C6,
-24/09) : `poll`, `send`, `find`, `pair`, `sniff`, `tail`, `debug`, `normal`,
-les chasses `appaire`, `preambule`, `ancre`, et `benq`, `tx6`, `txraw`,
-bases sur des modeles refutes.
+**Tools.** Product: the driver (`lampe ...`, `src/halo1_*`) and the Matter
+bridge. Bench: `txack` (standard transmission, automatic acknowledgement,
+TX_DS/MAX_RT verdict), `ecoute` (passive reception that never acknowledges,
+decoded by `halo1::decodeAir`, the driver's decoder), `prxack` (bench
+receiver that acknowledges). The original Halo 2 layer (10-byte payload,
+state read back from the acknowledgement, polling every 5 s) and its tools
+are removed (step C6, Sep 24): `poll`, `send`, `find`, `pair`, `sniff`,
+`tail`, `debug`, `normal`, the hunts `appaire`, `preambule`, `ancre`, and
+`benq`, `tx6`, `txraw`, based on refuted models.
 
-**Questions ouvertes** : sens exact du bouton A et des bits 3/4 ; luminosite
-propre a chaque lampe (T7) ; pourquoi une trame seule a ete ignoree (reveil de
-la lampe ou doublon de PID) ; fonction qui derive l'adresse de lien de la
-balise.
+**Open questions**: exact meaning of button A and of bits 3/4; brightness
+specific to each lamp (T7); why a single frame was ignored (lamp wake-up or
+PID duplicate); the function that derives the link address from the beacon.
 
-**Passages du journal ci-dessous INFIRMES** (a ne plus citer) :
+**Passages of the log below that are REFUTED** (no longer to be cited):
 
-| Passage | Ce qui est faux |
+| Passage | What is wrong |
 |---|---|
-| « Statut des informations », « Couche radio », « Payload (10 octets) », « Appairage » (`E2 08 00 B0`), « Retrouver l'adresse » | Halo 2 : charge de 10 octets, etat lu dans l'accuse, octets de queue, capteur, interrogation toutes les 5 s. Rien de cela ne vaut pour le Halo 1 ; les commandes citees n'existent plus. |
-| « Structure de trame Halo 1, confirmee sans le CRC » (6 octets, 72 = 48+16+8) | La commande porte 2 octets, l'accuse aucun ; la deuxieme adresse est l'accuse de la lampe, pas une retransmission ; `7A FF` etait un faux positif. |
-| « Deux familles de trames : commandes et accuses » (en-tete [longueur 4][compteur 2][type 2], etats 0xDFBE / 0xF55A, « 19 commandes exactes ») | En-tete a cheval sur le PCF et la charge ; un seul etat initial 0xFFFF ; environ 31 commandes sur 32 sont exactes avec le bon modele. |
-| « Le verrou : obtenir une trame B exacte » | Faux : les trames etaient exactes, c'est notre decoupage qui etait decale. Le verrou etait l'emission, levee le 23/09. |
-| « Biais d'erreur : 100 % des 1 lus comme 0 » | Observe sur 7 cas, contre une reference elle-meme decalee. Non etabli. |
-| Trim du quartz, valeurs analogiques, distance « elimines » | Chaque condition ne comptait que 7 a 9 trames, jugees avec un modele de CRC faux, et le bras « holtek 0 » tournait sans AGC (bogue B5). Seul un effet d'un facteur 3 ou plus est exclu. |
-| Tout passage sur le PCF « d'un octet plein » | Le PCF fait 9 bits ; l'« octet plein » venait de l'adresse decalee. |
-| « Le debit de la telecommande n'est pas 125 kbps » | 125 kbps, confirme par l'emission. |
-| GIO3 « en amont du correlateur », « voie RF close », « contradiction etablie » | Deja infirme plus bas dans ce document ; explique par l'adresse. |
-| « Premiere lecture de la charge » (lectures provisoires, « a confirmer ») | Tranche par la section « Semantique CONFIRMEE par emission » et par le tableau ci-dessus. |
-| « La piste de l'appairage est close » (« aucun echange d'appairage a capturer ») | Ecoute sur l'adresse d'appairage du Halo 2 (`E2 08 00 B0`) et a 250 kbps, debit refute. La balise d'appairage `59 01 00 B0` existe et la lampe en mode appairage l'accuse (section « Appairage Halo 1 »). |
-| « Pourquoi il faut un nRF52840 » | Depasse : le CC2500 a trouve l'adresse le 22/09 (vue decalee, corrigee par l'audit) et le BM5602 emet vers la lampe depuis le 23/09. Aucun nRF52840 n'est necessaire. |
+| "Status of the information", "Radio layer", "Payload (10 bytes)", "Pairing" (`E2 08 00 B0`), "Recovering the address" | Halo 2: 10-byte payload, state read from the acknowledgement, tail bytes, sensor, polling every 5 s. None of that holds for the Halo 1; the commands cited no longer exist. |
+| "Halo 1 frame structure, confirmed without the CRC" (6 bytes, 72 = 48+16+8) | The command carries 2 bytes, the acknowledgement none; the second address is the lamp's acknowledgement, not a retransmission; `7A FF` was a false positive. |
+| "Two frame families: commands and acknowledgements" (header [length 4][counter 2][type 2], states 0xDFBE / 0xF55A, "19 exact commands") | Header straddling the PCF and the payload; a single initial state 0xFFFF; about 31 commands out of 32 are exact with the right model. |
+| "The lock: obtaining an exact B frame" | Wrong: the frames were exact, it was our slicing that was offset. The lock was transmission, lifted on Sep 23. |
+| "Error bias: 100% of 1s read as 0" | Observed on 7 cases, against a reference that was itself offset. Not established. |
+| Crystal trim, analog values, distance "ruled out" | Each condition had only 7 to 9 frames, judged with a wrong CRC model, and the "holtek 0" arm was running without AGC (bug B5). Only an effect of a factor of 3 or more is excluded. |
+| Any passage about the PCF being "a full byte" | The PCF is 9 bits; the "full byte" came from the shifted address. |
+| "The remote's bitrate is not 125 kbps" | 125 kbps, confirmed by transmission. |
+| GIO3 "upstream of the correlator", "RF path closed", "contradiction established" | Already refuted further down in this document; explained by the address. |
+| "First reading of the payload" (provisional readings, "to be confirmed") | Settled by the "Semantics CONFIRMED by transmission" section and by the table above. |
+| "The pairing lead is closed" ("no pairing exchange to capture") | Listening on the Halo 2 pairing address (`E2 08 00 B0`) and at 250 kbps, a refuted bitrate. The pairing beacon `59 01 00 B0` exists and the lamp in pairing mode acknowledges it (section "Halo 1 pairing"). |
+| "Why an nRF52840 is needed" | Superseded: the CC2500 found the address on Sep 22 (a shifted view, corrected by the audit) and the BM5602 has been transmitting to the lamp since Sep 23. No nRF52840 is necessary. |
 
 
-## Statut des informations
+## Status of the information
 
-> **HISTORIQUE.** A partir d'ici, journal chronologique. Les sections qui
-> suivent, jusqu'a « Ce que la campagne de mesure du 21/09/2026 a etabli »,
-> decrivent le Halo 2 et l'ancien firmware : elles ne valent pas pour la
-> lampe (Halo 1), et les commandes CLI citees (`find`, `pair`, `sniff`,
-> `send`, `tail`, `benq`, `tx6`, `txraw`, `appaire`, `preambule`, `ancre`...)
-> n'existent plus. L'etat du 24/09 est le bloc d'en-tete.
+> **HISTORY.** From here on, chronological log. The sections that follow, up
+> to "What the Sep 21, 2026 measurement campaign established", describe the
+> Halo 2 and the old firmware: they do not hold for the lamp (Halo 1), and
+> the CLI commands cited (`find`, `pair`, `sniff`, `send`, `tail`, `benq`,
+> `tx6`, `txraw`, `appaire`, `preambule`, `ancre`...) no longer exist. The
+> Sep 24 state is the header block.
 
-Tout ce document vient de la rétro-ingénierie du **ScreenBar Halo 2** par
+This whole document comes from the reverse engineering of the
+**ScreenBar Halo 2** by
 [kuzmin-no](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration),
-recoupée avec les dossiers FCC et le fil
+cross-checked against the FCC filings and the
 [Benq Screenbar support](https://community.home-assistant.io/t/benq-screenbar-support/490864)
-de la communauté Home Assistant.
+thread on the Home Assistant community.
 
-| Élément | Halo 2 | Halo 1 (ce projet) |
+| Element | Halo 2 | Halo 1 (this project) |
 |---|---|---|
-| Transceiver RF | BC5602 | **BC5602 — confirmé** (FCC + teardown PCB) |
-| Bande | 2405–2475 MHz | **2405–2475 MHz — confirmé** (FCC `JVPCR20CCTR`) |
-| Modulation / débit | GFSK 125 kbps | Très probable (même puce, même bande) |
-| Format de trame | ESB : préambule + adresse 4 o + PCF 9 bits + payload + CRC | Très probable (imposé par le BC5602) |
-| Structure du payload | 10 octets, documentée ci-dessous | **À confirmer** |
-| Octets de queue | `01 02` | **À confirmer** (`tail` pour les changer) |
-| Bit « capteur » | ultrason | **À confirmer** (le Halo 1 n'a pas de capteur de présence) |
+| RF transceiver | BC5602 | **BC5602 — confirmed** (FCC + PCB teardown) |
+| Band | 2405–2475 MHz | **2405–2475 MHz — confirmed** (FCC `JVPCR20CCTR`) |
+| Modulation / bitrate | GFSK 125 kbps | Very likely (same chip, same band) |
+| Frame format | ESB: preamble + 4-byte address + 9-bit PCF + payload + CRC | Very likely (imposed by the BC5602) |
+| Payload structure | 10 bytes, documented below | **To be confirmed** |
+| Tail bytes | `01 02` | **To be confirmed** (`tail` to change them) |
+| "Sensor" bit | ultrasound | **To be confirmed** (the Halo 1 has no presence sensor) |
 
-Autrement dit : la couche radio est acquise, la couche applicative est à
-vérifier. Les commandes CLI `sniff`, `pair` et `send` sont là pour ça.
+In other words: the radio layer is established, the application layer
+remains to be verified. The `sniff`, `pair`, and `send` CLI commands are
+there for that.
 
-Le PCB du Halo 1 (relevé par `b4shful` sur le fil HA) : PSoC Cypress
-**CY8C4125LQI-483** + transceiver **BC5602** + expandeur I²C **TCA9539PWR**.
+The Halo 1's PCB (documented by `b4shful` on the HA thread): PSoC Cypress
+**CY8C4125LQI-483** + **BC5602** transceiver + **TCA9539PWR** I²C expander.
 
-## Couche radio
+## Radio layer
 
-- Canal 1 : **2405 MHz** (`RFCH = 5`) — le seul observé en pratique
-- Canal 2 : 2446 MHz (`RFCH = 46`)
-- Canal 3 : 2475 MHz (`RFCH = 75`)
-- Modulation GFSK, **125 kbps** (`DM1 = 0b10`)
-- Adresse de 4 octets, **écrite dans l'ordre inverse** de l'ordre sur l'air
-  (section *Bit ordering* du datasheet BC5602)
+- Channel 1: **2405 MHz** (`RFCH = 5`) — the only one observed in practice
+- Channel 2: 2446 MHz (`RFCH = 46`)
+- Channel 3: 2475 MHz (`RFCH = 75`)
+- GFSK modulation, **125 kbps** (`DM1 = 0b10`)
+- 4-byte address, **written in the reverse order** of the over-the-air order
+  (*Bit ordering* section of the BC5602 datasheet)
 
-Format de trame, hérité de l'Enhanced ShockBurst :
+Frame format, inherited from Enhanced ShockBurst:
 
 ```
 préambule 0xAA │ adresse 4 octets │ PCF 9 bits │ payload 10 octets │ CRC
 ```
 
-Le PCF (Packet Control Field) contient : longueur sur 5 bits (décalée de 3),
-PID sur 2 bits, drapeau NO_ACK sur 1 bit.
+The PCF (Packet Control Field) contains: length on 5 bits (offset by 3), PID
+on 2 bits, NO_ACK flag on 1 bit.
 
-**La lampe n'émet jamais spontanément.** Elle ne répond que dans le slot ACK
-matériel qui suit une trame reçue. D'où la stratégie du firmware : interrogation
-toutes les 5 s, et écoute passive de la télécommande entre deux interrogations.
+**The lamp never transmits spontaneously.** It only replies in the hardware
+ACK slot that follows a received frame. Hence the firmware's strategy:
+polling every 5 s, and passive listening to the remote between two polls.
 
-### Auto-ACK et écoute
+### Auto-ACK and listening
 
-Le BC5602 gère l'auto-ACK en matériel. Deux conséquences :
+The BC5602 handles auto-ACK in hardware. Two consequences:
 
-- pour **piloter** la lampe, on active l'auto-ACK : la réponse de la lampe
-  arrive dans la FIFO RX juste après l'émission ;
-- pour **écouter** la télécommande, il faut le **désactiver** — sinon notre
-  module acquitterait les trames en même temps que la lampe, et la
-  télécommande cesserait de fonctionner.
+- to **drive** the lamp, we enable auto-ACK: the lamp's reply arrives in the
+  RX FIFO right after transmission;
+- to **listen to** the remote, it must be **disabled** — otherwise our
+  module would acknowledge frames at the same time as the lamp, and the
+  remote would stop working.
 
-Désactiver l'auto-ACK désactive aussi le CRC matériel et la longueur de payload
-dynamique. Le PCF de 9 bits n'est alors plus retiré du flux, ce qui décale tous
-les octets d'un bit : le firmware recale à la lecture
+Disabling auto-ACK also disables the hardware CRC and dynamic payload
+length. The 9-bit PCF is then no longer stripped from the stream, which
+shifts every byte by one bit: the firmware re-aligns it on read
 (`BC5602::shiftLeftOneBit`).
 
-## Payload (10 octets)
+## Payload (10 bytes)
 
-| Octet | Contenu |
+| Byte | Content |
 |---|---|
-| 0 | Commande |
-| 1 | Registre de contrôle (bits, voir plus bas) |
-| 2 | Luminosité lampe avant, `0x01`–`0x64` (1–100 %) |
-| 3 | Température de couleur, poids fort |
-| 4 | Température de couleur, poids faible |
-| 5 | Luminosité lampe arrière, `0x01`–`0x64` |
-| 6 | Température de couleur arrière, poids fort (identique à l'avant) |
-| 7 | Température de couleur arrière, poids faible |
-| 8 | Octet de queue 0 — `0x01` sur le Halo 2 observé |
-| 9 | Octet de queue 1 — `0x02` sur le Halo 2 observé |
+| 0 | Command |
+| 1 | Control register (bits, see below) |
+| 2 | Front lamp brightness, `0x01`–`0x64` (1–100%) |
+| 3 | Color temperature, high byte |
+| 4 | Color temperature, low byte |
+| 5 | Back lamp brightness, `0x01`–`0x64` |
+| 6 | Back color temperature, high byte (identical to the front) |
+| 7 | Back color temperature, low byte |
+| 8 | Tail byte 0 — `0x01` on the observed Halo 2 |
+| 9 | Tail byte 1 — `0x02` on the observed Halo 2 |
 
-La température de couleur est transmise **en Kelvin, en clair** :
-2700 K = `0x0A8C`, 4000 K = `0x0FA0`, 6500 K = `0x1964`.
+The color temperature is transmitted **in Kelvin, in the clear**: 2700 K =
+`0x0A8C`, 4000 K = `0x0FA0`, 6500 K = `0x1964`.
 
-La lampe arrière n'a pas de température propre : les deux partagent la valeur.
+The back lamp has no temperature of its own: both share the value.
 
-### Registre de contrôle (octet 1)
+### Control register (byte 1)
 
-| Bit | Rôle |
+| Bit | Role |
 |---|---|
-| 0 | Marche / arrêt général |
-| 1 | Mode Auto |
-| 2 | Favori |
-| 3 | ┐ `0` = avant seule, `1` = arrière seule, `2` = les deux |
+| 0 | General on/off |
+| 1 | Auto mode |
+| 2 | Favorite |
+| 3 | ┐ `0` = front only, `1` = back only, `2` = both |
 | 4 | ┘ |
-| 5 | Capteur (ultrason sur le Halo 2) |
-| 6–7 | Non utilisés |
+| 5 | Sensor (ultrasound on the Halo 2) |
+| 6–7 | Unused |
 
-### Commandes (octet 0)
+### Commands (byte 0)
 
-| Valeur | Signification |
+| Value | Meaning |
 |---|---|
-| `0x00` | La télécommande se réveille et contacte la lampe |
-| `0x02` | Allumage / extinction général |
-| `0x03` | Réglage luminosité + température de couleur |
-| `0x04` | Demande de synchronisation d'état |
-| `0x05` | La télécommande s'endort et en informe la lampe |
-| `0x0A` | Mode appairage |
+| `0x00` | The remote wakes up and contacts the lamp |
+| `0x02` | General on/off |
+| `0x03` | Brightness + color temperature setting |
+| `0x04` | State sync request |
+| `0x05` | The remote goes to sleep and informs the lamp |
+| `0x0A` | Pairing mode |
 
-La lampe applique les changements **en fondu progressif**. Une trame `0x03`
-n'est donc pas immédiatement reflétée : le firmware réinterroge avec `0x04`
-toutes les 400 ms jusqu'à convergence (12 essais max, ~5 s).
+The lamp applies changes **as a gradual fade**. A `0x03` frame is therefore
+not immediately reflected: the firmware re-polls with `0x04` every 400 ms
+until convergence (12 attempts max, ~5 s).
 
-## Appairage
+## Pairing
 
-Pendant l'appairage, télécommande et lampe communiquent sur une adresse fixe :
-**`E2 08 00 B0`** sur l'air (soit `B0 00 08 E2` en ordre d'écriture registre).
-La commande est toujours `0x0A`.
+During pairing, remote and lamp communicate on a fixed address:
+**`E2 08 00 B0`** on air (i.e., `B0 00 08 E2` in register write order). The
+command is always `0x0A`.
 
-L'adresse de communication définitive semble transmise pendant cet échange sous
-forme encodée — elle n'a pas été décodée. C'est pour cela qu'il faut la
-retrouver par capture (voir ci-dessous).
+The final communication address seems to be transmitted during this exchange
+in encoded form — it has not been decoded. That is why it must be recovered
+by capture (see below).
 
-La commande CLI `pair` met le module en écoute sur cette adresse : c'est le
-meilleur moyen d'obtenir des trames Halo 1 exploitables **sans connaître
-l'adresse de communication**, et donc de vérifier en premier lieu si la
-structure de payload ci-dessus tient.
+The `pair` CLI command puts the module in listening mode on this address: it
+is the best way to obtain usable Halo 1 frames **without knowing the
+communication address**, and thus to first check whether the payload
+structure above holds.
 
-## Retrouver l'adresse de communication
+## Recovering the communication address
 
-### Méthode 1 — l'astuce du mot de synchro (commande `find`)
+### Method 1 — the sync word trick (`find` command)
 
-C'est la méthode du script `find_halo2_address.py`, généralisée.
+This is the method from the `find_halo2_address.py` script, generalized.
 
-On règle le récepteur sur une pseudo-adresse de 3 octets correspondant à une
-séquence du **payload** dont on connaît la valeur, parce qu'on vient de la
-régler à la télécommande. Les octets 5-6-7 conviennent : luminosité arrière +
-température de couleur.
+We tune the receiver to a 3-byte pseudo-address matching a **payload**
+sequence whose value we know, because we just set it on the remote. Bytes
+5-6-7 work well: back brightness + color temperature.
 
-Exemple avec 10 % et 3925 K :
+Example with 10% and 3925 K:
 
 ```
 sur l'air        : 0A 0F 55
 ordre d'écriture : 55 0F 0A
 ```
 
-Le récepteur se verrouille donc **au milieu** d'une trame, puis continue
-d'échantillonner. Les retransmissions automatiques font apparaître le début de
-la trame suivante dans la même fenêtre de capture : préambule `0xAA` suivi de la
-vraie adresse.
+The receiver thus locks **in the middle** of a frame, then keeps sampling.
+Automatic retransmissions make the start of the next frame appear within the
+same capture window: preamble `0xAA` followed by the real address.
 
-Le script d'origine lisait l'adresse à un offset fixe, calé sur le timing
-inter-trames du Halo 2. Ici le firmware **balaie les 8 alignements de bits et
-toute la fenêtre capturée**, puis compte les occurrences de chaque candidat : le
-bon ressort par répétition, le bruit non. C'est ce qui rend la méthode
-transposable au Halo 1, dont le timing n'a aucune raison d'être identique.
+The original script read the address at a fixed offset, tied to the Halo 2's
+inter-frame timing. Here the firmware **sweeps all 8 bit alignments across
+the whole captured window**, then counts the occurrences of each candidate:
+the right one stands out through repetition, the noise does not. This is
+what makes the method portable to the Halo 1, whose timing has no reason to
+be identical.
 
 ```
 find            # 10 % arrière + 3925 K (valeurs par défaut)
@@ -282,37 +284,37 @@ find 25 4000    # autres valeurs : luminosité %, Kelvin
 find x550f0a    # mot de synchro brut de 3 octets
 ```
 
-### Méthode 2 — sniffer le bus SPI de la télécommande
+### Method 2 — sniff the remote's SPI bus
 
-La méthode qui ne peut pas échouer, suggérée par `b4shful` sur le fil HA.
-Ouvre la télécommande, branche un analyseur logique sur `CSN` / `SCK` / `SDIO`
-du BC5602 et capture. La commande `0x10` (`WRITE_PTX_ADDRESS`) est suivie des
-4 octets d'adresse, en clair.
+The method that cannot fail, suggested by `b4shful` on the HA thread. Open
+the remote, hook a logic analyzer to the BC5602's `CSN` / `SCK` / `SDIO`,
+and capture. The `0x10` command (`WRITE_PTX_ADDRESS`) is followed by the 4
+address bytes, in the clear.
 
-Bonus non négligeable : la même capture donne aussi les payloads réels du
-Halo 1, donc la structure exacte de la trame — ce qui répond d'un coup à toutes
-les cases « à confirmer » du tableau en haut de page.
+A significant bonus: the same capture also gives the Halo 1's real payloads,
+hence the frame's exact structure — which answers, in one shot, every "to be
+confirmed" box in the table at the top of the page.
 
-### Méthode 3 — HackRF One + Universal Radio Hacker
+### Method 3 — HackRF One + Universal Radio Hacker
 
-Capture à 2405 MHz, démodulation GFSK à 125 kbps, décodage manuel de la trame.
-C'est la méthode qui a servi à établir le tableau du payload sur le Halo 2.
-Plus lourde à mettre en œuvre, mais elle ne demande pas d'ouvrir le matériel.
+Capture at 2405 MHz, GFSK demodulation at 125 kbps, manual frame decoding.
+This is the method that was used to establish the payload table for the
+Halo 2. Heavier to set up, but it does not require opening up the hardware.
 
-## Références
+## References
 
 - [BC5602 datasheet v1.20](https://www.holtek.com/webapi/116711/BC5602v120.pdf)
-- [Module BM5602-60-1](https://www.holtek.com/page/vg/BM5602-60-1)
+- [BM5602-60-1 module](https://www.holtek.com/page/vg/BM5602-60-1)
 - [kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration)
-- [Fil Home Assistant « Benq Screenbar support »](https://community.home-assistant.io/t/benq-screenbar-support/490864)
-- FCC : [`JVPCR20CCTR`](https://fccid.io/JVPCR20CCTR) (télécommande Halo 1),
-  [`JVPCR20C`](https://fccid.io/JVPCR20C) (lampe Halo 1)
+- [Home Assistant thread "Benq Screenbar support"](https://community.home-assistant.io/t/benq-screenbar-support/490864)
+- FCC: [`JVPCR20CCTR`](https://fccid.io/JVPCR20CCTR) (Halo 1 remote),
+  [`JVPCR20C`](https://fccid.io/JVPCR20C) (Halo 1 lamp)
 
 ---
 
-# Ce que la campagne de mesure du 21/09/2026 a établi
+# What the Sep 21, 2026 measurement campaign established
 
-## Trame réelle (Halo 2, publiée par Termina1)
+## Real frame (Halo 2, published by Termina1)
 
 ```
 54  04 10 0C 0F 55 5B 0F 55 01 02  20 B9
@@ -320,15 +322,15 @@ Plus lourde à mettre en œuvre, mais elle ne demande pas d'ouvrir le matériel.
 PCF
 ```
 
-La structure de payload documentée plus haut est donc **confirmée sur une trame
-réelle** : commande `04`, contrôle `10`, luminosité avant `0C`, température
-`0F 55` (3925 K), luminosité arrière `5B`, température répétée, queue `01 02`.
+The payload structure documented above is thus **confirmed on a real
+frame**: command `04`, control `10`, front brightness `0C`, temperature
+`0F 55` (3925 K), back brightness `5B`, temperature repeated, tail `01 02`.
 
-La trame fait **13 octets** en réception : `PCF(1) + payload(10) + CRC(2)`.
-Le PCF occupe **un octet plein** — il n'y a **pas** de décalage d'un bit à la
-lecture, contrairement à ce que supposait le portage initial.
+The frame is **13 bytes** on reception: `PCF(1) + payload(10) + CRC(2)`. The
+PCF occupies **a full byte** — there is **no** one-bit shift on read,
+contrary to what the initial port assumed.
 
-## CRC — modèle vérifié
+## CRC — verified model
 
 ```
 algorithme    : CRC-CCITT
@@ -337,33 +339,33 @@ polynôme      : 0x1021
 couverture    : adresse + PCF + payload (10 octets)
 ```
 
-Validé sur trois vecteurs, état intermédiaire compris :
+Validated on three vectors, intermediate state included:
 
-| PCF | Payload | CRC attendu |
+| PCF | Payload | Expected CRC |
 |---|---|---|
 | `54` | `04 10 0C 0F 55 5B 0F 55 01 02` | `20B9` |
 | `50` | `02 11 0C 0F 55 5B 0F 55 01 02` | `E962` |
 | `50` | `02 10 0C 0F 55 5B 0F 55 01 02` | `0241` |
 
-Après les 4 octets d'adresse `86 BB EA 9C`, l'état vaut `0x5042`.
+After the 4 address bytes `86 BB EA 9C`, the state equals `0x5042`.
 
-Implémenté dans `BenqHalo::frameCrc()` et `frameCrcFor()` (modèle Halo 2 ;
-fonctions supprimées à l'étape C6, 24/09).
+Implemented in `BenqHalo::frameCrc()` and `frameCrcFor()` (Halo 2 model;
+functions removed at step C6, Sep 24).
 
-## Contrainte sur l'adresse
+## Constraint on the address
 
-Datasheet BC5602 v1.20 p.25, sous le diagramme de format de paquet :
+BC5602 datasheet v1.20 p.25, below the packet format diagram:
 
 > `Note: * MSB high 4-bit must be 0001xxxx or 1110xxxx`
 
-Le premier octet de l'adresse **sur l'air** doit être de la forme `0x1X` ou
-`0xEX`. L'adresse d'appairage `E2 08 00 B0` s'y conforme. À noter que l'adresse
-`86 BB EA 9C` de Termina1 ne s'y conforme pas tout en fonctionnant : la portée
-exacte de la règle reste incertaine.
+The first byte of the address **on air** must be of the form `0x1X` or
+`0xEX`. The pairing address `E2 08 00 B0` conforms to this. Note that
+Termina1's address `86 BB EA 9C` does not conform to it while still working:
+the exact scope of the rule remains uncertain.
 
-## Configuration de réception correcte
+## Correct receive configuration
 
-Alignée sur l'implémentation ESPHome de Termina1, qui reçoit réellement :
+Aligned with Termina1's ESPHome implementation, which actually receives:
 
 ```
 DPL1 = 0x00, DPL2 = 0x00     payload statique
@@ -374,343 +376,352 @@ IRQ1 = 0x40                  acquitter RX_DR — INDISPENSABLE
 puis commande 0x8E           RX Mode Trigger
 ```
 
-`RX_DR` se latche et **doit** être acquitté en y écrivant 1, sinon la puce
-cesse de délivrer des trames.
+`RX_DR` latches and **must** be acknowledged by writing 1 to it, otherwise
+the chip stops delivering frames.
 
-## Variables éliminées par la mesure
+## Variables ruled out by measurement
 
-Débit (les 3 valeurs existantes), canal (les 3 du dossier FCC), ordre des octets
-d'adresse (les deux), longueur de préambule (1 et 2 octets), longueur d'adresse
-(3 et 4 octets), et l'existence d'une sortie de bits démodulés sur `GIO2`
-(8 sélecteurs balayés, aucune activité).
+Bitrate (the 3 existing values), channel (the 3 from the FCC filing),
+address byte order (both), preamble length (1 and 2 bytes), address length
+(3 and 4 bytes), and the existence of a demodulated-bit output on `GIO2`
+(8 selectors swept, no activity).
 
-## Ce qui bloque
+## What is blocking
 
-L'**adresse de communication** de la paire lampe/télécommande reste inconnue, et
-le corrélateur du BC5602 ne peut rien capter sans elle. La méthode consistant à
-se caler sur une séquence du payload comme pseudo-adresse n'a jamais accroché,
-malgré un récepteur dont le fonctionnement est mesuré (mode RX confirmé par
-`OMST`, RSSI avec 17 dB de dynamique, environnement RF propre).
+The **communication address** of the lamp/remote pair remains unknown, and
+the BC5602's correlator cannot capture anything without it. The method of
+locking onto a payload sequence as a pseudo-address has never caught,
+despite a receiver whose operation is measured (RX mode confirmed by `OMST`,
+RSSI with 17 dB of dynamic range, clean RF environment).
 
-Les deux seules voies restantes demandent du matériel :
+The only two remaining paths require hardware:
 
-1. **Analyseur logique** sur `CSN`/`SCK`/`SDIO` du BC5602 de la télécommande :
-   la commande `0x10` y transporte l'adresse en clair, et la même capture donne
-   la structure réelle du payload du Halo 1.
-2. **Second MCU** pour monter le récepteur indépendant que Termina1 mentionne
-   dans ses notes d'implémentation.
+1. **Logic analyzer** on the remote's BC5602 `CSN`/`SCK`/`SDIO`: the `0x10`
+   command carries the address there in the clear, and the same capture
+   gives the Halo 1's real payload structure.
+2. **Second MCU** to build the independent receiver that Termina1 mentions
+   in its implementation notes.
 
-## Comportement de la télécommande (mesure)
+## Remote behavior (measurement)
 
-Les commandes sont **tactiles** : un toucher émet **une impulsion**, maintenir le
-doigt n'émet rien de plus. Seule la **molette** produit un flux continu tant qu'on
-la tourne — c'est donc la seule source de trafic exploitable pour une capture à
-fenêtre fixe.
+The controls are **touch-based**: a touch emits **one pulse**, holding the
+finger down emits nothing more. Only the **dial** produces a continuous
+stream while it is turned — making it the only usable traffic source for a
+fixed-window capture.
 
-## Mode direct du BC5602 — sélecteurs non documentés
+## BC5602 direct mode — undocumented selectors
 
-Le bit `DIR_EN` (`CFG1` 0x00, bit 4) commute la puce en mode direct :
-*« TX/RX data from/to external MCU directly »*. Le datasheet le mentionne **une
-seule fois** et ne dit ni quelle broche porte les données, ni comment engager le
-mode. Le guide d'application Holtek ne le mentionne pas du tout.
+The `DIR_EN` bit (`CFG1` 0x00, bit 4) switches the chip into direct mode:
+*"TX/RX data from/to external MCU directly"*. The datasheet mentions it
+**only once** and says neither which pin carries the data nor how to engage
+the mode. The Holtek application guide does not mention it at all.
 
-Le portage ESPHome de Termina1, qui fonctionne, révèle deux valeurs de sélecteur
-que le datasheet range pourtant dans « Others: No function, input » :
+Termina1's ESPHome port, which works, reveals two selector values that the
+datasheet nonetheless files under "Others: No function, input":
 
-| Registre | Valeur | Fonction réelle |
+| Register | Value | Actual function |
 |---|---|---|
-| `IO1` (0x06), `GIO2S` | `3` | `DIRECT_TXD` — donnée, MCU vers puce |
-| `IO2` (0x07), `GIO3S` | `8` | `TBCLK_OUTPUT` — horloge bit, puce vers MCU |
+| `IO1` (0x06), `GIO2S` | `3` | `DIRECT_TXD` — data, MCU to chip |
+| `IO2` (0x07), `GIO3S` | `8` | `TBCLK_OUTPUT` — bit clock, chip to MCU |
 
-Sa séquence d'armement : `IO2=0x08`, `IO1=0x58`, `CFG1=0x50` (**`AGC_EN` +
-`DIR_EN`**), puis `OM=0x03`, 50 µs, `OM=0x07`. Les bits 2~0 d'`OM` sont déclarés
-« Reserved, must be kept unchanged after power on » : ce sont en fait des bits de
-commande cachés.
+Its arming sequence: `IO2=0x08`, `IO1=0x58`, `CFG1=0x50` (**`AGC_EN` +
+`DIR_EN`**), then `OM=0x03`, 50 µs, `OM=0x07`. Bits 2~0 of `OM` are declared
+"Reserved, must be kept unchanged after power on": they are in fact hidden
+command bits.
 
-`GIO3` est la **broche 8** du module BM5602 — le « septième fil » de son montage.
+`GIO3` is **pin 8** of the BM5602 module — the "seventh wire" of its wiring.
 
-Deux conséquences pour ce projet :
+Two consequences for this project:
 
-1. Notre configuration tournait avec **`AGC_EN` à 0** (`CFG1` relu à `0x00`).
-2. Il n'a **jamais tenté la réception en mode direct** : son chemin RX remet
-   `GIO2S=1` et repasse par le moteur de paquets. Le sélecteur `DIRECT_RXD`, s'il
-   existe, est à chercher parmi les valeurs `GIO2S` restantes (2, 4, 6, 7).
+1. Our configuration was running with **`AGC_EN` at 0** (`CFG1` read back as
+   `0x00`).
+2. It has **never attempted reception in direct mode**: its RX path resets
+   `GIO2S=1` and goes back through the packet engine. The `DIRECT_RXD`
+   selector, if it exists, is to be looked for among the remaining `GIO2S`
+   values (2, 4, 6, 7).
 
-Entrée en réception sans commande strobe, documentée celle-là (`ds.txt:717`) :
+Entering reception without a strobe command, which IS documented
+(`ds.txt:717`):
 
 > If the device is set as a PRX device, it will enter the RX mode when the CE bit
 > is set high by using register or using Strobe RX command.
 
-## Paramètres radio confirmés
+## Confirmed radio parameters
 
-Relevés dans le portage ESPHome qui pilote réellement une lampe :
+Read from the ESPHome port that actually drives a lamp:
 
 ```
 RADIO_CHANNEL = 5        ->  2405 MHz
 write_reg(0x11, 0x82)    ->  DM1 : AW=10 (4 octets) + 010 (125 kbps)
 ```
 
-Débit **125 kbps**, adresse de **4 octets**, canal **5**. Ce sont déjà les valeurs
-par défaut de `sharedRadioConfig()`.
+Bitrate **125 kbps**, **4-byte** address, channel **5**. These are already
+the default values of `sharedRadioConfig()`.
 
-Défaut corrigé le 2026-09-21 : `AGC_EN` (`CFG1` bit 6) n'était jamais activé. Le
-portage tiers écrit `CFG1 = 0x50` (`AGC_EN` + `DIR_EN`). Mesuré sur notre carte,
-molette en rotation : plus fort signal reçu **85 dB sans AGC, 41 dB avec**. Comme
-tout reset logiciel remet `CFG1` à `0x00`, le bit est réappliqué dans
-`sharedRadioConfig()`, au même titre que le bit de préambule.
+Defect fixed on Sep 21, 2026: `AGC_EN` (`CFG1` bit 6) was never enabled. The
+third-party port writes `CFG1 = 0x50` (`AGC_EN` + `DIR_EN`). Measured on our
+board, dial turning: strongest received signal **85 dB without AGC, 41 dB
+with**. Since any software reset resets `CFG1` to `0x00`, the bit is
+reapplied in `sharedRadioConfig()`, the same as the preamble bit.
 
-## L'émission exige `CE`
+## Transmission requires `CE`
 
-Mesuré le 2026-09-22 sur un banc à deux cartes : 2553 trames écrites dans la FIFO
-d'émission, **zéro** `TX_DS`, `OMST` bloqué à `2` (Light Sleep), mode TX jamais
-observé. La commande strobe `0x0E` ne suffit pas.
+Measured on Sep 22, 2026 on a two-board bench: 2553 frames written to the
+transmit FIFO, **zero** `TX_DS`, `OMST` stuck at `2` (Light Sleep), TX mode
+never observed. The `0x0E` strobe command is not enough.
 
-Le datasheet l'explique (`ds.txt:711`) :
+The datasheet explains it (`ds.txt:711`):
 
 > If the device is set as a PTX device and the CE bit is set high, it will stay in
 > the Light Sleep mode when the TX FIFO is empty. **The PTX device will enter the
 > TX mode automatically once the TX FIFO is not empty.**
 
-L'émission n'est donc pas déclenchée par une commande mais par le **remplissage de
-la FIFO**, à condition que `CE` (registre `0x15`, bit 0) soit à `1`. Sans lui, la
-puce attend indéfiniment, FIFO pleine.
+Transmission is therefore not triggered by a command but by the **FIFO
+filling up**, provided `CE` (register `0x15`, bit 0) is at `1`. Without it,
+the chip waits indefinitely, FIFO full.
 
-`CE` est désormais posé dans `configForLoopback()` et dans `prepareToTransfer()`.
-Rappel : `CE` est **effacé par le matériel** à chaque fin de réception, donc il
-doit être reposé à chaque tentative d'entrée en RX.
+`CE` is now set in `configForLoopback()` and in `prepareToTransfer()`.
+Reminder: `CE` is **cleared by the hardware** at the end of every reception,
+so it must be set again on every attempt to enter RX.
 
-## `EN_DYN_ACK` : l'écriture FIFO refusée en silence
+## `EN_DYN_ACK`: the FIFO write silently refused
 
-Le datasheet (`ds.txt:869`), dans la description de `DPL2` (registre `0x2B`) :
+The datasheet (`ds.txt:869`), in the description of `DPL2` (register
+`0x2B`):
 
 > Bit 0 **`EN_DYN_ACK`**: PTX "write TX FIFO with No-Auto-ACK" command enable
 
-Tant que ce bit vaut `0`, la commande d'écriture FIFO **sans** auto-ACK est
-**ignorée sans aucun signal d'erreur** : la FIFO reste vide, la puce n'a rien à
-émettre et demeure en Light Sleep.
+As long as this bit is `0`, the FIFO write command **without** auto-ACK is
+**ignored with no error signal whatsoever**: the FIFO stays empty, the chip
+has nothing to transmit and remains in Light Sleep.
 
-Mesuré par la commande `autotest`, quatre combinaisons sur silicium :
+Measured with the `autotest` command, four combinations on silicon:
 
-| `EN_DYN_ACK` | commande d'écriture | FIFO remplie ? |
+| `EN_DYN_ACK` | write command | FIFO filled? |
 |---|---|---|
-| 0 | sans auto-ACK | **non** |
-| 1 | sans auto-ACK | oui, et `TX_DS` tombe |
-| 0 | avec auto-ACK | oui |
-| 1 | avec auto-ACK | oui |
+| 0 | without auto-ACK | **no** |
+| 1 | without auto-ACK | yes, and `TX_DS` fires |
+| 0 | with auto-ACK | yes |
+| 1 | with auto-ACK | yes |
 
-C'est ce défaut qui expliquait 2553 trames « émises » sans une seule transmission
-réelle. La séquence d'émission correcte est donc : `DPL2` bit 0 à `1`, écriture de
-la FIFO, `CE` à `1` — après quoi la puce part en TX **d'elle-même**, sans commande
-strobe.
+This is the defect that explained 2553 "transmitted" frames without a single
+real transmission. The correct transmit sequence is therefore: `DPL2` bit 0
+to `1`, write the FIFO, `CE` to `1` — after which the chip goes into TX **by
+itself**, with no strobe command.
 
-## L'accrochage sur le préambule est impossible — démontré
+## Locking onto the preamble is impossible — demonstrated
 
-L'idée : puisque le préambule est connu (`AA` répété), donner au corrélateur une
-adresse de 3 octets valant `AA AA X` pour qu'il se cale sur le préambule plus le
-premier octet d'adresse, et livre les trois octets suivants — c'est-à-dire le
-reste de l'adresse.
+The idea: since the preamble is known (`AA` repeated), give the correlator a
+3-byte address of `AA AA X` so it locks onto the preamble plus the first
+address byte, and delivers the next three bytes — that is, the rest of the
+address.
 
-**Testée sur un émetteur dont l'adresse était connue d'avance**, le 2026-09-22 :
+**Tested on a transmitter whose address was known in advance**, on
+Sep 22, 2026:
 
 | | |
 |---|---|
-| balise | 4474 trames, **100 % confirmées par `TX_DS`** |
-| préambule émis | 2 octets, vérifié effectif (`CFO1 = 0x4F`) |
-| adresse | `E1 22 33 44` sur l'air, canal 5, 125 kbps |
-| récepteur | validé la même heure : 421 trames reçues sur 421 |
-| **résultat** | **0 accroche sur 512 configurations** |
+| beacon | 4474 frames, **100% confirmed by `TX_DS`** |
+| preamble sent | 2 bytes, verified effective (`CFO1 = 0x4F`) |
+| address | `E1 22 33 44` on air, channel 5, 125 kbps |
+| receiver | validated at the same time: 421 frames received out of 421 |
+| **result** | **0 locks out of 512 configurations** |
 
-Le corrélateur **ne peut pas se caler sur un motif contenant le préambule**,
-vraisemblablement parce qu'il ne s'arme qu'après avoir détecté un préambule
-valide. La méthode est close : ne pas la réessayer.
+The correlator **cannot lock onto a pattern containing the preamble**, most
+likely because it only arms after detecting a valid preamble. The method is
+closed: do not retry it.
 
-Corollaire méthodologique : ce banc à deux cartes permet de **valider une
-technique de découverte sur une adresse connue** avant de la lancer contre la
-lampe. Toute méthode future doit passer par là d'abord.
+Methodological corollary: this two-board bench makes it possible to
+**validate a discovery technique on a known address** before running it
+against the lamp. Every future method must go through this first.
 
-## Le débit de la télécommande n'est pas 125 kbps
+## The remote's bitrate is not 125 kbps
 
-Mesure des durées de rafale du 2026-09-22, canal 5, seuil 70 dB.
+Burst-duration measurement from Sep 22, 2026, channel 5, 70 dB threshold.
 
-**Étalonnage** sur la balise, dont on connaît le débit (125 kbps) et la trame
-(19 octets = 152 bits = 1216 µs théoriques) :
+**Calibration** against the beacon, whose bitrate (125 kbps) and frame
+(19 bytes = 152 bits = 1216 µs theoretical) are known:
 
 ```
 1620 rafales — dominante 800-1499 µs, moyenne 913 µs, plus longue 1755 µs
 ```
 
-L'instrument lit court d'environ un quart (913 pour 1216) : inertie du registre
-RSSI et seuil qui rogne les bords.
+The instrument reads about a quarter short (913 for 1216): RSSI register
+inertia and a threshold that clips the edges.
 
-**Télécommande de la lampe**, molette en rotation :
+**The lamp's remote**, dial turning:
 
 ```
 817 rafales — dominante 400-799 µs, moyenne 531 µs, plus longue 785 µs
 bande 800-1499 : ZERO
 ```
 
-Aucune rafale dans la bande où la balise en plaçait 929, et une rafale maximale
-de 785 µs contre 1755 µs. Corrigé du biais, les 531 µs mesurés valent environ
-**708 µs réels** — soit 608 µs pour 19 octets à 250 kbps, contre 1216 µs à
-125 kbps.
+No burst in the band where the beacon placed 929 of them, and a maximum
+burst of 785 µs versus 1755 µs. Corrected for the bias, the measured 531 µs
+is worth about **708 µs real** — i.e., 608 µs for 19 bytes at 250 kbps,
+versus 1216 µs at 125 kbps.
 
-**125 kbps sur une trame de 19 octets est exclu par la mesure.** La durée seule ne
-sépare pas formellement « 19 octets à 250 kbps » de « 11 octets à 125 kbps »,
-la longueur du payload du Halo 1 étant inconnue — mais toutes les chasses menées
-jusqu'ici écoutaient à 125 kbps, ce qui suffit à expliquer leurs zéros.
+**125 kbps on a 19-byte frame is ruled out by the measurement.** Duration
+alone does not formally separate "19 bytes at 250 kbps" from "11 bytes at
+125 kbps," the Halo 1's payload length being unknown — but every hunt run so
+far was listening at 125 kbps, which is enough to explain their zeros.
 
-Le débit est désormais réglable et **persisté** (`debit 125|250|500`), au lieu
-d'être codé en dur dans `sharedRadioConfig()`.
+The bitrate is now adjustable and **persisted** (`debit 125|250|500`),
+instead of being hard-coded in `sharedRadioConfig()`.
 
-## La piste de l'appairage est close
+## The pairing lead is closed
 
-Capture sur l'adresse d'appairage `E2 08 00 B0`, avec pour la première fois un
-récepteur **validé** (421 trames sur 421 au même moment), au **débit mesuré**
-(250 kbps) et sur le **canal mesuré** (5) : **zéro trame**, y compris en campant
-sur le seul canal 5 avec trois fois plus de temps par combinaison.
+Capture on the pairing address `E2 08 00 B0`, with, for the first time, a
+**validated** receiver (421 frames out of 421 at the same moment), at the
+**measured bitrate** (250 kbps) and on the **measured channel** (5): **zero
+frames**, including while camping on channel 5 alone with three times more
+time per combination.
 
-L'explication n'est pas instrumentale. Observé le 2026-09-22 : la manip
-d'appairage, qui se concluait la veille par un retour de la télécommande en deux
-secondes, **expire désormais systématiquement au bout de dix**, et ce **les deux
-ESP32 débranchés**. La télécommande continue par ailleurs de piloter la lampe.
+The explanation is not instrumental. Observed on Sep 22, 2026: the pairing
+procedure, which the day before had concluded with the remote returning
+within two seconds, **now systematically times out after ten**, and this
+**with both ESP32s unplugged**. The remote otherwise continues to drive the
+lamp.
 
-Autrement dit : la paire est déjà liée, la manip n'a rien à renégocier, et **il
-n'y a aucun échange d'appairage à capturer**. Ne pas relancer cette piste.
+In other words: the pair is already bonded, the procedure has nothing to
+renegotiate, and **there is no pairing exchange to capture**. Do not revisit
+this lead.
 
-## Ce qui reste
+## What remains
 
-L'adresse doit être lue là où elle est écrite en clair : sur le **bus SPI**
-interne de la télécommande ou de la lampe, au démarrage, quand le
-microcontrôleur la charge dans son BC5602 (commande « write PTX address »).
+The address must be read where it is written in the clear: on the
+**internal SPI bus** of the remote or the lamp, at startup, when the
+microcontroller loads it into its BC5602 ("write PTX address" command).
 
-La lampe est sans doute la cible la plus simple : plus volumineuse, alimentée en
-USB donc facile à redémarrer à volonté, et elle porte la même adresse que la
-télécommande. Un ESP32 suffit à capturer ce bus.
+The lamp is probably the simplest target: bulkier, USB-powered and thus easy
+to restart at will, and it carries the same address as the remote. One
+ESP32 is enough to capture this bus.
 
-## Écoute du bus SPI de la télécommande — point d'étape
+## Tapping the remote's SPI bus — status update
 
-La télécommande a été ouverte. Sa carte porte un **`BC5602` nu** (repère `U4`,
-QFN-16), le quartz `Y1` à sa gauche et l'antenne sérigraphiée au-dessus — deux
-repères physiques qui confirment l'orientation du boîtier.
+The remote has been opened. Its board carries a **bare `BC5602`** (designator
+`U4`, QFN-16), the `Y1` crystal to its left, and the antenna silkscreened
+above — two physical landmarks that confirm the case's orientation.
 
-Numérotation déduite des repères de coin sérigraphiés (`4/5`, `8/9`, `12/13`,
-`16/1`), antenne en haut et quartz à gauche : bord haut `1-4` de droite à gauche,
-bord gauche `5-8` de haut en bas, bord bas `9-12` de gauche à droite, bord droit
-`13-16` de bas en haut.
+Pin numbering inferred from the silkscreened corner markers (`4/5`, `8/9`,
+`12/13`, `16/1`), antenna at the top and crystal on the left: top edge `1-4`
+right to left, left edge `5-8` top to bottom, bottom edge `9-12` left to
+right, right edge `13-16` bottom to top.
 
-**Les trois signaux sortent sur des pastilles de test**, vérifié au multimètre —
-inutile de souder sur le QFN :
+**The three signals come out on test pads**, verified with a multimeter — no
+need to solder onto the QFN:
 
-| Broche | Signal | Pastille |
+| Pin | Signal | Pad |
 |---:|---|---|
-| 11 | `CSN` | la plus basse de la colonne de droite |
-| 12 | `SCK` | celle du milieu, près de `C34` |
-| 14 | `SDIO` | la plus haute |
+| 11 | `CSN` | the lowest one in the right-hand column |
+| 12 | `SCK` | the middle one, near `C34` |
+| 14 | `SDIO` | the highest one |
 
-Une masse est disponible sur une pastille au-dessus à gauche de la puce.
+A ground is available on a pad above and to the left of the chip.
 
-Niveaux au repos relevés par la commande `taptest`, pile en place : `CSN` tenue
-**haute**, `SCK` tenue **basse**, `SDIO` haute. Ce sont les états d'un bus SPI
-sain en mode 0, et ils ne peuvent pas provenir de lignes flottantes : les
-pastilles sont donc les bonnes.
+Idle levels read with the `taptest` command, battery in place: `CSN` held
+**high**, `SCK` held **low**, `SDIO` high. These are the idle states of a
+healthy mode-0 SPI bus, and they cannot come from floating lines: the pads
+are therefore the right ones.
 
-**Ce qui bloque est purement mécanique.** Un contact maintenu au ruban et à la
-main ne survit pas à une capture : le journal se remplit de `FF`, `00`, `80`,
-`C0`, `E0`, `F8`, `FC` — des suites de uns puis de zéros, signature d'un registre
-à décalage cadencé par une ligne qui bascule au hasard. La capture filtre
-désormais ce bruit, et n'annonce une écriture d'adresse que si `0x10` est suivi
-d'au moins quatre octets non tous nuls.
+**What is blocking is purely mechanical.** A contact held with tape and by
+hand does not survive a capture: the log fills up with `FF`, `00`, `80`,
+`C0`, `E0`, `F8`, `FC` — runs of ones then zeros, the signature of a shift
+register clocked by a line toggling at random. Capture now filters out this
+noise, and only reports an address write if `0x10` is followed by at least
+four bytes that are not all zero.
 
-Il faut des **pointes de test à ressort** pour maintenir les quatre contacts
-pendant qu'on retire et remet la pile.
+**Spring-loaded test probes** are needed to hold the four contacts while the
+battery is removed and reinserted.
 
-### Outillage de capture — cinq défauts corrigés
+### Capture tooling — five defects fixed
 
-La première version de `sniffspi` ne pouvait pas fonctionner. Cinq défauts, tous
-côté logiciel, trouvés grâce aux observations de terrain :
+The first version of `sniffspi` could not have worked. Five defects, all on
+the software side, found thanks to field observations:
 
-1. **Sourd entre deux transactions.** Une seule transaction armée, et un
-   `Serial.flush()` de plusieurs millisecondes entre chacune. On attrapait la
-   première d'une rafale et on dormait pendant tout le reste. Symptôme qui a mis
-   sur la piste : « à l'insertion de la pile, le compteur monte de 1 » — alors
-   qu'une initialisation compte des dizaines d'échanges.
-2. **Bruit stocké au lieu d'être jeté.** Le tri ne se faisait qu'à l'affichage :
-   le tampon se remplissait de parasites dans les premières secondes, et la
-   rafale utile était perdue faute de place.
-3. **Libération du périphérique avec des transactions encore armées**, d'où un
-   `Load access fault` qui emportait la capture. Il faut vider la file d'abord —
-   et afficher **avant** de démonter.
-4. **Affichage tronqué à 20 octets** alors que les transactions vont jusqu'à 32 :
-   le contenu discriminant était invisible.
-5. **Test de contact trompeur.** Sans pile, toutes les lignes sont tirées vers la
-   masse et ne suivent plus les résistances internes : elles passaient pour
-   « pilotées ». Le discriminant est `CSN`, que le microcontrôleur maintient
-   **haute** au repos.
+1. **Deaf between two transactions.** Only one transaction armed, and a
+   multi-millisecond `Serial.flush()` between each one. We caught the first
+   frame of a burst and slept through all the rest. The symptom that put us
+   on the trail: "when the battery is inserted, the counter goes up by 1" —
+   whereas an initialization involves dozens of exchanges.
+2. **Noise stored instead of discarded.** Filtering only happened at display
+   time: the buffer filled up with noise in the first few seconds, and the
+   useful burst was lost for lack of space.
+3. **Releasing the peripheral with transactions still armed**, hence a
+   `Load access fault` that took down the capture. The queue must be
+   drained first — and displayed **before** tearing down.
+4. **Display truncated to 20 bytes** while transactions go up to 32: the
+   discriminating content was invisible.
+5. **Misleading contact test.** Without the battery, all lines are pulled
+   toward ground and no longer follow the internal resistors: they read as
+   "driven." The discriminant is `CSN`, which the microcontroller holds
+   **high** at rest.
 
-À noter pour la suite : le pilote SPI esclave active des résistances de tirage
-internes, donc **une broche débranchée se lit à 100 % haut**. Trois lignes à
-100 % haut ne veulent pas dire « tout va bien » mais « rien ne touche ».
+Worth noting for later: the slave SPI driver enables internal pull-up
+resistors, so **a disconnected pin reads 100% high**. Three lines at 100%
+high do not mean "everything is fine" but "nothing is touching."
 
-État final de l'outillage : capture à six transactions pré-armées, tri du bruit à
-la volée, état des trois lignes et compteurs affichés une fois par seconde,
-restitution complète sur 32 octets. **Il ne manque qu'un contact mécanique
-fiable** — trois pastilles d'un millimètre ne se tiennent pas à la main.
+Final state of the tooling: capture with six pre-armed transactions, noise
+filtered on the fly, state of the three lines and counters displayed once a
+second, full readout over 32 bytes. **All that is missing is a reliable
+mechanical contact** — three one-millimeter pads cannot be held by hand.
 
-## `J5` : le connecteur de programmation du microcontrôleur
+## `J5`: the microcontroller's programming connector
 
-Six trous traversants plaqués, repère `J5`, entre le contrôleur tactile `U2` et
-la découpe. Ils acceptent une broche Dupont par simple friction — c'est le seul
-point de la carte où le contact mécanique ne pose aucun problème.
+Six plated through-holes, designator `J5`, between the touch controller `U2`
+and the board's cutout. They accept a Dupont pin by simple friction — the
+one spot on the board where mechanical contact poses no problem at all.
 
-Relevés au multimètre, télécommande alimentée, masse sur le trou 1 :
+Readings with a multimeter, remote powered, ground on hole 1:
 
-| Trou | Mesure | Interprétation |
+| Hole | Reading | Interpretation |
 |---:|---|---|
-| 1 | continuité avec la masse | `GND` |
-| 2, 4, 5, 6 | 2,49 V | tirés haut |
-| **3** | **0,001 V** | **`SWCLK`** — tiré bas par sa résistance interne |
+| 1 | continuity with ground | `GND` |
+| 2, 4, 5, 6 | 2.49 V | pulled high |
+| **3** | **0.001 V** | **`SWCLK`** — pulled low by its internal resistor |
 
-Aucun des cinq ne porte `CSN`, `SCK` ni `SDIO` : ce n'est pas un connecteur de
-test radio. La signature — un seul trou bas pendant que les autres sont hauts —
-est celle d'un port `SWD` : `SWDIO` et le reset se tiennent hauts, `SWCLK` bas.
+None of the five carries `CSN`, `SCK`, or `SDIO`: this is not a radio test
+connector. The signature — a single hole low while the others are high — is
+that of an `SWD` port: `SWDIO` and reset sit high, `SWCLK` low.
 
-**Conséquence sur les niveaux logiques** : la logique de la télécommande tourne
-à **2,5 V**, pas 3,3 V, ce qui est cohérent avec des piles montées en parallèle
-et remontées par un convertisseur. Le seuil de niveau haut de l'ESP32-C6 est
-d'environ 2,48 V : les signaux arrivent donc dix millivolts au-dessus du seuil.
-Ça fonctionne, mais sans marge — à garder en tête devant toute capture bruitée.
+**Consequence for logic levels**: the remote's logic runs at **2.5 V**, not
+3.3 V, which is consistent with batteries wired in parallel and stepped up
+by a converter. The ESP32-C6's high-level threshold is about 2.48 V: the
+signals therefore arrive ten millivolts above the threshold. It works, but
+with no margin — worth keeping in mind for any noisy capture.
 
-Une sonde `ST-Link V2` travaillant à 3,3 V devra passer par deux résistances
-série de quelques centaines d'ohms sur `SWDIO` et `SWCLK`, pour ne pas faire
-conduire les diodes de protection de la cible.
+An `ST-Link V2` probe working at 3.3 V will need to go through two series
+resistors of a few hundred ohms on `SWDIO` and `SWCLK`, so as not to turn on
+the target's protection diodes.
 
-### Implémentation `SWD` en bit-banging
+### Bit-banged `SWD` implementation
 
-`src/swd.cpp` génère le protocole sans matériel dédié : reset de ligne, bascule
-JTAG vers SWD, puis échanges de 8 bits de requête, 3 bits d'acquittement et
-32 bits de donnée avec leurs cycles de retournement.
+`src/swd.cpp` generates the protocol without dedicated hardware: line reset,
+JTAG-to-SWD switchover, then exchanges of 8 request bits, 3 acknowledgement
+bits, and 32 data bits with their turnaround cycles.
 
-La commande `swd` **cherche elle-même quel trou est `SWDIO`** parmi plusieurs
-broches de l'ESP32 reliées d'un coup aux trous inconnus — pas de recâblage entre
-les essais. Elle ne s'arrête pas à l'`IDCODE` : elle demande ensuite la mise sous
-tension du domaine de debug et vérifie l'acquittement matériel, ce qui distingue
-une vraie liaison d'une lecture heureuse.
+The `swd` command **figures out on its own which hole is `SWDIO`** among
+several ESP32 pins wired all at once to the unknown holes — no rewiring
+between attempts. It does not stop at the `IDCODE`: it then requests
+power-up of the debug domain and checks the hardware acknowledgement, which
+distinguishes a real link from a lucky read.
 
-Réserve connue : Artery livre souvent ses microcontrôleurs avec la lecture de la
-flash verrouillée. La liaison peut donc s'établir sans que le contenu soit
-accessible.
+Known caveat: Artery often ships its microcontrollers with flash read
+protection locked. The link can therefore be established without the
+content being accessible.
 
-## L'accrochage en milieu de trame EST possible — à condition d'une ancre
+## Mid-frame locking IS possible — provided there is an anchor
 
-**Correction d'une conclusion erronée.** Une version précédente de cette section
-affirmait l'inverse, « démontré » à l'appui. La démonstration ne valait rien.
+**Correction of an erroneous conclusion.** A previous version of this
+section claimed the opposite, backed by "demonstrated." The demonstration
+was worthless.
 
-Le détecteur de préambule s'arme sur une **suite alternée**. Une fenêtre de trois
-octets prise dans le payload n'est donc accrochable que si l'octet qui la
-**précède** ressemble à un préambule, c'est-à-dire vaut `0x55` ou `0xAA`.
+The preamble detector arms on an **alternating sequence**. A 3-byte window
+taken from the payload can therefore only be locked onto if the byte that
+**precedes** it looks like a preamble, i.e., equals `0x55` or `0xAA`.
 
-Le script `find_addr.py` de kuzmin, dont l'intégration Home Assistant fonctionne,
-le dit explicitement :
+kuzmin's `find_addr.py` script, whose Home Assistant integration works, says
+so explicitly:
 
 ```python
 HALO2_ADDRESS = [0x55, 0x0f, 0x0a]
@@ -718,396 +729,408 @@ HALO2_ADDRESS = [0x55, 0x0f, 0x0a]
 #               (reverse byte order; used as preambule and part of the sync word)
 ```
 
-D'où sa consigne de régler la lampe sur **3925 K** exactement : c'est la valeur
-dont l'octet de poids faible vaut `0x55`, et cet octet **sert de préambule**.
+Hence its instruction to tune the lamp to exactly **3925 K**: it is the
+value whose low byte equals `0x55`, and that byte **serves as the
+preamble**.
 
-Le premier test de contrôle utilisait le payload de balise
-`DE AD BE EF 01 02 03 04 05 06`, dont la plus longue suite alternée fait sept
-bits — trop court pour armer le détecteur. **Aucune de ses huit fenêtres n'était
-ancrée : l'expérience ne pouvait pas accrocher, quelle que soit la capacité réelle
-de la puce.**
+The first control test used the beacon payload
+`DE AD BE EF 01 02 03 04 05 06`, whose longest alternating run is seven
+bits — too short to arm the detector. **None of its eight windows was
+anchored: the experiment could not have locked, regardless of the chip's
+actual capability.**
 
-Refaite avec un payload portant une ancre, `DE AD 55 0F A0 3C 01 02 03 04` :
+Redone with a payload carrying an anchor, `DE AD 55 0F A0 3C 01 02 03 04`:
 
-| Fenêtre | Octets | Ancrée | Trames |
-|---|---|---|---:|
-| 0-2 | `DE AD 55` | non | 0 |
-| 1-3 | `AD 55 0F` | non | 0 |
-| 2-4 | `55 0F A0` | non | 0 |
-| **3-5** | **`0F A0 3C`** | **oui** | **158** |
-| 4-6 | `A0 3C 01` | non | 0 |
-| 5-7 | `3C 01 02` | non | 0 |
-| 6-8 | `01 02 03` | non | 0 |
-| 7-9 | `02 03 04` | non | 0 |
+| Window | Bytes | Anchored | Frames |
+|---|---|---:|---:|
+| 0-2 | `DE AD 55` | no | 0 |
+| 1-3 | `AD 55 0F` | no | 0 |
+| 2-4 | `55 0F A0` | no | 0 |
+| **3-5** | **`0F A0 3C`** | **yes** | **158** |
+| 4-6 | `A0 3C 01` | no | 0 |
+| 5-7 | `3C 01 02` | no | 0 |
+| 6-8 | `01 02 03` | no | 0 |
+| 7-9 | `02 03 04` | no | 0 |
 
-Un positif, sept négatifs — y compris pour les fenêtres qui **contiennent** le
-`0x55` sans être précédées par lui. Et la FIFO rend `01 02 03 04 …`, exactement
-les octets suivant la fenêtre accrochée.
+One positive, seven negatives — including for the windows that **contain**
+`0x55` without being preceded by it. And the FIFO returns `01 02 03 04 …`,
+exactly the bytes following the anchored window.
 
-**Le procédé de `find` est donc valide.** Ses échecs s'expliquent par deux causes
-identifiées depuis : le **débit** — toutes les chasses tournaient à 125 kbps alors
-que la mesure de durée de rafale exclut ce débit pour le Halo 1 — et l'**ancre**,
-qui impose de régler la lampe sur une valeur dont un octet vaut `0x55` ou `0xAA`.
+**The `find` procedure is therefore valid.** Its failures are explained by
+two causes identified since: the **bitrate** — every hunt was running at
+125 kbps, whereas the burst-duration measurement rules out that bitrate for
+the Halo 1 — and the **anchor**, which requires tuning the lamp to a value
+with a byte equal to `0x55` or `0xAA`.
 
-Valeurs d'ancrage utilisables : une température dont l'octet bas vaut `0x55`
-(2645, 2901, 3157, 3413, 3669, **3925**, 4181, 4437 … K) ou `0xAA` (2730, 2986,
-3242, 3498, 3754, 4010 … K) ; ou une **luminosité de 85 %**, qui vaut `0x55`.
+Usable anchor values: a temperature whose low byte is `0x55` (2645, 2901,
+3157, 3413, 3669, **3925**, 4181, 4437 … K) or `0xAA` (2730, 2986, 3242,
+3498, 3754, 4010 … K); or a **brightness of 85%**, which equals `0x55`.
 
-À noter : l'accrochage sur le **préambule lui-même** reste impossible, et pour une
-raison qui découle du même mécanisme — rien ne précède le préambule, il ne peut
-donc pas être ancré.
+Note: locking onto the **preamble itself** remains impossible, and for a
+reason that follows from the same mechanism — nothing precedes the
+preamble, so it cannot be anchored.
 
-## La chasse ancrée appliquée au Halo 1 — sans résultat
+## The anchored hunt applied to the Halo 1 — no result
 
-Le mécanisme d'ancrage est **validé sur le banc** (voir ci-dessus : un positif,
-sept négatifs). Appliqué à la télécommande du Halo 1, il ne donne rien.
+The anchoring mechanism is **validated on the bench** (see above: one
+positive, seven negatives). Applied to the Halo 1's remote, it yields
+nothing.
 
-Mesures du 2026-09-22, télécommande remontée et molette tournée sans arrêt,
-témoin de trafic positif à chaque fois (12 à 13 pour mille de signal fort,
-pics à 19-20 dB) :
+Measurements from Sep 22, 2026, remote reassembled and the dial turned
+continuously, with a positive traffic control each time (12 to 13 per mille
+of strong signal, peaks at 19-20 dB):
 
-| Configuration | Candidats | Accroches |
+| Configuration | Candidates | Locks |
 |---|---:|---:|
-| 32 températures d'ancrage × 101 luminosités | 4995 | 1 |
-| lampe arrière éteinte, 32 températures | 3000 (94 passes) | 1 |
-| température imposée à 3925 K, 101 luminosités | 5000 (50 passes) | 2 |
+| 32 anchor temperatures × 101 brightness levels | 4995 | 1 |
+| back lamp off, 32 temperatures | 3000 (94 passes) | 1 |
+| temperature fixed at 3925 K, 101 brightness levels | 5000 (50 passes) | 2 |
 
-Un motif de 24 bits se retrouve par hasard environ une fois sur 16 millions de
-positions, et il en défile des dizaines de millions par minute : **une à deux
-accroches par run est le bruit attendu**, pas un indice. Leurs contenus sont
-d'ailleurs illisibles et leurs luminosités dispersées.
+A 24-bit pattern recurs by chance about once every 16 million positions, and
+tens of millions of them go by per minute: **one or two locks per run is the
+expected noise**, not a clue. Their contents are, moreover, unreadable and
+their brightness values scattered.
 
-Trois accroches antérieures, toutes annoncées à 3925 K, avaient semblé
-corréler avec l'affichage de la télécommande. Le test concentré ci-dessus —
-température imposée, 50 passages complets sur la luminosité — aurait produit
-des dizaines d'accroches si cette corrélation avait été réelle. Elle ne l'était
-pas.
+Three earlier locks, all reported at 3925 K, had seemed to correlate with
+the remote's display. The focused test above — temperature fixed, 50
+complete sweeps over brightness — would have produced dozens of locks had
+that correlation been real. It was not.
 
-**Ce que cela laisse ouvert** : la structure du payload du Halo 1 n'a jamais été
-vérifiée, elle est supposée identique à celle du Halo 2. Si elle diffère, toute
-l'approche par fenêtre ancrée s'effondre — et rien dans nos mesures ne permet de
-trancher.
+**What this leaves open**: the Halo 1's payload structure has never been
+verified, it is assumed identical to the Halo 2's. If it differs, the whole
+anchored-window approach collapses — and nothing in our measurements can
+settle it.
 
-## Détecteurs sans adresse — ce qu'ils disent
+## Address-less detectors — what they say
 
-Deux instruments ont été construits qui ne demandent aucune adresse, en
-exploitant le fait que `GIO3` ne s'anime que si un **préambule a été détecté** :
+Two instruments have been built that require no address, exploiting the
+fact that `GIO3` only stirs if a **preamble has been detected**:
 
-- `debitgio` — balaie les trois débits. **Validé sur la balise** : 434 et 442
-  transitions à son débit réel, zéro aux deux autres. Discrimination parfaite.
-- `canalgio` — balaie les 84 canaux. **Validé sur la balise** : seul son canal
-  ressort, accompagné de son **image** seize canaux plus haut (fréquence
-  intermédiaire de 8 MHz), que le RSSI permet de distinguer du vrai canal.
+- `debitgio` — sweeps the three bitrates. **Validated on the beacon**: 434
+  and 442 transitions at its real bitrate, zero at the other two. Perfect
+  discrimination.
+- `canalgio` — sweeps the 84 channels. **Validated on the beacon**: only its
+  channel stands out, accompanied by its **image** sixteen channels higher
+  (8 MHz intermediate frequency), which the RSSI can distinguish from the
+  real channel.
 
-Appliqués à la télécommande, avec trafic attesté : **aucune transition, à aucun
-débit, sur aucun canal**, préambule de un comme de deux octets.
+Applied to the remote, with confirmed traffic: **no transition, at any
+bitrate, on any channel**, with a one-byte or two-byte preamble alike.
 
-La puce n'accroche donc jamais le préambule de la télécommande, alors que sa
-carte porte elle aussi un `BC5602`. Ce constat est solide et reste inexpliqué.
+The chip therefore never locks onto the remote's preamble, even though its
+board also carries a `BC5602`. This finding is solid and remains
+unexplained.
 
-## Le débit, tranché par le rapport FCC
+## The bitrate, settled by the FCC report
 
-Le rapport de laboratoire de la télécommande (`scratchpad/ctr_test_report.txt`)
-donne, pour les trois canaux 2405 / 2446 / 2475 MHz :
+The remote's lab report (`scratchpad/ctr_test_report.txt`) gives, for the
+three channels 2405 / 2446 / 2475 MHz:
 
-| Fréquence | Largeur à 20 dB | Largeur occupée à 99 % |
+| Frequency | 20 dB width | 99% occupied bandwidth |
 |---|---|---|
-| 2405 MHz | 0,504 MHz | **0,430 MHz** |
-| 2446 MHz | 0,508 MHz | **0,434 MHz** |
-| 2475 MHz | 0,508 MHz | **0,447 MHz** |
+| 2405 MHz | 0.504 MHz | **0.430 MHz** |
+| 2446 MHz | 0.508 MHz | **0.434 MHz** |
+| 2475 MHz | 0.508 MHz | **0.447 MHz** |
 
-Le datasheet donne les excursions appliquées par la puce (`ds.txt:198-200`) :
-160 kHz à 125 et 250 kbps, 250 kHz à 500 kbps. Pour du GFSK, la largeur occupée
-vaut approximativement `2 × fDEV + débit` :
+The datasheet gives the deviations applied by the chip (`ds.txt:198-200`):
+160 kHz at 125 and 250 kbps, 250 kHz at 500 kbps. For GFSK, the occupied
+bandwidth is approximately `2 × fDEV + bitrate`:
 
-| Débit | Largeur attendue | Verdict |
+| Bitrate | Expected width | Verdict |
 |---|---|---|
 | **125 kbps** | **445 kHz** | **compatible** |
-| 250 kbps | 570 kHz | exclu |
-| 500 kbps | 1000 kHz | exclu |
+| 250 kbps | 570 kHz | excluded |
+| 500 kbps | 1000 kHz | excluded |
 
-**La télécommande émet à 125 kbps.** Cela contredit l'estimation par durée de
-rafale, qui annonçait 250 kbps en supposant une trame de 19 octets.
+**The remote transmits at 125 kbps.** This contradicts the burst-duration
+estimate, which pointed to 250 kbps assuming a 19-byte frame.
 
-### Conséquence : la trame du Halo 1 est courte
+### Consequence: the Halo 1 frame is short
 
-À 125 kbps, la durée de rafale corrigée (~708 µs) correspond à environ
-**11 octets**, non 19. Préambule, adresse, PCF et CRC en consomment 8 ou 9 : il
-ne reste que **2 à 4 octets de payload**, là où le Halo 2 en a dix.
+At 125 kbps, the corrected burst duration (~708 µs) corresponds to about
+**11 bytes**, not 19. Preamble, address, PCF, and CRC consume 8 or 9 of
+them: leaving only **2 to 4 payload bytes**, where the Halo 2 has ten.
 
-**La structure de trame du Halo 1 n'est donc pas celle du Halo 2** — hypothèse
-qui soutenait toutes les chasses par fenêtre de payload, et qui explique leur
-échec.
+**The Halo 1's frame structure is therefore not the Halo 2's** — an
+assumption that underpinned every payload-window hunt, and which explains
+their failure.
 
-## La contradiction ouverte
+## The open contradiction
 
-Deux blocs de faits qui ne peuvent pas être vrais ensemble si les deux puces
-sont réglées de la même manière :
+Two sets of facts that cannot both be true if the two chips are configured
+the same way:
 
-- la télécommande **émet** (la lampe lui répond) et porte un `BC5602` ;
-- notre `BC5602` **ne détecte jamais son préambule**, après avoir balayé
-  84 canaux × 3 débits × 2 longueurs de préambule × 3 largeurs d'adresse ×
-  2 séquences d'initialisation, instrument validé sur la balise à chaque fois.
+- the remote **transmits** (the lamp replies to it) and carries a `BC5602`;
+- our `BC5602` **never detects its preamble**, after sweeping 84 channels ×
+  3 bitrates × 2 preamble lengths × 3 address widths × 2 initialization
+  sequences, with the instrument validated against the beacon every time.
 
-**Réserve** : ces balayages n'accordent que 0,7 à 3 s par canal, et le témoin
-RSSI ne voyait jamais le canal 5 ressortir pendant ces runs — alors que la
-mesure `presence` l'y voyait bondir d'un facteur sept le matin même. Une source
-à ~1 % de rapport cyclique peut être ratée par un balayage.
+**Caveat**: these sweeps allot only 0.7 to 3 s per channel, and the RSSI
+control never saw channel 5 stand out during these runs — whereas the
+`presence` measurement saw it jump by a factor of seven that same morning. A
+source with a ~1% duty cycle can be missed by a sweep.
 
-**À faire en priorité à la reprise** : camper une minute entière sur le canal 5
-plutôt que balayer.
+**Top priority for the next session**: camp a full minute on channel 5
+rather than sweep.
 
 ```
 debit 125
 canalgio 60000 5 5
 ```
 
-Cela tranche entre « la puce ne sait pas démoduler cette source » et « on n'y
-était jamais au bon moment ». Les quarante balayages précédents ne pouvaient pas
-séparer ces deux lectures.
+This settles between "the chip cannot demodulate this source" and "we were
+simply never there at the right moment." The forty previous sweeps could
+not separate these two readings.
 
-Variables encore non testées si ce campement ne donne rien : l'**excursion de
-fréquence** et les réglages de **modem** non documentés. Seul le firmware de la
-télécommande, lisible par `SWD` sur `J5`, peut les livrer.
+Variables still untested if this stakeout yields nothing: the **frequency
+deviation** and the undocumented **modem** settings. Only the remote's
+firmware, readable via `SWD` on `J5`, can deliver them.
 
-### La contradiction, verrouillée par deux mesures contrôlées
+### The contradiction, locked down by two controlled measurements
 
-Mesure `presence` du 2026-09-22 à 19h24, bande « très fort » (RSSI ≤ 49 dB),
-trois cycles alternés repos / molette en main :
+`presence` measurement from Sep 22, 2026 at 19:24, "very strong" band
+(RSSI ≤ 49 dB), three alternating rest / dial-in-hand cycles:
 
-| Canal | Repos | Molette en main | |
+| Channel | Rest | Dial in hand | |
 |---|---:|---:|---|
 | **5 — 2405 MHz** | **5** | **847** | **×169** |
 | 46 — 2446 MHz | 0 | 0 | — |
 | 75 — 2475 MHz | 9 | 14 | — |
-| 80 — témoin BLE | 159 | 146 | plat |
+| 80 — BLE control | 159 | 146 | flat |
 
-Le témoin ne bouge pas, les deux autres canaux FCC non plus. **La télécommande
-émet sur le canal 5, et le récepteur l'entend très fort.**
+The control does not move, nor do the other two FCC channels. **The remote
+transmits on channel 5, and the receiver hears it very strongly.**
 
-Deux minutes plus tôt, une minute entière campée sur ce même canal 5 à
-125 kbps : **1,29 % de signal fort, zéro détection de préambule.** Environ onze
-cents rafales sont passées devant le démodulateur sans qu'une seule soit
-reconnue.
+Two minutes earlier, a full minute camped on that same channel 5 at
+125 kbps: **1.29% strong signal, zero preamble detections.** About eleven
+hundred bursts went past the demodulator without a single one being
+recognized.
 
-Les deux mesures ont leur propre contrôle et ont été faites dans la même séance.
-**La contradiction est donc établie, pas supposée** : le signal est là, fort, sur
-le bon canal, et un `BC5602` ne reconnaît pas le préambule d'un autre `BC5602`.
+Both measurements have their own control and were made in the same session.
+**The contradiction is thus established, not assumed**: the signal is
+there, strong, on the right channel, and one `BC5602` does not recognize the
+preamble of another `BC5602`.
 
-Tout ce qui pouvait être balayé l'a été : 84 canaux, 3 débits, 2 longueurs de
-préambule, 3 largeurs d'adresse, 2 séquences d'initialisation. Les variables
-restantes — **excursion de fréquence** et réglages de **modem** non documentés —
-ne sont pas accessibles par balayage. Elles sont dans le firmware de la
-télécommande, lisible par `SWD` sur `J5`.
+Everything that could be swept has been: 84 channels, 3 bitrates, 2 preamble
+lengths, 3 address widths, 2 initialization sequences. The remaining
+variables — **frequency deviation** and undocumented **modem** settings —
+are not accessible by sweeping. They are in the remote's firmware, readable
+via `SWD` on `J5`.
 
+## The software reset clears the analog settings (Sep 22, 2026)
 
-## Le reset logiciel efface les reglages analogiques (2026-09-22)
+`survie` measurement: of the 19 values recommended by Holtek, **15 are reset
+to their factory value by a software reset**. Yet `resetRadio()`,
+`configForLoopback()`, and `sharedRadioConfig()` all begin with a reset.
 
-Mesure `survie` : sur les 19 valeurs recommandees par Holtek, **15 sont
-remises a leur valeur d'usine par un reset logiciel**. Or `resetRadio()`,
-`configForLoopback()` et `sharedRadioConfig()` commencent tous par un reset.
+Consequence: from when these values were written in `begin()` until Sep 22,
+**they were never active during a listening session**. Every sweep of
+channels, bitrates, address widths, and preamble lengths ran on a modem at
+factory values. Exception: the `modem` sweep, which writes its register
+after the configuration.
 
-Consequence : de l'ecriture de ces valeurs dans `begin()` jusqu'au 22 septembre,
-**elles n'ont jamais ete actives pendant une ecoute**. Tous les balayages de
-canaux, de debits, de largeurs d'adresse et de longueurs de preambule ont tourne
-sur un modem aux valeurs d'usine. Exception : le balayage `modem`, qui ecrit son
-registre apres la configuration.
+Fixed: `registerConfigure()` is replayed after every reset, in both
+configuration paths, selectable via `holtek 0|1`. The control is printed by
+the measurement itself: **18 out of 19** in place (the 19th is the known
+anomaly of bank 2 register 0x2D, written as 0x18 and read back as 0x58).
 
-Corrige : `registerConfigure()` est rejoue apres chaque reset, dans les deux
-chemins de configuration, pilotable par `holtek 0|1`. Le temoin est imprime par
-la mesure elle-meme : **18 sur 19** en place (le 19e est l'anomalie connue du
-registre 0x2D de la banque 2, ecrit 0x18 et relu 0x58).
+First hunt with the settings active, channels 3 to 7, 125 kbps, 30 s each:
+channel 5 has 2433 strong signals out of 145713 (16.7 per mille versus 7
+average over the band, and 4.5 at rest) -- the remote is indeed heard -- but
+**zero transitions on GIO3**.
 
-Premiere chasse avec les reglages actifs, canaux 3 a 7, 125 kbps, 30 s chacun :
-canal 5 a 2433 signaux forts sur 145713 (16,7 pour mille contre 7 de moyenne sur
-la bande, et 4,5 au repos) -- la telecommande est bien entendue -- mais **zero
-transition sur GIO3**.
+## The GIO3 wire is electrically valid (Sep 22, 2026)
 
-## Le fil GIO3 est valide electriquement (2026-09-22)
+`fil` command: we force the pad to drive a level, selector by selector, and
+check whether the pin overrides the ESP32's internal pull resistors. All 16
+selectors drive the pin to a firm level (0/20 or 20/20 against BOTH pulls),
+and **the level changes with the selector**. This validates the entire
+chain: SPI write -> pad -> wire -> ESP32 read.
 
-Commande `fil` : on force la pastille a sortir un niveau, selecteur par
-selecteur, et on regarde si la broche resiste aux resistances internes de
-l'ESP32. Les 16 selecteurs pilotent la broche a un niveau franc (0/20 ou 20/20
-contre les DEUX tractions), et **le niveau change avec le selecteur**. Cela
-valide la chaine entiere : ecriture SPI -> pastille -> fil -> lecture ESP32.
+This test requires no radio source, unlike an edge count: it distinguishes a
+disconnected wire from an absence of signal, which a zero transition count
+cannot do.
 
-Ce test ne demande aucune source radio, contrairement a un comptage de fronts :
-il distingue un fil debranche d'une absence de signal, ce qu'un zero de
-transitions ne sait pas faire.
+Still to be validated functionally: that a selector MOVES when a frame
+arrives. This requires the beacon on the second board, currently unplugged.
+Selectors 2, 4, 9, and 14 had been seen active -- with the beacon on.
 
-Reste a valider fonctionnellement : qu'un selecteur BOUGE quand une trame
-arrive. Cela demande la balise sur la deuxieme carte, actuellement debranchee.
-Les selecteurs 2, 4, 9 et 14 avaient ete vus actifs -- avec la balise allumee.
+## Three checks that lock down the contradiction (evening of Sep 22, 2026)
 
-## Trois controles qui verrouillent la contradiction (2026-09-22 au soir)
+**1. Channel 5 really does carry the remote, not Wi-Fi.** Channel 5
+(2405 MHz) falls inside Wi-Fi channel 1, 20 MHz wide (2401-2423). A Wi-Fi
+transmitter therefore deposits as much energy at 2420 as at 2405; the
+remote, 0.43 MHz wide (FCC filing), can only be at one of the two spots.
+`discrimine` command, channels 5 / 20 / 78 sampled alternately, rest then
+dial phases:
 
-**1. Le canal 5 porte bien la telecommande, pas le Wi-Fi.** Le canal 5 (2405 MHz)
-tombe dans le Wi-Fi 1, large de 20 MHz (2401-2423). Un emetteur Wi-Fi depose
-donc autant d'energie a 2420 qu'a 2405 ; la telecommande, large de 0,43 MHz
-(dossier FCC), ne peut etre qu'a un des deux endroits. Commande `discrimine`,
-canaux 5 / 20 / 78 echantillonnes en alternance, phases repos puis molette :
-
-| canal | role | repos | molette | rapport |
+| channel | role | rest | dial | ratio |
 |---|---|---|---|---|
-| 5 = 2405 MHz | cible, dans le Wi-Fi 1 | 3,92 0/00 | 16,66 0/00 | **x4,25** |
-| 20 = 2420 MHz | temoin Wi-Fi 1 | 0,96 0/00 | 0,97 0/00 | x1,01 |
-| 78 = 2478 MHz | hors Wi-Fi | 1,68 0/00 | 1,84 0/00 | x1,09 |
+| 5 = 2405 MHz | target, inside Wi-Fi 1 | 3.92 0/00 | 16.66 0/00 | **x4.25** |
+| 20 = 2420 MHz | Wi-Fi 1 control | 0.96 0/00 | 0.97 0/00 | x1.01 |
+| 78 = 2478 MHz | outside Wi-Fi | 1.68 0/00 | 1.84 0/00 | x1.09 |
 
-Instrument valide d'abord contre la balise (source etroite connue sur le canal
-5) : x21,68 sur le canal 5, x1,36 et x0,85 sur les deux autres.
+Instrument first validated against the beacon (known narrow source on
+channel 5): x21.68 on channel 5, x1.36 and x0.85 on the other two.
 
-**Premiere version de cette mesure : fausse.** Elle changeait de canal en
-ecrivant seulement `RFCH` puis attendait 1,5 ms. Avec la balise sur le seul
-canal 5, les trois canaux lisaient 992 pour mille -- y compris un canal a 73 MHz
-de distance. La PLL ne retune pas en 1,5 ms : il faut une reconfiguration
-complete a chaque visite.
+**First version of this measurement: wrong.** It changed channel by writing
+only `RFCH` then waiting 1.5 ms. With the beacon on channel 5 alone, all
+three channels read 992 per mille -- including a channel 73 MHz away. The
+PLL does not retune in 1.5 ms: a full reconfiguration is needed on every
+visit.
 
-**2. GIO3S=14 est en amont du correlateur.** Refait avec une adresse fausse d'un
-octet, balise allumee : 624 fronts avec la bonne adresse, **624 fronts avec la
-mauvaise**, pendant que les trames acceptees tombent de 210 a 13. La sortie
-reflete donc la detection de preambule seule. Un zero de transitions signifie
-« aucun preambule reconnu », et non « adresse inconnue ».
+**2. GIO3S=14 is upstream of the correlator.** Redone with an address wrong
+by one byte, beacon on: 624 edges with the correct address, **624 edges
+with the wrong one**, while accepted frames drop from 210 to 13. The output
+thus reflects preamble detection alone. A zero transition count means "no
+preamble recognized," not "address unknown."
 
-Rendement mesure : **3 fronts par trame reconnue** (624 fronts / 210 trames).
-Une telecommande a ~20 trames/s devrait donc donner ~1200 fronts en 20 s.
+Measured yield: **3 edges per recognized frame** (624 edges / 210 frames). A
+remote at ~20 frames/s should therefore give ~1200 edges in 20 s.
 
-**3. La forme du preambule est epuisee.** Le BC5602 deduit la polarite du
-preambule du premier bit d'adresse emis, et l'adresse part a l'envers de l'ordre
-du tableau : c'est le DERNIER octet du tableau qui sort en premier. Nos sondes
-n'avaient donc jamais teste qu'une polarite. Commande `forme` : 2 polarites x 2
-longueurs x 3 debits = 12 configurations, 20 s chacune, molette tournee,
-reglages Holtek actifs. **Zero transition sur les douze**, temoin de trafic a
-~20 pour mille contre 3,9 au repos.
+**3. Preamble shape is exhausted.** The BC5602 derives the preamble's
+polarity from the first address bit sent, and the address goes out in
+reverse of the table's order: it is the LAST byte of the table that comes
+out first. Our probes had therefore only ever tested one polarity. `forme`
+command: 2 polarities x 2 lengths x 3 bitrates = 12 configurations, 20 s
+each, dial turning, Holtek settings active. **Zero transitions across all
+twelve**, traffic control at ~20 per mille versus 3.9 at rest.
 
-**L'excursion de frequence n'est pas reglable** et elle est deja la bonne. Le
-datasheet la fixe par le debit : fDEV=160 kHz a 125 et 250 kbps, 250 kHz a 500
-kbps. Regle de Carson a 125 kbps : 2x160 + 125 = **445 kHz**, contre **430, 434
-et 447 kHz** mesures dans le dossier FCC de la telecommande. C'est la meme
-modulation au kilohertz pres. Les six bits bas de `CFO1`, malgre le nom du
-registre, sont marques « reserved, must be kept unchanged ».
+**The frequency deviation is not adjustable** and it is already the right
+one. The datasheet fixes it by the bitrate: fDEV=160 kHz at 125 and
+250 kbps, 250 kHz at 500 kbps. Carson's rule at 125 kbps: 2x160 + 125 =
+**445 kHz**, against **430, 434, and 447 kHz** measured in the remote's FCC
+filing. It is the same modulation to the kilohertz. The six low bits of
+`CFO1`, despite the register's name, are marked "reserved, must be kept
+unchanged."
 
-Etat de la contradiction : canal confirme, debit confirme par deux voies
-independantes, excursion confirmee, preambule epuise, detecteur etalonne,
-reglages analogiques actifs -- et toujours aucun preambule reconnu.
+State of the contradiction: channel confirmed, bitrate confirmed by two
+independent means, deviation confirmed, preamble exhausted, detector
+calibrated, analog settings active -- and still no preamble recognized.
 
-## La voie RF est close, et on sait pourquoi (2026-09-22, bilan)
+## The RF path is closed, and we know why (Sep 22, 2026, summary)
 
-Balayage complet des **84 canaux**, 125 kbps, reglages analogiques actifs,
-detecteur etalonne, molette tournee sans arret : **zero transition**. Le canal le
-plus bruyant est le 59 (2459 MHz), en plein Wi-Fi 11 -- pas la telecommande.
+Full sweep of the **84 channels**, 125 kbps, analog settings active,
+detector calibrated, dial turned nonstop: **zero transitions**. The noisiest
+channel is 59 (2459 MHz), right in the middle of Wi-Fi 11 -- not the remote.
 
-**Le mode direct en reception est mort, confirme avec une source forte.** Rejoue
-avec la balise et les reglages actifs :
+**Direct mode on reception is dead, confirmed with a strong source.**
+Replayed with the beacon and the settings active:
 
 | configuration | OMST | RSSI |
 |---|---|---|
-| DIR_EN=0, entree par registre CE | 5 (RX) | 123 -> **31 dB** |
-| DIR_EN=0, entree par strobe 0x8E | 5 (RX) | 118 -> **31 dB** |
-| DIR_EN=1, entree par registre CE | 2 (Light Sleep) | 127 -> 120 dB |
-| DIR_EN=1, OM 0x03 puis 0x07 | 4 (TX) | 127 -> 118 dB |
+| DIR_EN=0, entry via CE register | 5 (RX) | 123 -> **31 dB** |
+| DIR_EN=0, entry via strobe 0x8E | 5 (RX) | 118 -> **31 dB** |
+| DIR_EN=1, entry via CE register | 2 (Light Sleep) | 127 -> 120 dB |
+| DIR_EN=1, OM 0x03 then 0x07 | 4 (TX) | 127 -> 118 dB |
 
-Le recepteur est parfaitement vivant en mode normal ; `DIR_EN=1` le rend sourd
-par toutes les methodes d'entree. Le datasheet annonce pourtant « TX/RX data
-from/to external MCU directly » (ligne 377) : l'implantation ne suit pas.
+The receiver is perfectly alive in normal mode; `DIR_EN=1` makes it deaf
+through every entry method. The datasheet nonetheless claims "TX/RX data
+from/to external MCU directly" (line 377): the implementation does not
+follow through.
 
-**Cette puce ne sait pas livrer de bits non decodes.** Les huit selecteurs GIO2
-ne sortent rien, et le rendement de GIO3 le disait deja : **3 fronts par trame**
-(624 fronts pour 210 trames), la ou un flux de bits a 125 kbps en donnerait un
-demi-million. GIO3 est une impulsion d'evenement, pas un train de donnees.
+**This chip cannot deliver undecoded bits.** The eight GIO2 selectors output
+nothing, and GIO3's yield already said as much: **3 edges per frame**
+(624 edges for 210 frames), where a 125 kbps bit stream would give half a
+million. GIO3 is an event pulse, not a data stream.
 
-**Consequence.** Il n'existe aucun moyen d'ecouter l'air sans connaitre
-l'adresse a l'avance : le moteur de paquets est le seul chemin vers les donnees,
-et il refuse d'ouvrir. La methode 1 (verrouillage en milieu de trame sur une
-pseudo-adresse tiree du payload) ne peut pas davantage fonctionner, puisque le
-detecteur de preambule ne s'arme jamais sur ce signal, meme en debut de trame.
+**Consequence.** There is no way to listen to the air without knowing the
+address in advance: the packet engine is the only path to the data, and it
+refuses to open. Method 1 (mid-frame locking on a pseudo-address drawn from
+the payload) cannot work any better either, since the preamble detector
+never arms on this signal, even at the start of a frame.
 
-Ce qui reste etabli et n'est plus a refaire :
+What remains established and does not need to be redone:
 
-- la telecommande emet une source **etroite sur 2405 MHz** (controle Wi-Fi) ;
-- a **125 kbps, fDEV 160 kHz** (Carson vs dossier FCC, au kilohertz pres) ;
-- notre recepteur **fonctionne** (31 dB sur la balise, 210 trames decodees) ;
-- le detecteur est **en amont du correlateur** (624 fronts avec adresse fausse) ;
-- canal, debit, excursion, polarite et longueur de preambule sont **epuises**.
+- the remote transmits a **narrow source at 2405 MHz** (Wi-Fi check);
+- at **125 kbps, fDEV 160 kHz** (Carson vs. FCC filing, to the kilohertz);
+- our receiver **works** (31 dB on the beacon, 210 frames decoded);
+- the detector is **upstream of the correlator** (624 edges with a wrong
+  address);
+- channel, bitrate, deviation, polarity, and preamble length are
+  **exhausted**.
 
-**Suite : la lecture du firmware AT32F421 par SWD.** Elle donne l'adresse ET la
-structure reelle des trames, c'est-a-dire tout ce qui manque. Brochage J5 : trou
-1 = masse, trou 3 = 0,001 V (candidat SWCLK), les autres a 2,49 V. Resistances
-serie de 220 a 470 ohms sur SWDIO/SWCLK, la cible tournant a 2,5 V.
+**Next: reading the AT32F421 firmware via SWD.** It gives both the address
+AND the real frame structure, i.e., everything that is missing. J5 pinout:
+hole 1 = ground, hole 3 = 0.001 V (SWCLK candidate), the others at 2.49 V.
+Series resistors of 220 to 470 ohms on SWDIO/SWCLK, the target running at
+2.5 V.
 
+## IMPORTANT CORRECTION: GIO3S=14 is NOT upstream of the correlator
 
-## CORRECTION IMPORTANTE : GIO3S=14 n'est PAS en amont du correlateur
+The entry above, "GIO3S=14 is upstream of the correlator," is **wrong**, and
+with it the conclusion "the RF path is closed." The check was confounded:
+the address called "wrong" (`44 33 22 E2`) differs from the real one
+(`44 33 22 E1`) by only **two bits**, and the BC5602's correlator tolerates
+a few bit errors. It was therefore still accepting frames, which gave the
+illusion of an output independent of the address.
 
-L'entree ci-dessus « GIO3S=14 est en amont du correlateur » est **fausse**, et
-avec elle la conclusion « la voie RF est close ». Le controle etait confondu :
-l'adresse dite « fausse » (`44 33 22 E2`) ne differe de la vraie (`44 33 22 E1`)
-que de **deux bits**, et le correlateur du BC5602 tolere quelques bits d'erreur.
-Il acceptait donc encore les trames, ce qui donnait l'illusion d'une sortie
-independante de l'adresse.
+Redone with the upstream project's receive sequence, beacon on:
 
-Refait avec la sequence de reception du projet amont, balise allumee :
-
-| adresse du recepteur | ecart | transitions GIO3 | trames |
+| receiver address | deviation | GIO3 transitions | frames |
 |---|---|---|---|
-| `44 33 22 E1` | aucun | 28 506 | 789 |
-| `44 33 22 E2` | 2 bits, premier octet sur l'air | 1 806 | 50 |
-| `11 22 33 E2` | totalement differente | **0** | **0** |
-| `11 22 33 44` | totalement differente, polarite opposee | **0** | **0** |
+| `44 33 22 E1` | none | 28,506 | 789 |
+| `44 33 22 E2` | 2 bits, first byte on air | 1,806 | 50 |
+| `11 22 33 E2` | totally different | **0** | **0** |
+| `11 22 33 44` | totally different, opposite polarity | **0** | **0** |
 
-**Consequence.** Tous les resultats nuls de la journee -- 84 canaux, 3 debits,
-2 polarites, 2 longueurs de preambule -- signifient « on n'a pas la bonne
-adresse », et non « le signal est indetectable ». La voie RF n'est pas close.
+**Consequence.** Every null result from that day -- 84 channels, 3 bitrates,
+2 polarities, 2 preamble lengths -- means "we don't have the right address,"
+not "the signal is undetectable." The RF path is not closed.
 
-**Lecon de methode.** Un controle negatif doit etre VRAIMENT negatif. Choisir
-une adresse fausse a deux bits de la vraie, c'etait tester la tolerance du
-correlateur en croyant tester son existence.
+**Methodological lesson.** A negative control must be TRULY negative.
+Choosing an address two bits off from the real one meant testing the
+correlator's tolerance while believing we were testing its existence.
 
-## Le chemin de reception du projet amont (qui fonctionne)
+## The upstream project's receive path (which works)
 
-Tire de `prepare_halo_receive()` dans Termina1/benq-screenbar-halo2-esphome.
-Deux differences de fond avec le notre, commande `amont` :
+Taken from `prepare_halo_receive()` in Termina1/benq-screenbar-halo2-esphome.
+Two fundamental differences from ours, `amont` command:
 
-1. **Aucun reset logiciel.** Son commentaire : « Literal Pico lifecycle: no
-   software reset during normal initialization. Hidden packet/PID/RF state is
-   allowed to continue from hardware POR. » Nos deux chemins commencaient par un
-   reset, qui efface 15 des 19 valeurs recommandees. Sans reset, celles ecrites
-   par `begin()` survivent : le temoin affiche **18 sur 19**.
-2. **Reception passive** : CRC desactive (`PKT1=0x00`), auto-ACK desactive
-   (`ENAA=0x00`), payload dynamique desactive, longueur statique de 13 octets.
+1. **No software reset.** Its comment: "Literal Pico lifecycle: no software
+   reset during normal initialization. Hidden packet/PID/RF state is
+   allowed to continue from hardware POR." Both of our paths began with a
+   reset, which clears 15 of the 19 recommended values. Without a reset, the
+   ones written by `begin()` survive: the control shows **18 out of 19**.
+2. **Passive reception**: CRC disabled (`PKT1=0x00`), auto-ACK disabled
+   (`ENAA=0x00`), dynamic payload disabled, static length of 13 bytes.
 
-Mesure : **789 trames en 15 s** sur la balise, charge utile exacte
-`DE AD 55 0F A0 3C 01 02 03 04` suivie du CRC `C2 BA`. Et **28 506 transitions
-GIO3, soit 36 par trame**, contre 3 par trame avec notre ancien chemin.
+Measurement: **789 frames in 15 s** on the beacon, exact payload
+`DE AD 55 0F A0 3C 01 02 03 04` followed by CRC `C2 BA`. And **28,506 GIO3
+transitions, i.e., 36 per frame**, versus 3 per frame with our old path.
 
-Parametres du projet amont, identiques a ce qu'on avait deduit par la mesure :
-adresse `9C EA BB 86` (4 octets, **codee en dur**, c'est une Halo 2), canal 5,
-`DM1 = 0x82` (125 kbps, adresse de 4 octets).
+Upstream project parameters, identical to what we had deduced by
+measurement: address `9C EA BB 86` (4 bytes, **hard-coded**, it's a Halo 2),
+channel 5, `DM1 = 0x82` (125 kbps, 4-byte address).
 
-Il ecrit aussi `XO1` (banque 0, registre `0x38`) a `0x15` avant la calibration du
-VCO, dans son chemin d'emission en mode direct -- le **trim du quartz**, que nous
-n'avons jamais touche. Valeur par defaut apres reset : `0x10`.
+It also writes `XO1` (bank 0, register `0x38`) to `0x15` before VCO
+calibration, in its direct-mode transmit path -- the **crystal trim**, which
+we have never touched. Default value after reset: `0x10`.
 
-## Pourquoi il faut un nRF52840, et pas seulement un ESP32 (2026-09-22)
+## Why an nRF52840 is needed, not just an ESP32 (Sep 22, 2026)
 
-**La methode qui a reellement trouve l'adresse du Halo 2**, c'est un **HackRF
-One + Universal Radio Hacker**, le 2026-04-14, par kuzmin-no (SK2024 sur le
-forum HA). Son README initial le dit, et deux captures d'ecran du depot montrent
-la session : 2,405 GHz, 2 MSps, FSK, 16 echantillons par symbole. Le script
-`find_halo2_address.py` n'arrive que 2,5 mois plus tard, presente comme un moyen
-de se passer du SDR, et **aucun log n'a jamais ete publie prouvant qu'il marche**.
+**The method that actually found the Halo 2's address** was a **HackRF One +
+Universal Radio Hacker**, on 2026-04-14, by kuzmin-no (SK2024 on the HA
+forum). Its original README says so, and two screenshots in the repo show
+the session: 2.405 GHz, 2 MSps, FSK, 16 samples per symbol. The
+`find_halo2_address.py` script only shows up 2.5 months later, presented as
+a way to do without the SDR, and **no log has ever been published proving
+that it works**.
 
-Le projet `Termina1/benq-screenbar-halo2-esphome` ne resout pas la decouverte
-d'adresse : `RADIO_ADDRESS{0x9C,0xEA,0xBB,0x86}` est codee en dur et le README
-renvoie l'utilisateur a « capturer son propre trafic ». **L'adresse est propre a
-chaque paire lampe/telecommande** ; seule celle d'appairage (`E2 08 00 B0`) est
-universelle. Verifie : les trois adresses connues donnent 0 trame sur notre
-Halo 1, sur un chemin qui en decode pourtant 789 de la balise.
+The `Termina1/benq-screenbar-halo2-esphome` project does not solve address
+discovery: `RADIO_ADDRESS{0x9C,0xEA,0xBB,0x86}` is hard-coded and the README
+refers the user to "capture your own traffic." **The address is specific to
+each lamp/remote pair**; only the pairing one (`E2 08 00 B0`) is universal.
+Verified: the three known addresses give 0 frames on our Halo 1, on a path
+that nonetheless decodes 789 from the beacon.
 
-**La voie nRF52840** (`xf_bc5602.py`) : ecouter a **1 Mbps** un signal emis a
-125 kbps sur-echantillonne chaque bit par **8**. On pointe alors le mot de
-synchro sur le **preambule sur-echantillonne** -- `0xAA` a 125 kbps devient
-`FF 00 FF 00` a 1 Mbps, motif universel, identique sur tous les exemplaires --
-au lieu de l'adresse qu'on ignore. Le decodeur decime par 8, cherche la position
-ou le CRC tombe juste, et lit l'adresse dans le flux :
+**The nRF52840 path** (`xf_bc5602.py`): listening at **1 Mbps** to a signal
+transmitted at 125 kbps oversamples each bit by **8**. The sync word is then
+pointed at the **oversampled preamble** -- `0xAA` at 125 kbps becomes
+`FF 00 FF 00` at 1 Mbps, a universal pattern, identical on every unit --
+instead of the address we don't know. The decoder decimates by 8, searches
+for the position where the CRC comes out right, and reads the address from
+the stream:
 
 ```
 Frame: address(32) + PCF(9) + payload(80) + CRC-16(16)
@@ -1115,65 +1138,69 @@ CRC-16/CCITT (poly 0x1021, init 0xFFFF) over address + PCF + payload
 "address": bytes(_byte(bits, o - 41 + 8 * i) for i in range(4))
 ```
 
-**Le BC5602 ne peut pas faire cela, c'est mesure.** Son detecteur de preambule
-doit s'armer sur une alternance AU DEBIT CONFIGURE, avant le correlateur
-d'adresse. Balise a 125 kbps, recepteur sur-echantillonnant, payload de 32
-octets, CRC coupe :
+**The BC5602 cannot do this, it has been measured.** Its preamble detector
+must arm on an alternation AT THE CONFIGURED BITRATE, ahead of the address
+correlator. Beacon at 125 kbps, oversampling receiver, 32-byte payload, CRC
+cut off:
 
-| debit RX | facteur | mot de synchro | trames | temoin |
+| RX bitrate | factor | sync word | frames | control |
 |---|---|---|---|---|
 | 500 kbps | x4 | `F0 F0 F0 F0` | **0** | 1293/11999 |
 | 500 kbps | x4 | `0F 0F 0F 0F` | **0** | 1186/12000 |
 | 250 kbps | x2 | `CC CC CC CC` | **0** | 695/12000 |
 | 250 kbps | x2 | `33 33 33 33` | **0** | 692/12000 |
 
-Et le BC5602 plafonne a 500 kbps, soit x4 au mieux. L'ESP32-C6, lui, n'expose
-aucune interface de PHY brute : sa radio ne fait que Wi-Fi, BLE et 802.15.4.
+And the BC5602 tops out at 500 kbps, i.e., x4 at best. The ESP32-C6,
+meanwhile, exposes no raw PHY interface: its radio only does Wi-Fi, BLE, and
+802.15.4.
 
-**Conclusion : une carte nRF52840 (Seeed XIAO, ~13 $) est le chemin le moins
-cher vers l'adresse.** Verifier qu'elle porte une antenne ceramique et pas un
-simple connecteur u.FL nu.
+**Conclusion: an nRF52840 board (Seeed XIAO, ~$13) is the cheapest path to
+the address.** Check that it carries a ceramic antenna and not a bare u.FL
+connector.
 
-## Capture brute au CC2500, et premiere adresse de la Halo 1 (2026-09-22)
+## Raw capture with the CC2500, and the first Halo 1 address (Sep 22, 2026)
 
-Le CC2500 donne ce que le BC5602 refuse : un MODE SERIE ou le moteur de paquets
-est debranche. `PKTCTRL0.PKT_FORMAT=01` sort les bits demodules sur GDO0 avec
-l'horloge de bit recuperee sur GDO2, et `MDMCFG2.SYNC_MODE=000` supprime toute
-exigence de preambule et de mot de synchro. Le datasheet prevoit exactement cet
-usage : « The MCU must then handle preamble and sync word insertion and
-detection in software. »
+The CC2500 gives what the BC5602 refuses: a SERIAL MODE where the packet
+engine is disconnected. `PKTCTRL0.PKT_FORMAT=01` outputs the demodulated
+bits on GDO0 with the recovered bit clock on GDO2, and
+`MDMCFG2.SYNC_MODE=000` removes any requirement for a preamble or sync word.
+The datasheet plans for exactly this use: "The MCU must then handle preamble
+and sync word insertion and detection in software."
 
-Module : 24TRGC5-V4 (GC-02), CC2500 + RFX2402E (PA/LNA), quartz 26 MHz, u.FL.
-PARTNUM 0x80, VERSION 0x03. Table de verite de l'etage d'entree MESUREE :
-`PA_EN=0, RX_EN=1` donne 18 dB de plus que les trois autres combinaisons.
+Module: 24TRGC5-V4 (GC-02), CC2500 + RFX2402E (PA/LNA), 26 MHz crystal,
+u.FL. PARTNUM 0x80, VERSION 0x03. MEASURED truth table of the front-end
+stage: `PA_EN=0, RX_EN=1` gives 18 dB more than the other three
+combinations.
 
-**Le pilote est bit-bange**, volontairement : l'ESP32-C6 n'a qu'un controleur
-SPI generaliste, deja pris par le BM5602, et il ne se re-route pas ensuite.
-Mesure a l'appui, le peripherique rendait un octet d'etat 0x00 la ou le
-bit-bang rendait 0x0F sur les MEMES broches.
+**The driver is bit-banged**, deliberately: the ESP32-C6 only has one
+general-purpose SPI controller, already taken by the BM5602, and it cannot
+be re-routed afterward. Backed by measurement, the peripheral returned a
+0x00 status byte where bit-banging returned 0x0F on the SAME pins.
 
-**Chaine validee de bout en bout sur la balise.** Une trame lue dans le flux
-brut, par une puce a qui aucune adresse n'a ete donnee :
+**Chain validated end to end on the beacon.** A frame read in the raw
+stream, by a chip that was given no address at all:
 
 ```
 FF FF FF C0 2A AA | E1 22 33 44 | DE AD 55 0F A0 3C 01 02 03 04 | C2 BA
      repos          adresse            charge utile                CRC
 ```
 
-**Ce qui a ete mesure sur la telecommande, et non plus deduit :**
+**What has been measured on the remote, and no longer just deduced:**
 
-- elle emet sur 2405 MHz : bandes fortes x8,76 quand la molette tourne, plancher
-  immobile (commande `ccpres`) ;
-- a **125 kbps** : duree d'un bit mesuree en mode asynchrone, pic a 8,08 us,
-  contre 8,09 us pour la balise a 125 kbps connus (commande `ccbit`) ;
-- sa porteuse est **bien centree** : FREQEST donne une masse a 0-31 kHz, contre
-  0-15 kHz pour la balise (commande `ccoff`) ;
-- elle est **forte** : pic a -19 dBm.
+- it transmits on 2405 MHz: strong-signal bins x8.76 when the dial turns, a
+  flat floor at rest (`ccpres` command);
+- at **125 kbps**: bit duration measured in asynchronous mode, peak at
+  8.08 us, versus 8.09 us for the beacon at a known 125 kbps (`ccbit`
+  command);
+- its carrier is **well centered**: FREQEST gives a mass at 0-31 kHz, versus
+  0-15 kHz for the beacon (`ccoff` command);
+- it is **strong**: peak at -19 dBm.
 
-**Adresse trouvee : `8F F7 C1 3C` sur l'air, soit `3C C1 F7 8F` en ordre
-d'ecriture.** Trouvee par recherche des sequences repetees dans 956 672 bits de
-flux brut, sans aucune hypothese de CRC ni de structure. Quatre occurrences,
-trois precedees d'un preambule, toutes suivies de charges utiles DIFFERENTES :
+**Address found: `8F F7 C1 3C` on air, i.e., `3C C1 F7 8F` in write order.**
+Found by searching for repeated sequences within 956,672 bits of raw
+stream, with no assumption about CRC or structure whatsoever. Four
+occurrences, three preceded by a preamble, all followed by DIFFERENT
+payloads:
 
 ```
 FC 00 55 | 8F F7 C1 3C | 53 13 11 6E 07 CF DF ...
@@ -1182,354 +1209,358 @@ FC 00 55 | 8F F7 C1 3C | 25 89 67 E2 20 BE 7F ...
 77 B6 01 55 | 8F F7 C1 3C | 06 B9 21 BF FF FE ...
 ```
 
-Le preambule fait **un octet** (`55`), la ou notre balise en emet deux.
+The preamble is **one byte** (`55`), where our beacon transmits two.
 
-**ADRESSE CONFIRMEE** par le correlateur materiel du BM5602, avec son controle :
+**ADDRESS CONFIRMED** by the BM5602's hardware correlator, with its control:
 
-| adresse ecrite | duree | transitions GIO3 | trames |
+| address written | duration | GIO3 transitions | frames |
 |---|---|---|---|
 | `3C C1 F7 8F` | 90 s | 200 | **7** |
-| `3C C1 F7 8E` (un bit d'ecart) | 40 s | 0 | **0** |
-| `8F F7 C1 3C` (ordre inverse) | 30 s | 0 | **0** |
+| `3C C1 F7 8E` (one bit off) | 40 s | 0 | **0** |
+| `8F F7 C1 3C` (reverse order) | 30 s | 0 | **0** |
 
-Et corroboration croisee entre deux radios et deux chaines d'analyse
-independantes : le prefixe de charge utile `06 B9 21 B*` apparait a la fois dans
-le flux brut du CC2500 (passes 21 et 25 : `06 B9 21 BD`, `06 B9 21 BF`) et dans
-une trame decodee par le moteur de paquets du BM5602 (`06 B9 21 BB`).
+And cross-corroboration between two radios and two independent analysis
+chains: the payload prefix `06 B9 21 B*` appears both in the CC2500's raw
+stream (passes 21 and 25: `06 B9 21 BD`, `06 B9 21 BF`) and in a frame
+decoded by the BM5602's packet engine (`06 B9 21 BB`).
 
-Sept trames en 90 s reste peu : les erreurs binaires en rejettent la plupart.
-C'est desormais une question de rapport signal sur bruit, plus de protocole. C'est le juge le plus dur dont on dispose -- il decode 789 trames de la
-balise et rigoureusement aucune avec une adresse fausse.
+Seven frames in 90 s is still few: bit errors reject most of them. It is now
+a matter of signal-to-noise ratio, no longer of protocol. This is the
+harshest judge we have -- it decodes 789 frames from the beacon and
+strictly none with a wrong address.
 
-**Aucun modele de CRC ne valide ces trames** : 84 combinaisons de polynome,
-d'etat initial et de sens de bits, sur sept points de depart. Les trames portent
-donc des erreurs binaires, ce qui explique aussi leur rarete.
+**No CRC model validates these frames**: 84 combinations of polynomial,
+initial state, and bit order, over seven starting points. The frames
+therefore carry bit errors, which also explains their rarity.
 
-**Methodes essayees et ECARTEES, chacune par un controle sur la balise :**
-l'ancrage sur l'alternance du preambule (sort surtout les `0x55` de la charge
-utile), le consensus sur regions actives (37 bits unanimes sur la balise aussi,
-donc sans valeur), et toute capture DECLENCHEE sur le RSSI -- lire le RSSI coute
-190 us quand preambule et adresse n'en durent que 384 : l'adresse est passee
-avant qu'on echantillonne. Seules la chasse par CRC et la recherche de
-sequences repetees ont survecu a leur controle.
+**Methods tried and RULED OUT, each by a check against the beacon:**
+anchoring on the preamble alternation (mostly pulls out the `0x55`s from the
+payload), consensus over active regions (37 unanimous bits on the beacon
+too, hence worthless), and any capture TRIGGERED on RSSI -- reading the RSSI
+costs 190 us when preamble and address together only last 384: the address
+has gone by before we sample. Only the CRC hunt and the search for repeated
+sequences survived their check.
 
-## Structure de trame Halo 1, confirmee sans le CRC (2026-09-22, nuit)
+## Halo 1 frame structure, confirmed without the CRC (Sep 22, 2026, night)
 
-L'analyse des captures brutes de 32 octets du BM5602 donne une confirmation
-INDEPENDANTE du CRC : l'adresse de la retransmission suivante se trouve
-systematiquement au bit **72 ou 73** apres celle de la trame en cours, deux fois
-avec **zero bit faux**. Or 72 = 48 + 16 + 8 :
+Analysis of the BM5602's raw 32-byte captures gives an INDEPENDENT
+confirmation of the CRC: the address of the next retransmission is
+systematically found at bit **72 or 73** after that of the current frame,
+twice with **zero wrong bits**. Now, 72 = 48 + 16 + 8:
 
 ```
 | adresse 32 b | charge utile 48 b | CRC 16 b | preambule 8 b | adresse suivante...
 ```
 
-Soit six octets de charge utile, deux de CRC, un octet de preambule. Cela
-recoupe exactement la seule trame dont le CRC a valide
-(`06 B9 21 BB 98 FF` + `7A FF`) et confirme que le Halo 1 utilise six octets la
-ou le Halo 2 en utilise dix.
+That is six bytes of payload, two of CRC, one preamble byte. This matches
+exactly the only frame whose CRC validated (`06 B9 21 BB 98 FF` + `7A FF`)
+and confirms that the Halo 1 uses six bytes where the Halo 2 uses ten.
 
-**Hypotheses ecartees par la mesure :**
+**Hypotheses ruled out by measurement:**
 
-- *Ecart de debit.* Balayage fin du CC2500, DRATE_M de 46 a 72, soit 119,8 a
-  130,1 kbit/s par pas de 0,32 % : les detections d'adresse sont reparties
-  uniformement sur toute la plage, **sans pic**, et aucun CRC ne valide nulle
-  part. Un ecart de debit aurait donne un maximum franc.
-- *Distance.* Les deux modules sont a 25 cm l'un de l'autre : la telecommande
-  etait deja proche du BM5602.
-- *Vote majoritaire.* Sans objet en l'etat : les rafales ne livrent qu'une ou
-  deux copies, jamais les trois qu'un vote demande.
+- *Bitrate offset.* Fine CC2500 sweep, DRATE_M from 46 to 72, i.e., 119.8 to
+  130.1 kbit/s in 0.32% steps: address detections are spread evenly across
+  the whole range, **with no peak**, and no CRC validates anywhere. A
+  bitrate offset would have produced a clear maximum.
+- *Distance.* The two modules are 25 cm apart: the remote was already close
+  to the BM5602.
+- *Majority vote.* Moot as things stand: the bursts only deliver one or two
+  copies, never the three that a vote requires.
 
-**Anomalie a reprendre en priorite.** La meme commande donne
-`06 B9 21 BB 98 FF` + `7A FF` (CRC VALIDE) dans une lecture de 13 octets, et
-`06 B9 21 BB FF 3F` + `7F 9B` dans une lecture de 32. Les quatre premiers
-octets concordent, les suivants non. **Changer RXPW0 change le contenu recu**,
-ce qui ne devrait pas arriver et explique probablement le faible rendement.
-Reprendre avec `RXPW0 = 8`, la valeur qui a produit la seule trame valide.
+**Anomaly to revisit as a priority.** The same command gives
+`06 B9 21 BB 98 FF` + `7A FF` (CRC VALID) in a 13-byte read, and
+`06 B9 21 BB FF 3F` + `7F 9B` in a 32-byte read. The first four bytes agree,
+the rest do not. **Changing RXPW0 changes the content received**, which
+should not happen and probably explains the low yield. Resume with
+`RXPW0 = 8`, the value that produced the only valid frame.
 
-**Le chien de garde des interruptions** se declenchait sur les captures : 32768
-bits a 125 kbit/s font 260 ms d'interruptions masquees pour un seuil de 300.
-Toutes les captures passent desormais par `ccSampleBits`, qui masque par
-tranches de 8192 bits.
+**The interrupt watchdog** was tripping during captures: 32768 bits at
+125 kbit/s make 260 ms of masked interrupts against a 300 ms threshold. All
+captures now go through `ccSampleBits`, which masks in chunks of 8192 bits.
 
-## Deux familles de trames : commandes et accuses de reception (2026-09-23)
+## Two frame families: commands and receive acknowledgements (Sep 23, 2026)
 
-Le premier octet de la charge utile se range en deux familles, et dans chacune
-les bits 3-2 forment un **compteur de sequence sur deux bits** :
+The payload's first byte sorts into two families, and within each one bits
+3-2 form a **2-bit sequence counter**:
 
 ```
 famille A : 02 06 0A 0E          = 0000 PP 10
 famille B : 21 25 29 2D, puis 89 = 0010 PP 01
 ```
 
-Dans les captures de 32 octets, une trame B est **toujours** suivie, 72 bits
-plus loin, d'une trame A portant **le meme compteur** : 21->02, 25->06, 29->0A,
-2D->0E. Ce sont des paires question-reponse, dans l'ordre B puis A.
+In the 32-byte captures, a B frame is **always** followed, 72 bits later, by
+an A frame carrying **the same counter**: 21->02, 25->06, 29->0A, 2D->0E.
+These are question-answer pairs, in the order B then A.
 
-Interpretation retenue, par trois indices concordants :
+Interpretation adopted, based on three converging clues:
 
-- **l'ordre** : B precede A ;
-- **le contenu** : dans les trames A, les octets 2-3 ne dependent que du
-  compteur (`06` -> `B9 21`, `0A` -> `78 AC`, `02` -> `F9 A5`, `0E` -> `38 28`),
-  comme un accuse ; dans les trames B, l'octet 2 vaut toujours `89` et l'octet
-  3 varie a chaque capture, comme une valeur de molette ;
-- **la qualite de reception** : les trames A se recoivent nettement mieux --
-  la seule trame au CRC valide de la soiree est une A -- ce qui designe deux
-  emetteurs differents.
+- **the order**: B precedes A;
+- **the content**: in A frames, bytes 2-3 depend only on the counter (`06`
+  -> `B9 21`, `0A` -> `78 AC`, `02` -> `F9 A5`, `0E` -> `38 28`), like an
+  acknowledgement; in B frames, byte 2 is always `89` and byte 3 varies with
+  each capture, like a dial value;
+- **reception quality**: A frames are received markedly better -- the only
+  frame with a valid CRC that evening was an A -- which points to two
+  different transmitters.
 
-Donc **B = commande de la telecommande, A = accuse de la lampe**. C'est
-l'INVERSE de la convention du Halo 2 (« odd PID frames are lamp replies »).
+So **B = command from the remote, A = acknowledgement from the lamp**. This
+is the OPPOSITE of the Halo 2 convention ("odd PID frames are lamp
+replies").
 
-**Consequence mesuree.** La trame rejouee `06 B9 21 BB 98 FF` (verifiee bit
-pour bit par le CC2500, CRC `7A FF`) n'a produit aucune reaction de la lampe,
-mise au minimum pour l'occasion : c'etait un accuse de reception, pas une
-commande.
+**Measured consequence.** The replayed frame `06 B9 21 BB 98 FF` (verified
+bit for bit by the CC2500, CRC `7A FF`) produced no reaction from the lamp,
+set to minimum for the occasion: it was a receive acknowledgement, not a
+command.
 
-**Reparation par le biais : sans resultat.** Les erreurs etant a 100 % des 1
-lus comme 0, on a tente de reparer 49 captures en remettant a 1 jusqu'a trois
-zeros. Trois trames passent le CRC, mais chacune au maximum de corrections, sans
-repetition, et le hasard en predit environ quatre sur ce volume : faux
-positifs.
+**Repair via the bias: no result.** Since the errors were 100% ones read as
+zero, we tried to repair 49 captures by setting up to three zeros back to
+one. Three frames pass the CRC, but each at the maximum number of
+corrections, with no repetition, and chance predicts about four over this
+volume: false positives.
 
-**Correction d'une conclusion anterieure.** Le rejet de toutes les trames par
-le CRC materiel ne tenait pas a un modele different : pendant cette seance,
-aucune trame ne passait non plus le CRC logiciel. Sur la balise, le CRC
-materiel produit exactement notre modele, et on l'utilise desormais en
-emission.
+**Correction of an earlier conclusion.** The hardware CRC's rejection of
+every frame was not due to a different model: during this session, no frame
+passed the software CRC either. On the beacon, the hardware CRC produces
+exactly our model, and we now use it on transmission.
 
-**Hypotheses de reception eliminees par la mesure** (trame A de reference ou
-comptage de trames, en alternance quand c'etait possible) : longueur de
-lecture, distance et saturation, trim du quartz (calibre : environ 3 kHz par
-cran, 87 kHz de plage), valeurs analogiques par defaut contre recommandees.
+**Reception hypotheses eliminated by measurement** (reference A frame or
+frame count, alternating when possible): read length, distance and
+saturation, crystal trim (calibrated: about 3 kHz per notch, 87 kHz range),
+default versus recommended analog values.
 
-**Ce qui bloque maintenant** : obtenir une trame B exacte. Nos radios decodent
-proprement nos propres emissions et assez bien celles de la lampe ; c'est le
-signal de la telecommande qu'elles digerent mal.
+**What is blocking now**: obtaining an exact B frame. Our radios decode our
+own transmissions cleanly and the lamp's fairly well; it is the remote's
+signal that they digest poorly.
 
-## Premiere lecture de la charge (ecoute de la telecommande, 23/09)
+## First reading of the payload (listening to the remote, Sep 23)
 
-Capture `logs/ecoute-tele2.log` (outil `ecoute 4FF0FD63 5`), gestes : minimum,
-maximum, un cran bas, eteindre/rallumer, temperature, autres boutons (sans
-pauses). Lecture provisoire, a confirmer une par une par `txack` :
+Capture `logs/ecoute-tele2.log` (tool `ecoute 4FF0FD63 5`), gestures:
+minimum, maximum, one notch down, turn off/on, temperature, other buttons
+(no pauses). Provisional reading, to be confirmed one by one via `txack`:
 
-| charge | observe | lecture provisoire |
+| payload | observed | provisional reading |
 |---|---|---|
-| `C4 xx` | xx balaie `4C` (minimum tenu) a `FE` (maximum tenu) avec la molette | luminosite, lampe allumee |
-| `44 xx` / `C4 xx` alternes, meme xx | pendant eteindre/rallumer | bit 7 du 1er octet = marche/arret ? |
-| `C2 xx` | xx balaie `00` a `64` (0 a 100) | temperature de couleur en pourcentage ? |
-| `83 xx`, `C3 xx` | meme xx que `C2` | variantes de `C2` (marche/arret ?) |
-| `FF 00`, `FE 00`, `FD 00` | en debut et entre les groupes de gestes | reveil / etat ? |
-| `E0 01`, `E0 02`, `FA A8`, `83 35`, `85 A7`, `91 00`, `89 58`, `89 E0` | « autres boutons » | inconnus |
+| `C4 xx` | xx sweeps `4C` (minimum held) to `FE` (maximum held) with the dial | brightness, lamp on |
+| `44 xx` / `C4 xx` alternating, same xx | during turn off/on | bit 7 of the 1st byte = on/off? |
+| `C2 xx` | xx sweeps `00` to `64` (0 to 100) | color temperature as a percentage? |
+| `83 xx`, `C3 xx` | same xx as `C2` | variants of `C2` (on/off?) |
+| `FF 00`, `FE 00`, `FD 00` | at the start and between gesture groups | wake-up / state? |
+| `E0 01`, `E0 02`, `FA A8`, `83 35`, `85 A7`, `91 00`, `89 58`, `89 E0` | "other buttons" | unknown |
 
-**Bouton de switch de lampe** (capture `logs/btn-switch.log`, appuis repetes ;
-la lampe cycle avant -> arriere -> les deux -> avant). Sequence decodee :
-`C3 35`, `C2 35`, `C2 35` (apres un reveil `FF 00 FD 00 FF 00`), `83 35`,
-`C3 35` -- chaque etat emis 3 fois. L'ordre C3 -> C2 -> 83 -> C3 est bien le
-cycle les deux -> avant -> arriere -> les deux. Le 2e octet (`35` = 53) ne
-bouge pas : c'est la temperature de couleur courante, renvoyee avec le mode.
+**Lamp switch button** (capture `logs/btn-switch.log`, repeated presses; the
+lamp cycles front -> back -> both -> front). Decoded sequence: `C3 35`,
+`C2 35`, `C2 35` (after a wake-up `FF 00 FD 00 FF 00`), `83 35`, `C3 35` --
+each state emitted 3 times. The order C3 -> C2 -> 83 -> C3 is indeed the
+cycle both -> front -> back -> both. The 2nd byte (`35` = 53) does not move:
+it is the current color temperature, sent back along with the mode.
 
-| 1er octet | bits | lampe |
+| 1st byte | bits | lamp |
 |---|---|---|
-| `C2` | `1100 0010` | avant seule |
-| `83` | `1000 0011` | arriere seule |
-| `C3` | `1100 0011` | les deux |
+| `C2` | `1100 0010` | front only |
+| `83` | `1000 0011` | back only |
+| `C3` | `1100 0011` | both |
 
-Lecture du 1er octet comme champ de bits, **a confirmer par emission** :
-bit 7 = marche, bit 6 = lampe avant, bit 0 = lampe arriere, bit 1 = le 2e
-octet est la temperature, bit 2 = le 2e octet est la luminosite. Elle explique
-toutes les valeurs deja vues : `C4` (luminosite, avant), `C5` (luminosite, les
-deux), `85` (luminosite, arriere), `44` (eteinte, avant), `C2/83/C3`
-(temperature + mode). La telecommande envoie donc des ETATS ABSOLUS et non des
-bascules -- d'ou le renvoi sans risque du meme etat (`C2 35` deux fois).
+Reading of the 1st byte as a bit field, **to be confirmed by transmission**:
+bit 7 = on, bit 6 = front lamp, bit 0 = back lamp, bit 1 = the 2nd byte is
+the temperature, bit 2 = the 2nd byte is the brightness. It explains every
+value already seen: `C4` (brightness, front), `C5` (brightness, both), `85`
+(brightness, back), `44` (off, front), `C2/83/C3` (temperature + mode). The
+remote therefore sends ABSOLUTE STATES rather than toggles -- hence the
+risk-free resending of the same state (`C2 35` twice).
 
-**Bouton A et bouton favori** (captures `logs/btn-A.log`, `btn-A2.log`,
-`btn-A3.log` ; l'ecoute horodate desormais chaque trame a la milliseconde).
-Chronologie de `btn-A3.log` (reveil par le bouton favori, puis bouton A) :
+**Button A and favorite button** (captures `logs/btn-A.log`, `btn-A2.log`,
+`btn-A3.log`; capture now timestamps every frame to the millisecond).
+Timeline of `btn-A3.log` (wake-up via the favorite button, then button A):
 
-| t (ms) | charge | lecture |
+| t (ms) | payload | reading |
 |---|---|---|
-| 2532-2940 | `FF 00` `FF 00` `FE 00` `FF 00` `FD 00` `FF 00` | reveil |
-| 3043 | `FA A8`, NO_ACK=1 | seule trame sans demande d'accuse |
-| 3143 | `83 35` | mode arriere seule, temperature 53 |
-| 3244-3345 | `85 A7` x2 | luminosite A7, arriere seule |
-| 3446-3548 | `91 00` x2 | bit 4, arriere seule |
-| 4048-4250 | `89 58`, `89 E0` x2 | bit 3, arriere seule |
-| 7588 | `A1 01` | bouton A, compteur 1 |
-| 10892-11304 | reveil | |
-| 13202-13405 | `A1 02` x2 | bouton A, compteur 2 |
-| 16445-16824 | reveil | |
-| 17042-17244 | `A1 03` x3 | bouton A, compteur 3 |
+| 2532-2940 | `FF 00` `FF 00` `FE 00` `FF 00` `FD 00` `FF 00` | wake-up |
+| 3043 | `FA A8`, NO_ACK=1 | only frame with no acknowledgement request |
+| 3143 | `83 35` | back-only mode, temperature 53 |
+| 3244-3345 | `85 A7` x2 | brightness A7, back only |
+| 3446-3548 | `91 00` x2 | bit 4, back only |
+| 4048-4250 | `89 58`, `89 E0` x2 | bit 3, back only |
+| 7588 | `A1 01` | button A, counter 1 |
+| 10892-11304 | wake-up | |
+| 13202-13405 | `A1 02` x2 | button A, counter 2 |
+| 16445-16824 | wake-up | |
+| 17042-17244 | `A1 03` x3 | button A, counter 3 |
 
-Le bloc 3143-4250 (favori) rejoue un etat complet : mode, luminosite, puis
-deux reglages encore inconnus (bits 3 et 4). C'est exactement la liste des
-« autres boutons » de la premiere capture. Le bouton A emet `E0 nn` quand la
-lampe avant seule est active, `A1 nn` en arriere seule, `60 01` une fois
-(bit 7 a zero) : le haut et le bas de l'octet suivent le mode de lampe, le
-bit 5 designe le bouton A. Le 2e octet compte les appuis successifs sur A
-(01, 02, 03... jusqu'a 05 vu) et repart a 01 apres une pause ou une autre
-commande. Constat de l'utilisateur sur `btn-A3.log` : apres le favori, la
-lampe est bien passee en **arriere seule** (confirme la lecture de `83`,
-predite avant son retour) ; **deux appuis brefs** sur A, **rien de visible**
--- mais trois trames `A1 01/02/03`. Le 1 pour 1 appui/trame n'est donc pas
-acquis : la telecommande pourrait emettre A d'elle-meme (mode automatique
-entretenu ?). A trancher par un appui unique suivi d'un long silence.
+The 3143-4250 block (favorite) replays a complete state: mode, brightness,
+then two still-unknown settings (bits 3 and 4). This is exactly the "other
+buttons" list from the first capture. Button A emits `E0 nn` when
+front-only is active, `A1 nn` in back-only, `60 01` once (bit 7 at zero):
+the top and bottom of the byte follow the lamp mode, bit 5 designates
+button A. The 2nd byte counts successive presses on A (01, 02, 03... up to
+05 seen) and resets to 01 after a pause or another command. User's
+observation on `btn-A3.log`: after the favorite, the lamp did indeed switch
+to **back-only** (confirming the reading of `83`, predicted before its
+return); **two brief presses** on A, **nothing visible** -- yet three
+frames `A1 01/02/03`. A 1-to-1 press/frame mapping is therefore not
+established: the remote might emit A on its own (an ongoing automatic
+mode?). To be settled by a single press followed by a long silence.
 
-Lecture de travail du 1er octet (a confirmer par emission) :
+Working reading of the 1st byte (to be confirmed by transmission):
 
 | bit | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
 |---|---|---|---|---|---|---|---|---|
-| sens | marche | avant | bouton A | reglage ? | reglage ? | luminosite | temperature | arriere |
+| meaning | on | front | button A | setting? | setting? | brightness | temperature | back |
 
-`FF`, `FE`, `FD`, `FA` (tous les bits hauts a 1) sortent de ce schema :
-trames de service (reveil, annonce).
+`FF`, `FE`, `FD`, `FA` (all high bits at 1) fall outside this scheme:
+service frames (wake-up, announcement).
 
-**Appui unique sur A** (`logs/btn-A4.log`, lampe en avant seule, puis 21 s
-sans toucher la telecommande) : un seul evenement `E0 01` x3 a 9,8 s, puis
-un reveil sans commande a 13,1 s, puis silence. La telecommande n'emet donc
-pas A d'elle-meme ; les trames en trop des essais precedents etaient des
-doubles detections du bouton tactile. Effet observe : la lampe avant
-**baisse puis remonte**, la temperature semble bouger aussi (incertain).
-Lecture : A = bascule du mode automatique (capteur), 2e octet = numero
-d'appui pour que la lampe ignore les repetitions.
+**Single press on A** (`logs/btn-A4.log`, lamp in front-only, then 21 s
+without touching the remote): a single `E0 01` x3 event at 9.8 s, then a
+wake-up with no command at 13.1 s, then silence. The remote therefore does
+not emit A on its own; the extra frames from earlier tests were double
+detections by the touch button. Effect observed: the front lamp **dims then
+comes back up**, the temperature also seems to move (uncertain). Reading:
+A = toggle of the automatic mode (sensor), 2nd byte = press number so the
+lamp ignores repeats.
 
-**Verification sur toutes les captures** (tous les `logs/*.log`, 18 valeurs
-distinctes de 1er octet) : `05 42 43 44 60 83 85 89 91 A1 C2 C3 C4 E0` ont
-toutes exactement un bit de reglage parmi les bits 1 a 5, et au moins une
-lampe (bit 6 ou bit 0) ; les seules exceptions sont `FA FD FE FF`. Le bouton
-marche/arret renvoie la derniere trame d'etat avec le bit 7 inverse, dans
-chaque mode : `C4 ED`/`44 ED` (avant, apres la molette), `85 A7`/`05 A7`
-(arriere), `C3 35`/`43 35` (les deux), `C2 35`/`42 35` (avant).
-Le favori a ete rejoue deux fois dans `ecoute-tele2.log` : `83 35`, `85 A7`,
-`91 00`, puis `89 58` ou `89 00`, puis `89 E0`.
+**Check across all captures** (every `logs/*.log`, 18 distinct 1st-byte
+values): `05 42 43 44 60 83 85 89 91 A1 C2 C3 C4 E0` all have exactly one
+setting bit among bits 1 to 5, and at least one lamp (bit 6 or bit 0); the
+only exceptions are `FA FD FE FF`. The on/off button replays the last state
+frame with bit 7 flipped, in every mode: `C4 ED`/`44 ED` (front, after the
+dial), `85 A7`/`05 A7` (back), `C3 35`/`43 35` (both), `C2 35`/`42 35`
+(front). The favorite was replayed twice in `ecoute-tele2.log`: `83 35`,
+`85 A7`, `91 00`, then `89 58` or `89 00`, then `89 E0`.
 
-### Semantique CONFIRMEE par emission (23/09, telecommande sans piles)
+### Semantics CONFIRMED by transmission (Sep 23, remote without batteries)
 
-Outil : `txack 4FF0FD63 5 <charge> 3 300` (trois trames, 300 ms d'ecart,
-comme la telecommande). Logs `logs/tx-sem-*.log`. Chaque ligne : 3 accuses
-sur 3, puis observation de l'utilisateur, prediction ecrite AVANT.
+Tool: `txack 4FF0FD63 5 <charge> 3 300` (three frames, 300 ms apart, like
+the remote). Logs `logs/tx-sem-*.log`. Every line: 3 acknowledgements out of
+3, then the user's observation, with the prediction written BEFORE.
 
-| test | charge | prediction | observe |
+| test | payload | prediction | observed |
 |---|---|---|---|
-| 1 | `C3 35` x1 | les deux lampes | **rien** (voir plus bas) |
-| 1 bis | `C3 35` x3 | les deux lampes | les deux lampes |
-| 2 | `83 35` | arriere seule | arriere seule |
-| 3 | `C2 35` | avant seule | avant seule |
-| 4a | `C2 00` | un extreme de temperature | **le plus froid** |
-| 4b | `C2 64` | l'autre extreme | **le plus chaud** |
-| 5a | `42 64` | extinction | eteinte |
-| 5b | `C3 35` | rallumage, les deux, temperature moyenne | les trois a la fois |
-| 6a | `E1 01` (jamais vu, construit) | A : baisse puis remonte, les deux restent | conforme |
-| 6b | `E1 01` renvoye deux fois | rien (numero deja traite) | rien, deux fois |
-| 6c | `E1 02` | nouvelle reaction | baisse puis remonte |
+| 1 | `C3 35` x1 | both lamps | **nothing** (see below) |
+| 1 bis | `C3 35` x3 | both lamps | both lamps |
+| 2 | `83 35` | back only | back only |
+| 3 | `C2 35` | front only | front only |
+| 4a | `C2 00` | one temperature extreme | **the coldest** |
+| 4b | `C2 64` | the other extreme | **the warmest** |
+| 5a | `42 64` | turn off | off |
+| 5b | `C3 35` | turn back on, both, mid temperature | all three at once |
+| 6a | `E1 01` (never seen, constructed) | A: dims then comes back up, both stay | as expected |
+| 6b | `E1 01` sent again twice | nothing (number already handled) | nothing, twice |
+| 6c | `E1 02` | new reaction | dims then comes back up |
 
-Acquis :
-- 1er octet = champ de bits : b7 marche, b6 avant, b0 arriere, b5 bouton A,
-  b2 luminosite, b1 temperature (b3, b4 : favori, non testes). Une valeur
-  jamais emise par la telecommande (`E1`) est comprise : la lecture en champ
-  de bits est la bonne, pas une table de codes.
-- Les trames d'etat sont ABSOLUES : mode, marche et temperature s'imposent
-  quel que soit l'etat precedent, et plusieurs en une trame (test 5b).
-- Temperature : `00` = le plus froid, `64` (100) = le plus chaud.
-- Bouton A : evenement, 2e octet = numero d'appui ; un numero deja traite est
-  ignore (6b). Effet visible identique a chaque nouveau numero (baisse puis
-  remonte) : bascule ou relance du reglage automatique, non tranche.
-- **Une trame unique n'a pas suffi** (test 1), trois oui. Hypotheses : la
-  premiere trame reveille le microcontroleur de la lampe, ou la lampe
-  ecarte une trame dont le PID egale celui de la derniere recue. A etudier ;
-  en attendant, emettre chaque commande trois fois comme la telecommande.
+Established:
+- 1st byte = bit field: b7 on, b6 front, b0 back, b5 button A, b2
+  brightness, b1 temperature (b3, b4: favorite, not tested). A value never
+  emitted by the remote (`E1`) is understood correctly: the bit-field
+  reading is the right one, not a code table.
+- State frames are ABSOLUTE: mode, on/off, and temperature take effect
+  regardless of the previous state, and several at once in one frame (test
+  5b).
+- Temperature: `00` = coldest, `64` (100) = warmest.
+- Button A: an event, 2nd byte = press number; a number already handled is
+  ignored (6b). Visible effect identical for each new number (dims then
+  comes back up): toggle or re-trigger of the automatic setting, not
+  settled.
+- **A single frame was not enough** (test 1), three was. Hypotheses: the
+  first frame wakes up the lamp's microcontroller, or the lamp discards a
+  frame whose PID equals that of the last one received. To be studied; in
+  the meantime, transmit each command three times like the remote.
 
-Luminosite avec les deux lampes (`C5`, bits marche + avant + luminosite +
-arriere) :
+Brightness with both lamps (`C5`, bits on + front + brightness + back):
 
-| test | charge | observe |
+| test | payload | observed |
 |---|---|---|
-| 7 | `C5 60` | baisse legere, les deux lampes restent allumees |
-| 7b | `C5 4C` | minimum de la molette |
-| 7c/7d | `C5 20`, puis `4C`/`20` alternes toutes les 4 s | aucun changement visible |
+| 7 | `C5 60` | slight dimming, both lamps stay on |
+| 7b | `C5 4C` | dial minimum |
+| 7c/7d | `C5 20`, then `4C`/`20` alternating every 4 s | no visible change |
 
-- La lampe **plafonne sous `4C`** : c'est son minimum reel, pas seulement
-  celui de la molette. Plage utile `4C`-`FE`.
-- Perception (utilisateur) : la courbe 0 -> 100 parait logarithmique ; avec
-  les deux lampes allumees, chacune eclaire moins que seule (puissance
-  partagee). Pour Matter : conversion non lineaire du niveau vers `4C`-`FE`.
+- The lamp **caps below `4C`**: that is its actual minimum, not just the
+  dial's. Usable range `4C`-`FE`.
+- Perception (user): the 0 -> 100 curve appears logarithmic; with both
+  lamps on, each shines less than alone (shared power). For Matter:
+  non-linear conversion of the level to `4C`-`FE`.
 
-Favori et bits 3 / 4 :
+Favorite and bits 3 / 4:
 
-| test | charge | observe |
+| test | payload | observed |
 |---|---|---|
-| 8 | salve du favori `83 35`, `85 A7`, `91 00`, (`89 E0` incertain) | arriere seule, luminosite plus forte : le favori se rejoue sans la telecommande |
-| 9a | `C3 35`, 4 s, `C9 58` | passage aux deux lampes, puis rien |
-| 9b/9c | `C9 E0` / `C9 00` alternes toutes les 4 s | rien (deux fois, lampe regardee) |
-| 10a/10b | `D1 01`, `D1 00`, `D1 64` toutes les 6 s | rien (deux fois, lampe regardee) |
+| 8 | favorite burst `83 35`, `85 A7`, `91 00`, (`89 E0` uncertain) | back only, stronger brightness: the favorite replays on its own without the remote |
+| 9a | `C3 35`, 4 s, `C9 58` | switch to both lamps, then nothing |
+| 9b/9c | `C9 E0` / `C9 00` alternating every 4 s | nothing (twice, lamp watched) |
+| 10a/10b | `D1 01`, `D1 00`, `D1 64` every 6 s | nothing (twice, lamp watched) |
 
-Bits 3 et 4 : **aucun effet visible**, deux lampes allumees, valeurs opposees.
-Reglages internes (cible ou etat du mode automatique ? memoire du favori ?),
-sans utilite pour la commande depuis Matter. Non poursuivi.
+Bits 3 and 4: **no visible effect**, both lamps on, opposite values.
+Internal settings (automatic-mode target or state? favorite memory?), of no
+use for commanding from Matter. Not pursued further.
 
-### Appairage Halo 1 (23/09, format de trame desormais correct)
+### Halo 1 pairing (Sep 23, frame format now correct)
 
-Manipulation : maintenir **favori + switch de lampe ~5 s** ; toutes les LED
-de la telecommande clignotent. Appui long sur favori = enregistrer le preset
-**dans la telecommande** (LED en retour ; la lampe ne recoit que les trames
-d'etat du rappel).
+Procedure: hold **favorite + lamp switch for ~5 s**; all the remote's LEDs
+blink. A long press on favorite = save the preset **in the remote** (LED
+feedback; the lamp only receives the recall's state frames).
 
-| capture | adresse, canal | pendant la manip |
+| capture | address, channel | during the procedure |
 |---|---|---|
-| `logs/pair-1.log` | `63 FD F0 4F`, 5 (lien normal) | rien ; avant et apres, trafic normal |
-| `logs/pair-2.log` | `E2 08 00 B0`, 5 (appairage Halo 2) | 0 trame, 0 rejet en 40 s |
+| `logs/pair-1.log` | `63 FD F0 4F`, 5 (normal link) | nothing; normal traffic before and after |
+| `logs/pair-2.log` | `E2 08 00 B0`, 5 (Halo 2 pairing) | 0 frames, 0 rejects in 40 s |
 
-- L'appairage de la Halo 1 ne passe ni par le lien normal, ni par l'adresse
-  d'appairage de la Halo 2 sur le canal 5 : autre adresse et/ou autre canal.
-  Seule voie restante : balayage au CC2500 (energie par canal, puis capture
-  brute). Non necessaire pour piloter la lampe ; laisse en option.
-- **L'adresse n'a pas change** : juste apres la manip, la molette emet sur
-  `63 FD F0 4F` (`85 A6` -> `85 FE`, pair-1.log, 36-40 s).
-- La trame de service `FA xx` (NO_ACK) valait `A8` partout avant, `F8` juste
-  apres la remise des piles et la manip (bits 6 et 4) : niveau de pile ou
-  drapeau, non tranche.
+- Halo 1 pairing goes through neither the normal link nor the Halo 2 pairing
+  address on channel 5: a different address and/or a different channel.
+  Only remaining path: CC2500 sweep (energy per channel, then raw capture).
+  Not necessary to drive the lamp; left as an option.
+- **The address did not change**: right after the procedure, the dial
+  transmits on `63 FD F0 4F` (`85 A6` -> `85 FE`, pair-1.log, 36-40 s).
+- The `FA xx` service frame (NO_ACK) read `A8` everywhere before, `F8` right
+  after the battery swap and the procedure (bits 6 and 4): battery level or
+  flag, not settled.
 
-**Adresse d'appairage Halo 1 TROUVEE** (23/09, CC2500, `logs/trig-2-appairage.log`,
-analyse `tools/pairing/ana.py`) :
-- Balayage d'energie (`ccscan`) : rien de net hors du canal 5 ; puis capture
-  brute sur 2405 MHz gardee sur detection de porteuse (`cctrig`, seuil
-  RELATIF +14 dB : en absolu, meme +7 dB laissait 18 % de porteuse au repos).
-- Temoin (molette, `trig-1-molette.log`) : l'analyse aveugle, sans connaitre
-  l'adresse, sort des trames au CRC juste `63 FD F0 4F` / `C4 D3`, `C4 CB`.
-- Pendant la manip favori + switch : trames standard, **125 kbps, canal 5,
-  adresse sur l'air `59 01 00 B0`** (a ecrire `B0 00 01 59`), longueur 2,
-  PID 0, NO_ACK 0, CRC juste. Charge en cycle, une par salve toutes les
-  ~200 ms : `5A 5A` -> `F5 C3` -> `CF 49` -> ... Chaque charge part jusqu'a 3
-  fois a ~1,85 ms d'ecart : ce sont des RETRANSMISSIONS faute d'accuse -- la
-  lampe, pas en mode appairage, ne repond pas.
-- Parente avec la Halo 2 : adresse d'appairage `E2 08 00 B0`, meme fin `00 B0`.
-- `F5 C3 CF 49` (identifiant de la telecommande ?) n'a aucun lien simple avec
-  `63 FD F0 4F` (XOR, inversions, complement, CRC-16 essayes). L'adresse de
-  lien vient peut-etre de la lampe, dans son accuse, pendant un vrai appairage.
-- Les « trames » `FFFF0000` longueur 0 vues a 1000 kbps sont des artefacts de
-  sur-echantillonnage (flux constant), a ignorer.
+**Halo 1 pairing address FOUND** (Sep 23, CC2500,
+`logs/trig-2-appairage.log`, analysis `tools/pairing/ana.py`):
+- Energy sweep (`ccscan`): nothing clear-cut outside channel 5; then raw
+  capture on 2405 MHz gated on carrier detection (`cctrig`, RELATIVE
+  threshold +14 dB: in absolute terms, even +7 dB left 18% carrier at
+  rest).
+- Control (dial, `trig-1-molette.log`): the blind analysis, without knowing
+  the address, produces frames with a correct CRC on `63 FD F0 4F` /
+  `C4 D3`, `C4 CB`.
+- During the favorite + switch procedure: standard frames, **125 kbps,
+  channel 5, address on air `59 01 00 B0`** (to be written as `B0 00 01 59`),
+  length 2, PID 0, NO_ACK 0, correct CRC. Payload cycling, one per burst
+  about every 200 ms: `5A 5A` -> `F5 C3` -> `CF 49` -> ... Each payload goes
+  out up to 3 times about 1.85 ms apart: these are RETRANSMISSIONS for lack
+  of an acknowledgement -- the lamp, not in pairing mode, does not reply.
+- Kinship with the Halo 2: pairing address `E2 08 00 B0`, same ending
+  `00 B0`.
+- `F5 C3 CF 49` (the remote's identifier?) has no simple relationship with
+  `63 FD F0 4F` (XOR, inversions, complement, CRC-16 tried). The link
+  address may come from the lamp, in its acknowledgement, during a real
+  pairing.
+- The `FFFF0000` length-0 "frames" seen at 1000 kbps are oversampling
+  artifacts (constant stream), to be ignored.
 
-**Appairage COMPLET capture** (23/09, procedure du manuel : lampe debranchee,
-switch + favori 5 s, capteur couvert, USB rebranche dans les 15 s ; BM5602 sur
-`59 01 00 B0` = `logs/pair-4-bm.log`, CC2500 brut = `logs/pair-4-cc.log`,
-liste `tools/pairing/frames.py logs/pair-4-cc.log 125 99.84`) :
+**COMPLETE pairing captured** (Sep 23, manual procedure: lamp unplugged,
+switch + favorite for 5 s, sensor covered, USB reconnected within 15 s;
+BM5602 on `59 01 00 B0` = `logs/pair-4-bm.log`, raw CC2500 =
+`logs/pair-4-cc.log`, listed with
+`tools/pairing/frames.py logs/pair-4-cc.log 125 99.84`):
 
-| t (s) | trafic |
+| t (s) | traffic |
 |---|---|
-| 0-2,2 et 5,7-8,0 | lien normal `63 FD F0 4F` : `FF 00`/`FE 00`/`FD 00` toutes les ~49 ms (manip en cours), puis `85 E2` x3 |
-| 8,5-14,6 | balise `59 01 00 B0` : `5A 5A`, `F5 C3`, `CF 49` toutes les 200 ms, 2-3 essais chacune, PID fige : pas d'accuse |
-| 14,76 | **premier accuse de la lampe** (USB rebranche) : longueur 0, PID 1, bit NO_ACK a 1 |
-| 14,8-17,7 | balise emise UNE fois par charge, PID qui avance : chaque trame est accusee (accuse vide, ~0,83 ms apres) |
-| 17,75 | fin : la telecommande s'arrete (appairage reussi) |
+| 0-2.2 and 5.7-8.0 | normal link `63 FD F0 4F`: `FF 00`/`FE 00`/`FD 00` about every 49 ms (procedure in progress), then `85 E2` x3 |
+| 8.5-14.6 | beacon `59 01 00 B0`: `5A 5A`, `F5 C3`, `CF 49` every 200 ms, 2-3 tries each, PID frozen: no acknowledgement |
+| 14.76 | **lamp's first acknowledgement** (USB reconnected): length 0, PID 1, NO_ACK bit at 1 |
+| 14.8-17.7 | beacon sent ONCE per payload, PID advancing: every frame is acknowledged (empty acknowledgement, ~0.83 ms later) |
+| 17.75 | end: the remote stops (pairing successful) |
 
-- **L'accuse de la lampe est VIDE** : la lampe n'attribue rien. Elle apprend
-  l'identite de la telecommande dans la balise (coherent avec le manuel : une
-  telecommande, plusieurs lampes). L'adresse de lien `63 FD F0 4F` est donc
-  une fonction de `5A 5A / F5 C3 / CF 49` (ou de l'identifiant interne de la
-  telecommande) -- fonction non identifiee.
-- Consequence pratique : l'ESP32 peut RE-APPAIRER la lampe a l'adresse
-  connue en rejouant la balise (`59 01 00 B0`, canal 5, charges dans l'ordre,
-  accuse demande) pendant la fenetre d'appairage de la lampe.
-- **L'adresse survit a l'appairage** (`logs/pair-5-verif.log`) : juste apres,
-  la molette emet 121 trames sur `63 FD F0 4F` et le PID avance a chaque
-  trame (emission unique, donc accusee) ; la lampe obeit. Voyants eteints a
-  la fin de la manip : appairage reussi. Piste appairage CLOSE.
+- **The lamp's acknowledgement is EMPTY**: the lamp does not assign
+  anything. It learns the remote's identity from the beacon (consistent
+  with the manual: one remote, several lamps). The link address
+  `63 FD F0 4F` is therefore a function of `5A 5A / F5 C3 / CF 49` (or of
+  the remote's internal identifier) -- function not identified.
+- Practical consequence: the ESP32 can RE-PAIR the lamp to the known
+  address by replaying the beacon (`59 01 00 B0`, channel 5, payloads in
+  order, acknowledgement requested) during the lamp's pairing window.
+- **The address survives pairing** (`logs/pair-5-verif.log`): right after,
+  the dial transmits 121 frames on `63 FD F0 4F` and the PID advances on
+  every frame (single transmission, hence acknowledged); the lamp obeys.
+  Indicators off at the end of the procedure: pairing successful. Pairing
+  lead CLOSED.

@@ -162,7 +162,7 @@ quand quelque chose ne marche pas.
 
 ## Câblage
 
-Voir [docs/WIRING.md](docs/WIRING.md). En résumé, sur ESP32-C6 SuperMini
+Voir [docs/WIRING.md](docs/WIRING.fr.md). En résumé, sur ESP32-C6 SuperMini
 (la cible par défaut) :
 
 | BM5602 | C6 SuperMini |
@@ -175,7 +175,7 @@ Voir [docs/WIRING.md](docs/WIRING.md). En résumé, sur ESP32-C6 SuperMini
 
 > `GIO2` sert de MISO : le firmware bascule le module en SPI 4 fils à l'init.
 > Le module n'a aucun marquage : l'ordre de ses pastilles est dans
-> [docs/WIRING.md](docs/WIRING.md#brochage-du-module-bm5602-60-1).
+> [docs/WIRING.md](docs/WIRING.fr.md#brochage-du-module-bm5602-60-1).
 
 ## Compilation
 
@@ -230,7 +230,7 @@ cru, champs a livrer, lien et radio. Une premiere commande, `lampe on` ou
 L'adresse de lien depend de la telecommande (elle vient de l'appairage BenQ).
 Pour une autre paire lampe/telecommande, `lampe adresse XXXXXXXX` (ordre
 d'ecriture) l'enregistre en NVS. Comment elle a ete trouvee :
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+[docs/PROTOCOL.md](docs/PROTOCOL.fr.md).
 
 ### 2. Appairer le nœud Matter
 
@@ -306,7 +306,7 @@ toutes les 10 min. Chaque relance ecrit des lignes `[lampe] BM5602 : ...` sur
 la console (jamais bloquantes : perdues si le tampon serie est plein) ; `lampe`
 montre l'etat et la derniere relance, `lampe stats` les relances par cause et
 les dernieres, datees. Detail et seuils :
-[docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.md), C.5.
+[docs/PLAN-PILOTE-HALO1.md](docs/PLAN-PILOTE-HALO1.fr.md), C.5.
 
 ### 4. Bouton BOOT
 
@@ -408,7 +408,7 @@ au lieu d'etre tronquee puis executee ; Ctrl-U vide la ligne en cours.
 
 L'app de supervision (macOS d'abord) parle a la carte par le meme port USB,
 ou par le reseau Thread (UDP, section 10), avec le protocole de
-[docs/PROTOCOLE-JSON.md](docs/PROTOCOLE-JSON.md) : elle
+[docs/PROTOCOLE-JSON.md](docs/PROTOCOLE-JSON.fr.md) : elle
 envoie les commandes de la console prefixees de `id=<n> `, la carte repond par
 des lignes machine (octet RS 0x1E + un objet JSON compact + LF, 1024 octets au
 plus), melees au texte habituel. Sans `json 1` et sans `id=`, la console
@@ -448,7 +448,7 @@ standard (adresse de 4 octets, PCF de 9 bits, CRC-16 materiel), charge de deux
 octets (drapeaux marche / lampes / selecteur, puis valeur), accuse vide. On ne
 peut donc pas lire l'etat de la lampe : le pilote suit celui qu'il lui envoie
 et ce qu'il entend de la telecommande. Detail, preuves et questions encore
-ouvertes : [docs/PROTOCOL.md](docs/PROTOCOL.md) (bloc d'en-tete, puis les
+ouvertes : [docs/PROTOCOL.md](docs/PROTOCOL.fr.md) (bloc d'en-tete, puis les
 sections Halo 1 a la fin).
 
 ## Structure
