@@ -1,82 +1,86 @@
-# Pistes futures
+[Français](PISTES-FUTURES.fr.md) · **English**
 
-Idees notees en cours de projet, hors du perimetre du produit actuel. Aucune n'est
-commencee sauf mention contraire.
+# Future directions
 
-## Pour la communaute : un seul CC2500 pour decouvrir ET piloter (23/09/2026)
+Ideas noted during the project, outside the scope of the current product. None
+have been started unless otherwise noted.
 
-Le produit utilise un BM5602 (Holtek BC5602), qui fait en materiel tout le format
-de trame de la lampe (adresse, en-tete de 9 bits, CRC-16/CCITT, accuse, renvois),
-mais qui ne sait ecouter qu'une adresse connue. Chaque Halo 1 a sa propre adresse
-de lien : un autre possesseur devrait refaire notre enquete pour la trouver.
+## For the community: a single CC2500 to discover AND drive (Sep 23, 2026)
 
-Un **CC2500** (TI) saurait faire les deux :
-- **decouvrir** l'adresse sans la connaitre : c'est exactement ce que nos outils
-  `cctrig` + `tools/pairing/ana.py` ont fait (capture brute sur porteuse, puis
-  recherche de trames au CRC juste a toute position) ;
-- **piloter** la lampe en emulant le format BC5602 en logiciel : synchro sur
-  16 bits d'adresse, reste de l'adresse, en-tete de 9 bits (decalage d'un bit),
-  charge et CRC-16/CCITT (init FFFF) construits bit a bit ; accuse, PID et renvois
-  geres par le firmware (bascule TX -> RX en ~21 us, l'accuse de la lampe arrive
-  150-250 us apres la trame).
+The product uses a BM5602 (Holtek BC5602), which handles the lamp's whole
+frame format in hardware (address, 9-bit header, CRC-16/CCITT, acknowledgement,
+retries), but which can only listen on a known address. Each Halo 1 has its
+own link address: another owner would have to redo our investigation to find
+it.
 
-Precedent : le projet DIY Multiprotocol emule deja sur CC2500 les puces de la
-famille nRF24 / XN297 (meme en-tete de 9 bits, meme principe d'accuse).
+A **CC2500** (TI) could do both:
+- **discover** the address without knowing it: that is exactly what our
+  `cctrig` + `tools/pairing/ana.py` tools did (raw capture on the carrier,
+  then a search for frames with a correct CRC at any position);
+- **drive** the lamp by emulating the BC5602 format in software: sync on
+  16 bits of address, the rest of the address, a 9-bit header (shifted by
+  one bit), payload and CRC-16/CCITT (init FFFF) built bit by bit;
+  acknowledgement, PID, and retries handled by the firmware (TX -> RX switch
+  in ~21 us, the lamp's acknowledgement arrives 150-250 us after the frame).
 
-Atouts : un seul module pour tout, meilleure portee (le module 24TRGC5-V4 a un
-PA/LNA RFX2402E), puce tres documentee. Couts : davantage de logiciel radio a
-timing serre, module plus gros avec antenne u.FL. Ideal pour une version
-« grand public » du projet.
+Precedent: the DIY Multiprotocol project already emulates the nRF24 / XN297
+family of chips on CC2500 (same 9-bit header, same acknowledgement scheme).
 
-## Telecommande Halo dans Apple Home
+Advantages: a single module for everything, better range (the 24TRGC5-V4
+module has an RFX2402E PA/LNA), a very well documented chip. Costs: more
+tightly timed radio software, a bigger module with a u.FL antenna. Ideal for
+a "consumer" version of the project.
 
-Exposer les boutons de la vraie telecommande (A, favori) comme **Generic Switch**
-Matter (boutons sans etat) : Maison pourrait declencher des automatisations sur
-un appui, comme avec un interrupteur Hue. Le pilote entend deja ces trames (A :
-`E0/E1 nn` ; favori : salve contenant `91`/`89`).
+## Halo remote in Apple Home
 
-## Retour rapide de « Halo auto » apres un appui dans l'app (en attente)
+Expose the buttons of the real remote (A, favorite) as a Matter **Generic
+Switch** (stateless buttons): Home could trigger automations on a press,
+like with a Hue switch. The driver already hears these frames (A: `E0/E1
+nn`; favorite: a burst containing `91`/`89`).
 
-En attente tant qu'EP4 est desactive (`HALO1_EXPOSE_AUTO 0` depuis la 0.3.0,
-decision du 23/09) : a reprendre s'il est remis. Maison garde l'etat demande ~10 s apres un appui dans l'app, alors que les
-rapports de la carte s'affichent en 1 s. Chercher une astuce (tache separee
-proposee le 23/09).
+## Fast feedback for "Halo auto" after a tap in the app (pending)
 
-## Signature LED du produit (implementee le 23/09 : src/status_led.*, README « LED d'etat »)
+Pending as long as EP4 is disabled (`HALO1_EXPOSE_AUTO 0` since 0.3.0,
+decision from Sep 23): to revisit if it is brought back. Home keeps showing
+the requested state for ~10 s after a tap in the app, while the board's
+reports show up within 1 s. Look for a workaround (a separate task was
+proposed on Sep 23).
 
-WS2812 (IO8) : bleu clignotant = pas appaire ; orange lent = pas de Thread ;
-eteinte + breve lueur blanche toutes les 10 s = OK ; flash vert = ordre envoye ;
-rouge x3 = lampe injoignable ; « Identifier » depuis Maison = arc-en-ciel.
+## The product's LED signature (implemented on Sep 23: src/status_led.*, README "Status LED")
 
-## Re-appairage de la lampe par l'ESP32
+WS2812 (IO8): blinking blue = not paired; slow orange = no Thread; off +
+brief white glow every 10 s = OK; green flash = command sent; red x3 = lamp
+unreachable; "Identify" from Home = rainbow.
 
-Rejouer la balise d'appairage (`59 01 00 B0`, canal 5, `5A 5A / F5 C3 / CF 49`,
-accuse demande) pendant la fenetre d'appairage de la lampe (debranchee, capteur
-couvert, rebranchee) : la lampe retrouverait l'adresse `63 FD F0 4F` sans la
-telecommande.
+## Re-pairing the lamp from the ESP32
 
-## Source reseau de l'app : petits points reportes (25-27/09/2026)
+Replay the pairing beacon (`59 01 00 B0`, channel 5, `5A 5A / F5 C3 / CF 49`,
+acknowledgement requested) during the lamp's pairing window (unplugged,
+sensor covered, plugged back in): the lamp would pick up the address
+`63 FD F0 4F` without the remote.
 
-Releves par les relectures de la phase 2 et au banc ; rien de bloquant.
+## App's network source: small deferred items (Sep 25-27, 2026)
 
-Firmware :
-- `udp.terminees` dans le bloc `reseau` `ip` : sessions terminees par `json 0`
-  encore comptees dans `udp.sessions` (rev 4).
-- Autres pertes de ligne sans `n` consomme (le `fin` de `leaveMachine`, les
-  evenements quand une ligne est deja en cours de formatage) : jamais vues,
-  a aligner sur `replyEmit` (2.3).
+Found during the phase 2 reviews and on the bench; nothing blocking.
 
-App macOS :
-- Relance sans `hello` toutes les ~37 s alors que le bandeau dit « 30 s »,
-  et ~7 lignes de console par tour.
-- Nouvelle cle : l'app recree l'element du trousseau, donc macOS redemande
-  l'acces pour `security` (`halo_udp.py`) ; `SecItemUpdate` garderait l'ACL.
-- Lecture du trousseau sur l'acteur principal : une invite du trousseau fige
-  l'interface le temps d'y repondre.
-- Datagrammes ecartes par l'enveloppe H1 (MAC faux, rejeu) non montres.
-- Pas de couture d'injection du transport dans `Pont` : les scenarios reseau
-  de bout en bout ne se testent qu'au banc.
-- Reste de cle d'une reponse abimee coupee sur plusieurs lignes de log
-  (classee en texte apres deux lignes).
-- `NSLocalNetworkUsageDescription` en double (project.yml et
-  InfoPlist.xcstrings) sans controle d'egalite.
+Firmware:
+- `udp.terminees` in the `reseau` `ip` block: sessions ended by `json 0`
+  still counted in `udp.sessions` (rev 4).
+- Other line losses without `n` consumed (the `fin` of `leaveMachine`, events
+  when a line is already being formatted): never seen, to be aligned with
+  `replyEmit` (2.3).
+
+macOS app:
+- Retry without `hello` every ~37 s while the banner says "30 s", and ~7
+  console lines per round.
+- New key: the app recreates the keychain item, so macOS asks again for
+  access for `security` (`halo_udp.py`); `SecItemUpdate` would keep the ACL.
+- Keychain reads on the main actor: a keychain prompt freezes the interface
+  for as long as it takes to answer it.
+- Datagrams dropped by the H1 envelope (bad MAC, replay) not shown.
+- No injection seam for the transport in `Pont`: end-to-end network
+  scenarios can only be tested on the bench.
+- Leftover key fragment from a corrupted response split across several log
+  lines (classified as text after two lines).
+- `NSLocalNetworkUsageDescription` duplicated (project.yml and
+  InfoPlist.xcstrings) with no equality check.

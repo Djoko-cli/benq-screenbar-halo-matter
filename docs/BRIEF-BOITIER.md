@@ -1,197 +1,202 @@
-# Brief de passation : boitier imprime 3D du module Halo (ESP32-C6 SuperMini + BM5602)
+[Français](BRIEF-BOITIER.fr.md) · **English**
 
-> Destinataire : une instance Claude (Opus) chargee de modeliser le boitier et de
-> rediger la notice de soudure et d'assemblage. Redige le 23/09/2026 par l'instance
-> qui a developpe le firmware. Interlocuteur : Majid (francophone, a l'aise en
-> electronique ; il a longtemps prefere eviter la soudure, il accepte maintenant
-> une soudure propre et definitive pour la version finale).
+# Hand-off brief: 3D-printed case for the Halo module (ESP32-C6 SuperMini + BM5602)
 
-## 1. Contexte en trois lignes
+> Recipient: a Claude (Opus) instance tasked with modeling the case and writing
+> the soldering and assembly instructions. Written on Sep 23, 2026 by the instance
+> that developed the firmware. Contact: Majid (French speaker, comfortable with
+> electronics; he long preferred to avoid soldering; he now accepts clean,
+> permanent soldering for the final version).
 
-- Le module pilote une lampe BenQ ScreenBar Halo (1re generation) par radio 2,4 GHz
-  (canal 5 = 2405 MHz, via le transceiver Holtek BM5602-60-1) et l'expose dans
-  Apple Home en **Matter sur Thread** (radio 802.15.4 de l'ESP32-C6, canal 25 = 2475 MHz).
-- Le firmware est termine et valide sur la vraie lampe (depot : ce dossier ; build
-  `esp32c6thread` dans `platformio.ini`). **Aucune broche ne doit changer** : elles
-  sont figees dans les `build_flags`.
-- Objectif de ta mission : un **petit boitier compact, visse sous le bureau, alimente
-  en USB-C**, plus la **notice definitive de soudure et d'assemblage**, avec le
-  BM5602 monte en « HAT » au-dessus de l'ESP32.
+## 1. Context in three lines
 
-## 2. Les deux cartes
+- The module drives a BenQ ScreenBar Halo (1st gen) lamp over 2.4 GHz radio
+  (channel 5 = 2405 MHz, via the Holtek BM5602-60-1 transceiver) and exposes it to
+  Apple Home over **Matter over Thread** (the ESP32-C6's 802.15.4 radio, channel 25 = 2475 MHz).
+- The firmware is finished and validated on the real lamp (repository: this folder; build
+  `esp32c6thread` in `platformio.ini`). **No pin may change**: they are
+  frozen in the `build_flags`.
+- The goal of your mission: a **small, compact case, screwed under the desk, powered
+  over USB-C**, plus the **final soldering and assembly instructions**, with the
+  BM5602 mounted as a "HAT" above the ESP32.
 
-**ESP32-C6 SuperMini** (carte de Majid, 4 Mo de flash) :
-- environ 22,5 x 18 mm (**a mesurer** : cote exacte, epaisseur PCB, hauteur des
-  composants dessus et dessous) ;
-- USB-C sur un petit cote, **antenne ceramique/PCB a l'autre petit cote** (a
-  confirmer sur la carte reelle) ;
-- boutons **BOOT (IO9)** et **RESET** pres de l'USB ; LED d'etat du firmware :
-  la **WS2812 sur IO8** (la LED simple d'IO15 reste eteinte) ;
-- connecteur exterieur gauche, pas de 2,54 mm, dans cet ordre :
+## 2. The two boards
+
+**ESP32-C6 SuperMini** (Majid's board, 4 MB flash):
+- approximately 22.5 x 18 mm (**to be measured**: exact dimensions, PCB thickness, height of
+  the components on top and bottom);
+- USB-C on one short side, **ceramic/PCB antenna on the other short side** (to
+  be confirmed on the real board);
+- **BOOT (IO9)** and **RESET** buttons near the USB; firmware status LED:
+  the **WS2812 on IO8** (the simple LED on IO15 stays off);
+- left outer header, 2.54 mm pitch, in this order:
   `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
-  **IO21 et IO22 sont des trous interieurs** : ne pas les utiliser.
+  **IO21 and IO22 are inner holes**: do not use them.
 
-**BM5602-60-1** (module Holtek, antenne imprimee integree) :
-- dimensions **a mesurer** (aucune fiche fiable) ;
-- aucune serigraphie. Antenne en haut, texte `BM5602-60-1 V1.0` lisible : les
-  9 pastilles du bord inferieur sont, de gauche a droite,
+**BM5602-60-1** (Holtek module, integrated printed antenna):
+- dimensions **to be measured** (no reliable datasheet);
+- no silkscreen. Antenna at the top, `BM5602-60-1 V1.0` text readable: the
+  9 pads on the bottom edge are, left to right,
   `VSS · VDD · GIO1 · CSN · SCK · GIO2 · SDIO · GIO3 · GIO4`.
-  Deux pastilles isolees pres de l'antenne, a gauche et a droite, sont des VSS
-  supplementaires (non necessaires).
-- **3,3 V uniquement** : ne jamais le relier au 5 V.
+  Two isolated pads near the antenna, on the left and right, are extra VSS
+  pads (not needed).
+- **3.3 V only**: never connect it to 5 V.
 
-## 3. Brochage DEFINITIF (six fils, rien d'autre)
+## 3. FINAL pinout (six wires, nothing else)
 
-| BM5602 (pastille n°) | Signal | ESP32-C6 SuperMini |
+| BM5602 (pad #) | Signal | ESP32-C6 SuperMini |
 |---|---|---|
-| VSS (1) | masse | **GND** |
-| VDD (2) | 3,3 V | **3V3** |
+| VSS (1) | ground | **GND** |
+| VDD (2) | 3.3 V | **3V3** |
 | CSN (4) | chip select | **IO14** |
-| SCK (5) | horloge SPI | **IO18** |
-| GIO2 (6) | MISO (le firmware passe le module en SPI 4 fils) | **IO19** |
+| SCK (5) | SPI clock | **IO18** |
+| GIO2 (6) | MISO (the firmware switches the module to 4-wire SPI) | **IO19** |
 | SDIO (7) | MOSI | **IO20** |
 
-A **ne pas** cabler dans la version finale : GIO1, GIO3, GIO4 (GIO3 -> IO3 ne servait
-qu'aux diagnostics), IO10 (second module du banc), les fils du CC2500. La WS2812
-(IO8) et IO9 (BOOT) sont sur la carte : rien a souder, seulement a rendre accessibles
+Do **not** wire in the final version: GIO1, GIO3, GIO4 (GIO3 -> IO3 was only
+used for diagnostics), IO10 (second module on the bench), the CC2500 wires. The WS2812
+(IO8) and IO9 (BOOT) are on the board: nothing to solder, only to make accessible
 (section 5).
 
-**Decouplage : OPTIONNEL.** Toutes les mesures du projet ont ete faites SANS
-condensateur ajoute (0 perte au banc hors Thread) et le module a tres
-probablement son propre decouplage. Un **10 uF + 100 nF** ceramiques au plus pres
-des pastilles VDD/VSS reste une bonne pratique peu couteuse ; ne le presente pas
-comme obligatoire, et ne lui attribue aucun effet non mesure.
+**Decoupling: OPTIONAL.** All of the project's measurements were made WITHOUT
+an added capacitor (0 loss on the bench outside Thread) and the module very
+likely has its own decoupling. A **10 uF + 100 nF** ceramic pair as close as possible
+to the VDD/VSS pads remains a low-cost good practice; do not present it
+as mandatory, and do not attribute to it any unmeasured effect.
 
-## 4. Contraintes radio (les plus importantes du projet)
+## 4. Radio constraints (the most important in the project)
 
-Deux radios 2,4 GHz cohabitent a quelques millimetres : le BM5602 (2405 MHz, doit
-entendre les accuses faibles de la lampe et la telecommande) et l'ESP32-C6 (Thread
-a +20 dBm, 2475 MHz). Sur le banc, des paquets vers la lampe se perdent par episodes
-quand Thread est actif ; la cause n'est pas prouvee, **mais l'eloignement des
-antennes est la seule parade materielle**. Regles :
+Two 2.4 GHz radios coexist a few millimeters apart: the BM5602 (2405 MHz, must
+hear the lamp's weak acknowledgements and the remote) and the ESP32-C6 (Thread
+at +20 dBm, 2475 MHz). On the bench, packets to the lamp are lost in episodes
+when Thread is active; the cause is not proven, **but keeping the antennas apart
+is the only hardware countermeasure**. Rules:
 
-1. **L'antenne imprimee du BM5602 ne doit survoler NI l'antenne du C6, NI un plan
-   de masse, NI un composant.** Elle doit deborder du PCB du C6, dans l'air.
-2. Mettre les deux antennes aux **extremites opposees** du boitier ; viser
-   **au moins 25-30 mm** entre elles (plus si le boitier le permet), et idealement
-   des orientations **perpendiculaires**.
-3. Disposition « HAT » recommandee : BM5602 au-dessus de la moitie USB du C6,
-   **tourne de 90°** pour que son antenne deborde d'un grand cote du C6, cote USB,
-   loin a la fois de l'antenne du C6 (autre extremite) et de la coque metallique
-   de la prise USB-C. Propose aussi une variante cote a cote si elle eloigne mieux
-   les antennes pour un encombrement comparable, avec schema, et laisse Majid choisir.
-4. **Aucun metal** dans le boitier pres des antennes : pas d'insert laiton ni de vis
-   a moins de ~10 mm d'une antenne, pas de peinture metallisee. Plastique plein
-   (PETG ou PLA), paroi de 1,6 a 2 mm devant les antennes.
-5. Montage sous le bureau : un plateau en bois ne gene presque pas. **Un plateau ou
-   un cadre metallique, si** : le signaler dans la notice (monter pres du bord
-   avant, antennes hors du metal). La lampe est posee sur l'ecran, au-dessus du
-   bureau, a ~1 m.
-6. Les fils SPI ne doivent pas passer sur les antennes.
+1. **The BM5602's printed antenna must overhang NEITHER the C6's antenna, NOR a
+   ground plane, NOR a component.** It must extend past the C6's PCB, into open air.
+2. Put the two antennas at **opposite ends** of the case; aim for
+   **at least 25-30 mm** between them (more if the case allows), and ideally
+   **perpendicular** orientations.
+3. Recommended "HAT" layout: BM5602 above the USB half of the C6,
+   **rotated 90°** so its antenna extends past a long side of the C6, on the USB
+   side, far from both the C6's antenna (the other end) and the metal shell
+   of the USB-C connector. Also propose a side-by-side variant if it keeps the
+   antennas further apart for a comparable footprint, with a diagram, and let
+   Majid choose.
+4. **No metal** in the case near the antennas: no brass insert or screw
+   within ~10 mm of an antenna, no metallic paint. Solid plastic
+   (PETG or PLA), wall 1.6 to 2 mm thick in front of the antennas.
+5. Mounting under the desk: a wooden desktop barely gets in the way. **A metal
+   desktop or frame does**: mention it in the instructions (mount near the front
+   edge, antennas clear of the metal). The lamp sits on the monitor, above the
+   desk, at ~1 m.
+6. The SPI wires must not run over the antennas.
 
-## 5. Exigences du boitier
+## 5. Case requirements
 
-- **Compact** : le plus petit possible en respectant la section 4 ; donne les cotes
-  exterieures finales.
-- **Fixation sous le bureau** : deux oreilles avec trous fraises pour vis a bois
-  ~3,5 mm (tetes loin des antennes), ou trous en boutonniere (keyhole) ; en option,
-  une face plane pour adhesif double face.
-- **USB-C** : ouverture ajustee au connecteur de la carte (mesure reelle + 0,3 mm),
-  la prise doit pouvoir s'enfoncer entierement ; prevoir le passage et un petit
-  arret de traction pour le cable. Le boitier doit rester **reflashable par l'USB**.
-- **LED d'etat (WS2812, IO8)** visible : fenetre fine ou guide de lumiere au-dessus
-  de la WS2812 (pas de la LED d'IO15). Signification : bleu clignotant = pas encore
-  appaire, orange lent = pas de reseau, eteinte avec une breve lueur blanche toutes
-  les 10 s = tout va bien (detail : README, « LED d'etat »).
-- **Bouton BOOT (IO9)** accessible par un trou d'epingle : **appui court =
-  redemarrage**, **8 s puis relacher = retrait de Matter** (decommission) ;
-  entre 2 et 8 s, rien (detail : README, « Bouton BOOT »). Trou RESET
-  optionnel : le bouton BOOT suffit a redemarrer.
-- Maintien des cartes sans colle sur les antennes : berceaux, nervures, clips ;
-  cale isolante (entretoise imprimee ou Kapton) entre le C6 et le BM5602.
-- Couvercle a clips ou vis M2 (hors zone antennes). Jeux de 0,2 a 0,3 mm.
-- Materiau conseille : **PETG** (tenue en chaleur sous un bureau), couches de 0,2 mm,
-  impression sans supports si possible ; indique l'orientation d'impression.
-- Marquage en relief discret (« Halo ») et repere d'orientation de montage.
+- **Compact**: as small as possible while respecting section 4; give the final
+  outer dimensions.
+- **Mounting under the desk**: two ears with countersunk holes for ~3.5 mm
+  wood screws (heads far from the antennas), or keyhole slots; optionally,
+  a flat face for double-sided tape.
+- **USB-C**: opening sized to the board's connector (actual measurement + 0.3 mm),
+  the plug must be able to seat fully; provide a pass-through and a small
+  strain relief for the cable. The case must stay **reflashable over USB**.
+- **Status LED (WS2812, IO8)** visible: thin window or light guide above
+  the WS2812 (not the LED on IO15). Meaning: blinking blue = not yet
+  paired, slow orange = no network, off with a brief white glow every
+  10 s = all is well (details: README, "Status LED").
+- **BOOT button (IO9)** accessible through a pinhole: **short press =
+  reboot**, **8 s then release = removal from Matter** (decommission);
+  between 2 and 8 s, nothing (details: README, "BOOT button"). Optional RESET
+  hole: the BOOT button is enough to reboot.
+- Holding the boards without glue on the antennas: cradles, ribs, clips;
+  insulating spacer (printed standoff or Kapton) between the C6 and the BM5602.
+- Lid with clips or M2 screws (outside the antenna zone). Clearances of 0.2 to 0.3 mm.
+- Recommended material: **PETG** (heat resistance under a desk), 0.2 mm layers,
+  printed without supports if possible; specify the print orientation.
+- Discreet embossed marking ("Halo") and a mounting-orientation reference mark.
 
-## 6. Notice de soudure et d'assemblage a rediger (pour Majid)
+## 6. Soldering and assembly instructions to write (for Majid)
 
-Ecris une notice pas a pas, illustree si possible, qui couvre au minimum :
+Write step-by-step instructions, illustrated if possible, covering at minimum:
 
-1. **Materiel** : fer a panne fine (biseau 1-1,5 mm), 320-340 °C ; etain 0,5 mm
-   (63/37 plombe plus facile, ou sans plomb a 350 °C) ; flux ; fil **30 AWG**
-   (silicone souple ou Kynar a wrapper) en 3 couleurs au moins ; pince a denuder
-   fine ; ruban **Kapton** ; tresse a dessouder ; multimetre ; bracelet ou
-   precautions ESD.
-2. **Preparation** : retirer les anciens fils et broches du banc si besoin (tresse),
-   nettoyer au flux, **pre-etamer** pastilles et bouts de fils.
-3. **Longueurs** : fils aussi courts que la disposition le permet (typiquement
-   3 a 6 cm), avec une petite boucle de detente ; deux fils de masse n'ont pas lieu
-   d'etre (un seul VSS suffit).
-4. **Ordre conseille** : condensateurs sur le BM5602 d'abord s'ils sont retenus, puis les six fils cote
-   BM5602 (pastilles fragiles : chaleur breve, sans tirer), puis cote C6 dans les
-   trous du connecteur exterieur (par le dessus ou le dessous selon la disposition
-   retenue). Aucune soudure sur ou pres des antennes.
-5. **Controles avant mise sous tension** : continuite de chaque fil de bout en bout,
-   **absence de court-circuit 3V3-GND**, absence de pont entre pastilles voisines
-   (loupe) ; fils non tendus.
-6. **Assemblage** : cale isolante, cartes dans leurs berceaux, fils ranges hors des
-   antennes, fermeture sans pincer.
-7. **Essais apres assemblage** (console serie USB, 115 200 bauds) :
-   - `info` doit afficher `BM5602 : detecte (version puce 0x01000F)`. `ABSENT`
-     avec `0xFFFFFF` : MISO (GIO2 -> IO19) coupe ; avec `0x000000` : alimentation,
-     CSN ou SCK/MOSI inverses ;
-   - `lampe autotest` doit repondre `ok` ; `lampe regs` : `RFCH 05 DM1 82 RT1 73` ;
-   - `matter` : toujours `mise en service : faite` et `Thread : role child` (la
-     soudure n'efface pas l'appairage) ;
-   - essai reel : une commande depuis Apple Home, puis `lampe stats` : noter le
-     rapport paquets / accuses et comparer a la reference ci-dessous.
+1. **Tools and supplies**: fine-tip soldering iron (1-1.5 mm bevel tip), 320-340 °C;
+   0.5 mm solder (63/37 leaded is easier, or lead-free at 350 °C); flux; **30 AWG**
+   wire (flexible silicone or Kynar wire-wrap) in at least 3 colors; fine
+   wire strippers; **Kapton** tape; desoldering braid; multimeter; ESD
+   wrist strap or precautions.
+2. **Preparation**: remove old wires and bench pins if needed (braid),
+   clean with flux, **pre-tin** the pads and wire ends.
+3. **Lengths**: wires as short as the layout allows (typically
+   3 to 6 cm), with a small service loop; two ground wires make no
+   sense (a single VSS is enough).
+4. **Recommended order**: capacitors on the BM5602 first if they are used, then the six wires on the
+   BM5602 side (fragile pads: brief heat, no pulling), then the C6 side into the
+   holes of the outer header (from above or below depending on the chosen
+   layout). No soldering on or near the antennas.
+5. **Checks before power-up**: continuity of each wire end to end,
+   **no 3V3-GND short circuit**, no bridge between neighboring pads
+   (magnifier); wires not under tension.
+6. **Assembly**: insulating spacer, boards in their cradles, wires routed clear of
+   the antennas, closing without pinching the wires.
+7. **Tests after assembly** (USB serial console, 115,200 baud):
+   - `info` must show `BM5602 : detecte (version puce 0x01000F)`. `ABSENT`
+     with `0xFFFFFF`: MISO (GIO2 -> IO19) disconnected; with `0x000000`: power,
+     CSN, or SCK/MOSI swapped;
+   - `lampe autotest` must reply `ok`; `lampe regs`: `RFCH 05 DM1 82 RT1 73`;
+   - `matter`: always `mise en service : faite` and `Thread : role child` (
+     soldering does not erase the pairing);
+   - real-world test: a command from Apple Home, then `lampe stats`: note the
+     packets/acknowledgements ratio and compare it to the reference below.
 
-Reference de performance mesuree le 23/09 (montage de banc, fils Dupont) : sans
-Thread, 0 paquet perdu sur plusieurs centaines ; avec Thread actif, de 0 a 18 %
-de paquets sans accuse selon les phases, toujours rattrapes par les renvois. Un
-bon boitier ne doit pas faire pire ; si c'est le cas, c'est la disposition des
-antennes qu'il faut revoir.
+Performance reference measured on Sep 23 (bench setup, Dupont wires): without
+Thread, 0 packets lost out of several hundred; with Thread active, 0 to 18%
+of packets unacknowledged depending on the phase, always recovered by
+retries. A good case should not do worse; if it does, it is the antenna
+layout that needs revisiting.
 
-**Controle obligatoire avant/apres boitier (demande de Majid, 23/09).** Dans le
-montage de reference, le BM5602 pend a **~12-15 cm au-dessus du C6** sur des fils
-Dupont, antenne vers le haut : un ecartement BIEN superieur aux 25-30 mm vises
-ici. Le boitier compact va donc rapprocher les antennes. Protocole :
-1. AVANT demontage, montage actuel : `lampe stats raz`, puis ~20 commandes depuis
-   Apple Home et ~1 min de telecommande, puis `lampe stats` ; noter paquets,
-   accuses, MAX_RT, trames recues et CRC faux.
-2. APRES assemblage dans le boitier : meme protocole, memes conditions (meme
-   emplacement de la lampe, telephone au meme endroit).
-3. Si le taux de paquets sans accuse ou de CRC faux se degrade nettement :
-   **allonger le boitier** (plus d'ecart entre antennes) plutot que de compacter.
-   Le levier puissance est deja epuise : le BM5602 emet a +6 dBm, son maximum
-   (RFTXP_1 = 0xAF, RFTXP_2 = 0x21, table 1 de la note Holtek AN0560).
+**Mandatory check before/after the case (Majid's request, Sep 23).** In the
+reference setup, the BM5602 hangs **~12-15 cm above the C6** on Dupont
+wires, antenna facing up: a gap FAR greater than the 25-30 mm targeted
+here. The compact case will therefore bring the antennas closer together.
+Protocol:
+1. BEFORE disassembly, current setup: `lampe stats raz`, then ~20 commands from
+   Apple Home and ~1 min of remote use, then `lampe stats`; note packets,
+   acknowledgements, MAX_RT, frames received, and bad CRCs.
+2. AFTER assembly in the case: same protocol, same conditions (same
+   lamp location, phone in the same spot).
+3. If the rate of unacknowledged packets or bad CRCs degrades noticeably:
+   **lengthen the case** (more spacing between antennas) rather than making it more
+   compact. The power lever is already maxed out: the BM5602 transmits at +6 dBm,
+   its maximum (RFTXP_1 = 0xAF, RFTXP_2 = 0x21, table 1 of Holtek application note
+   AN0560).
 
-## 7. Ce que tu dois demander a Majid avant de modeliser
+## 7. What you need to ask Majid before modeling
 
-Au pied a coulisse (en mm, au dixieme) -- **carte debranchee, et de preference
-avec un pied a coulisse en plastique** : le 24/09, la pointe d'un pied a coulisse
-metallique restee aimantee sur le quartz du BM5602 a mis la radio dans un etat
-anormal (plus aucune emission terminee, bruit en reception) pendant 70 minutes,
-jusqu'a une reinitialisation complete du module :
-- SuperMini : longueur, largeur, epaisseur du PCB, hauteur max des composants
-  dessus et dessous, position et dimensions de l'USB-C, position des boutons BOOT
-  et RESET et des LED, position de la zone d'antenne ;
-- BM5602-60-1 : longueur, largeur, epaisseur, position et longueur de la zone
-  d'antenne, position de la rangee de pastilles ;
-- le bureau : materiau du plateau (bois, verre, metal ?), epaisseur, presence d'un
-  cadre metallique, emplacement vise, type de vis souhaite ;
-- une photo de dessus de chaque carte a plat, avec une regle.
+With calipers (in mm, to the tenth) -- **board unplugged, and preferably
+with plastic calipers**: on Sep 24, the tip of a metal caliper, magnetized and
+left resting on the BM5602's crystal, put the radio into an abnormal state
+(no transmission ever completing, noisy reception) for 70 minutes, until the
+module was fully reset:
+- SuperMini: length, width, PCB thickness, max height of the components
+  on top and bottom, position and dimensions of the USB-C, position of the BOOT
+  and RESET buttons and the LEDs, position of the antenna area;
+- BM5602-60-1: length, width, thickness, position and length of the antenna
+  area, position of the row of pads;
+- the desk: desktop material (wood, glass, metal?), thickness, whether it has a
+  metal frame, intended mounting spot, preferred screw type;
+- a top-down photo of each board lying flat, with a ruler.
 
-## 8. Livrables attendus
+## 8. Expected deliverables
 
-1. Modele **parametrique** (OpenSCAD, ou CadQuery/build123d) avec toutes les cotes
-   mesurees en tete de fichier et commentees.
-2. Fichiers **STL/3MF** du fond et du couvercle, plus un rendu eclate de
-   l'assemblage montrant les deux antennes et leur distance.
-3. La **notice de soudure et d'assemblage** (section 6), en francais.
-4. La liste de materiel (fil, vis, condensateurs optionnels) avec references.
+1. **Parametric** model (OpenSCAD, or CadQuery/build123d) with all the measured
+   dimensions at the top of the file and commented.
+2. **STL/3MF** files for the bottom and the lid, plus an exploded render of
+   the assembly showing the two antennas and the distance between them.
+3. The **soldering and assembly instructions** (section 6), in French.
+4. The bill of materials (wire, screws, optional capacitors) with part numbers.
 
-Ne touche pas au firmware ni a `platformio.ini`. Le cablage de reference du banc est
-decrit dans `docs/WIRING.md` ; en cas de desaccord, **ce brief fait foi pour la
-version finale** (six fils, broches de la section 3).
+Do not touch the firmware or `platformio.ini`. The bench's reference wiring is
+described in `docs/WIRING.md`; in case of disagreement, **this brief is the
+authority for the final version** (six wires, pins from section 3).

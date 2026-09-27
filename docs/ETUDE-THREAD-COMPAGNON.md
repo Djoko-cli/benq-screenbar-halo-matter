@@ -1,411 +1,410 @@
-# Etude de faisabilite : app compagnon par Thread (24/09/2026)
+[Français](ETUDE-THREAD-COMPAGNON.fr.md) · **English**
 
-**Etude de faisabilite : joindre le pont Halo par Thread a travers les bornes Apple**
+# Feasibility study: companion app over Thread (Sep 24, 2026)
 
-# 0. Resultats de l'etape A (24/09, 19 h 30 - 20 h) : GO
+**Feasibility study: reaching the Halo bridge over Thread through the Apple border routers**
 
-Mac sur l'Ethernet USB seul (Wi-Fi coupe), Tailscale actif.
+# 0. Results of step A (Sep 24, 19 h 30 - 20 h): GO
 
-**A1. Route du Mac**
-- Avec une seule interface, toujours "not in table". Le noyau connait `fd77:9e:f4bb::/64` par 6 routeurs (5 bornes Apple + l'Aqara) et en marque un installe (`fe80::42a:d4d9:3614:70d3%en18`), absent de la table. Une seule interface ne suffit donc pas : la marque perimee survit.
-- Debrancher puis rebrancher l'adaptateur USB lui-meme (detachement de l'interface, `nd6_purge` vide la liste RTI) : route revenue en quelques secondes, `fd77:9e:f4bb::/64 fe80::42a:d4d9:3614:70d3%en18 UGc`.
-- L'auteur de la suppression initiale reste inconnu. Une surveillance filtree de `route -n monitor` tourne (scratchpad `routes.log`) pour relever son pid a la prochaine perte.
+Mac on USB Ethernet only (Wi-Fi off), Tailscale active.
 
-**A2. Ping** : 5/5, RTT 21 a 27 ms, hlim 254 (un saut par la borne). `561F9A6463953778.local` se resout bien en `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`, avec 2 fabrics (`309BEA1CCA0C1569`, `20A842B5C3C38A0D`). La confirmation par coupure du pont reste a faire.
+**A1. Mac route**
+- With a single interface, still "not in table". The kernel knows `fd77:9e:f4bb::/64` through 6 routers (5 Apple border routers + the Aqara) and marks one installed (`fe80::42a:d4d9:3614:70d3%en18`), which is absent from the table. A single interface is therefore not enough: the stale mark survives.
+- Unplugging then replugging the USB adapter itself (interface detach, `nd6_purge` empties the RTI list): the route came back within a few seconds, `fd77:9e:f4bb::/64 fe80::42a:d4d9:3614:70d3%en18 UGc`.
+- The author of the initial removal remains unknown. A filtered `route -n monitor` watch is running (scratchpad `routes.log`) to catch its pid at the next loss.
 
-**A3. UDP** : 5/5 REFUS sur le port 40000. Temoin : le port Matter 5540 (ouvert) donne DELAI, comme attendu pour un datagramme invalide. Un port non annonce traverse donc les bornes Apple : **GO pour une v1 sans service SRP** (1re ligne du tableau de decision). Le risque 2 est leve.
+**A2. Ping**: 5/5, RTT 21 to 27 ms, hlim 254 (one hop through the border router). `561F9A6463953778.local` resolves correctly to `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`, with 2 fabrics (`309BEA1CCA0C1569`, `20A842B5C3C38A0D`). Confirmation by power-cycling the bridge is still to be done.
 
-**Nouveau : l'OMR bouge deja.** A 19 h 33, l'Aqara annoncait `omr=fd77:9e:f4bb::/64` et une RIO basse pour ce prefixe. A 19 h 55, il annonce `omr=fd0d:eec8:5ef:1::/64` et une RIO moyenne pour celui-ci seulement. Les bornes Apple et tous les noeuds restent sur `fd77`. L'Aqara semble avoir quitte la partition Apple. Si `fd77` etait bien son prefixe, les bornes Apple publieront le leur et l'adresse du pont changera : c'est le cas R5 en conditions reelles, et la surveillance le verra.
+**A3. UDP**: 5/5 REFUS (refused) on port 40000. Control: the Matter port 5540 (open) gives DELAI (timeout), as expected for an invalid datagram. An unannounced port therefore does get through the Apple border routers: **GO for a v1 without an SRP service** (1st row of the decision table). Risk 2 is lifted.
 
-**Phase 1 (firmware) ecrite le 24/09 au soir, validee au banc le 25/09 (R1 ; R2 en partie) : docs/PROTOCOLE-JSON.md 10.**
-- Relue par 4 agents (concurrence OpenThread, securite H1, non-regression USB, robustesse), puis contre-verifiee par 2 agents ; un bug majeur trouve et corrige (reponses jetees comme perimees).
-- Route du Mac : la cause est un bug du noyau de macOS (suppression par le noyau quand un routeur de bordure parait injoignable, jamais remise) ; seule une route statique tient. L'assistant systeme `tools/macos/halo-routes/` (demon launchd root) garde la route (docs/PROTOCOLE-JSON.md 10.1).
-- `src/h1_proto.*` (pur, 78 verifications sur l'hote avec des vecteurs Python), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (socket OpenThread, files RX/TX, cle NVS), `json_mode.cpp` a une session par transport (USB + 2 reseau), liste blanche `jsonp::remoteRefusal`, cache des 8 dernieres reponses par session.
-- Ecarts assumes par rapport a cette etude : port **5480** ; une ligne = un datagramme (1078 octets au plus, 6LoWPAN fragmente), pas de decoupage a 512 (a revoir apres R3) ; decouverte par le nom SRP (`reseau` bloc `ip`, `srp.nom`), pas de service `_halo-pont._udp` en v1 ; `json cle nouvelle` exige un `id` mais pas le mode machine.
-- Client de banc : `tools/halo_udp.py` (cle par l'USB, session, commandes, test `refus`).
-- Reste : essais au banc de la phase 2 (app macOS, source "Reseau" :
-  implementee le 25/09 sur la branche `source-reseau`, voir plus bas et
-  docs/PROTOCOLE-JSON.md 10 ; essais au banc a venir), puis phase 3 (iOS).
+**New: the OMR is already moving.** At 19 h 33, the Aqara was announcing `omr=fd77:9e:f4bb::/64` and a low RIO for this prefix. At 19 h 55, it announces `omr=fd0d:eec8:5ef:1::/64` and a medium RIO for this one only. The Apple border routers and all the nodes stay on `fd77`. The Aqara appears to have left the Apple partition. If `fd77` really was its prefix, the Apple border routers will publish their own and the bridge's address will change: that is the R5 case under real conditions, and the monitoring will catch it.
 
-# 1. Verdict : GO, si l'experience de la section 2 passe (passee le 24/09, voir section 0)
+**Phase 1 (firmware) written on the evening of Sep 24, validated on the bench on Sep 25 (R1; R2 partly): docs/PROTOCOLE-JSON.md 10.**
+- Reviewed by 4 agents (OpenThread concurrency, H1 security, USB non-regression, robustness), then cross-checked by 2 agents; one major bug found and fixed (responses discarded as stale).
+- Mac route: the cause is a macOS kernel bug (removed by the kernel when a border router appears unreachable, never reinstated); only a static route holds. The `tools/macos/halo-routes/` system helper (a root launchd daemon) keeps the route (docs/PROTOCOLE-JSON.md 10.1).
+- `src/h1_proto.*` (pure, 78 host-side checks with Python vectors), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (OpenThread socket, RX/TX queues, NVS key), `json_mode.cpp` now has one session per transport (USB + 2 network), allowlist `jsonp::remoteRefusal`, cache of the last 8 responses per session.
+- Deliberate deviations from this study: port **5480**; one line = one datagram (1078 bytes at most, 6LoWPAN fragmented), no splitting at 512 (to revisit after R3); discovery by the SRP name (`reseau` block `ip`, `srp.nom`), no `_halo-pont._udp` service in v1; `json cle nouvelle` requires an `id` but not machine mode.
+- Bench client: `tools/halo_udp.py` (key over USB, session, commands, `refus` test).
+- Remaining: bench tests for phase 2 (macOS app, "Network" source: implemented on Sep 25 on the `source-reseau` branch, see below and docs/PROTOCOLE-JSON.md 10; bench tests still to come), then phase 3 (iOS).
 
-Rien n'empeche le chemin Mac ou iPhone -> LAN -> borne Thread Apple -> noeud. Le firmware a deja les briques necessaires : UDP OpenThread, client SRP, HMAC avec SHA materiel. Deux points ne sont pas prouves, et un troisieme bloque ce Mac aujourd'hui. Aucun code avant l'experience.
+# 1. Verdict: GO, if the experiment in section 2 passes (passed on Sep 24, see section 0)
 
-**Etat du Mac releve a 16 h 44 (lecture seule)**
-- `route -n get -inet6 fd77:9e:f4bb::1` repond toujours "not in table".
-- La liste RTI du noyau garde deux entrees marquees installees :
+Nothing rules out the Mac or iPhone -> LAN -> Apple Thread border router -> node path. The firmware already has the necessary building blocks: OpenThread UDP, SRP client, HMAC with hardware SHA. Two points are not proven, and a third is blocking this Mac today. No code before the experiment.
+
+**State of the Mac recorded at 16 h 44 (read-only)**
+- `route -n get -inet6 fd77:9e:f4bb::1` still answers "not in table".
+- The kernel's RTI list keeps two entries marked installed:
   - `fe80::cf4:afe0:c89a:397c%en0`
   - `fe80::42a:d4d9:3614:70d3%en18`
-- `561F9A6463953778.local` se resout en `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`. C'est probablement le pont : seul noeud Thread en SII/SAI 2000/2000. A confirmer en A2.
+- `561F9A6463953778.local` resolves to `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`. This is probably the bridge: the only Thread node at SII/SAI 2000/2000. To be confirmed in A2.
 
-**Risques cles, du plus bloquant au moins bloquant**
+**Key risks, from most to least blocking**
 
-1. **Route du Mac (bloquant aujourd'hui, certain).**
-   - Le noyau est dans un etat incoherent : 2 routes RTI marquees installees, aucune dans la table.
-   - XNU ne la reinstallera pas seul, meme en attendant.
-   - Cause probable, non prouvee : Wi-Fi et Ethernet USB branches sur le meme lien.
-   - 24/09 soir : avec une seule interface, la marque perimee restait. Le double branchement n'est donc pas la cause directe de l'etat bloque. Le detachement de l'interface (adaptateur USB debranche) le repare.
-   - Consequence pour l'app macOS : elle doit detecter EHOSTUNREACH/ENETDOWN et l'expliquer a l'utilisateur (remede : debrancher l'adaptateur, couper puis rallumer le Wi-Fi, ou redemarrer).
-2. **Filtrage par port dans la borne : leve le 24/09 (A3 = 5/5 REFUS).**
-   - Les Best Practices du Thread Group (section 4.1) autorisent une borne a ne laisser entrer que le trafic que les noeuds ont demande.
-   - Toutes les preuves publiques visent des ports enregistres en SRP (Matter 5540, `_hap._udp`).
-   - Si la borne filtre, le service SRP maison devient obligatoire.
-3. **Republication d'un type DNS-SD tiers par les HomePod et l'Apple TV.** Probable d'apres le code source mDNSResponder-2881, non prouve sur le logiciel reellement livre.
-4. **Cohabitation avec le client SRP de CHIP (maitrisable, mais peut casser Matter).**
-   - CHIP efface 628 octets sur chaque service retire.
-   - Un nom d'instance reste lie a un ancien hote entraine le rejet YXDOMAIN de toute la mise a jour. Matter est alors bloque jusqu'a l'expiration du bail.
-   - CHIP efface tout a chaque demarrage.
-   - Le service SRP maison reste donc une option, jamais la base.
-5. **Radio.** Chaque datagramme part en trames 802.15.4 a quelques cm du BM5602, et le lien parent est faible (parent_rssi -80). MAX_RT a mesurer (R3). Datagrammes de 512 octets au plus.
-6. **Prefixe OMR non fige.** Le prefixe actif `fd77:9e:f4bb::/64` est celui de l'Aqara Hub M100 (cle `omr=`), pas d'une borne Apple. Il peut changer. Toujours resoudre un nom, ne jamais figer l'adresse. Confirme le 24/09 a 19 h 55 : l'Aqara annonce desormais `fd0d:eec8:5ef:1::/64`, et les bornes Apple gardent `fd77`.
-7. **Flash.** Il reste 143 248 octets libres (4,6 %). La v1 est estimee entre 10 et 20 Ko (non mesure).
-8. **Cote Apple.**
-   - La confidentialite du reseau local impose une signature Apple Development.
-   - Le partage de trousseau avec une equipe gratuite est a verifier.
+1. **Mac route (blocking today, certain).**
+   - The kernel is in an inconsistent state: 2 RTI routes marked installed, none in the table.
+   - XNU will not reinstall it on its own, no matter how long you wait.
+   - Probable cause, not proven: Wi-Fi and USB Ethernet plugged into the same link.
+   - Evening of Sep 24: with a single interface, the stale mark remained. The dual connection is therefore not the direct cause of the stuck state. Detaching the interface (USB adapter unplugged) fixes it.
+   - Consequence for the macOS app: it must detect EHOSTUNREACH/ENETDOWN and explain it to the user (remedy: unplug the adapter, turn Wi-Fi off then back on, or restart).
+2. **Port filtering in the border router: lifted on Sep 24 (A3 = 5/5 REFUS).**
+   - The Thread Group's Best Practices (section 4.1) allow a border router to let in only the traffic the nodes have asked for.
+   - All the public evidence concerns ports registered via SRP (Matter 5540, `_hap._udp`).
+   - If the border router filters, our own SRP service becomes mandatory.
+3. **Republishing of a third-party DNS-SD type by the HomePods and the Apple TV.** Probable based on the mDNSResponder-2881 source code, not proven on the software actually shipped.
+4. **Coexistence with CHIP's SRP client (manageable, but could break Matter).**
+   - CHIP clears 628 bytes on every service removed.
+   - An instance name left bound to an old host causes the whole update to be rejected with YXDOMAIN. Matter is then stuck until the lease expires.
+   - CHIP clears everything on every startup.
+   - Our own SRP service therefore remains an option, never the baseline.
+5. **Radio.** Every datagram leaves as 802.15.4 frames a few cm from the BM5602, and the parent link is weak (parent_rssi -80). MAX_RT to be measured (R3). Datagrams of 512 bytes at most.
+6. **OMR prefix not fixed.** The active prefix `fd77:9e:f4bb::/64` belongs to the Aqara Hub M100 (key `omr=`), not to an Apple border router. It can change. Always resolve a name, never hardcode the address. Confirmed on Sep 24 at 19 h 55: the Aqara now announces `fd0d:eec8:5ef:1::/64`, and the Apple border routers keep `fd77`.
+7. **Flash.** 143,248 bytes remain free (4.6%). v1 is estimated at 10 to 20 KB (not measured).
+8. **Apple side.**
+   - Local network privacy requires an Apple Development signature.
+   - Keychain sharing with a free team is to be checked.
    - iOS 18 minimum (Synchronization.Mutex).
 
-# 2. Experience decisive la moins chere
+# 2. Cheapest decisive experiment
 
-## Etape A : sans flasher (environ 15 min, depuis le Mac)
+## Step A: without flashing (about 15 min, from the Mac)
 
-**A1. Remettre la route (a faire par toi)**
-1. Couper le Wi-Fi ET debrancher l'Ethernet USB, ou redemarrer le Mac.
-2. Rebrancher une seule interface et attendre 3 min (les annonces arrivent toutes les 180 s environ).
-3. Lancer `route -n get -inet6 fd77:9e:f4bb::1` puis `python3 /private/tmp/claude-501/rtilist.py`.
-   - Attendu : `gateway: fe80::...%enX`, et une seule entree avec `stateflags=0x1`.
-4. Si c'est toujours "not in table" :
-   - redemarrer le Mac ;
-   - en dernier recours, route manuelle provisoire (perdue au redemarrage) : `sudo route -n add -inet6 -prefixlen 64 fd77:9e:f4bb:: fe80::cf4:afe0:c89a:397c%en0`
-   - pour l'annuler : `sudo route -n delete -inet6 -prefixlen 64 fd77:9e:f4bb::`
-   - La suite du test reste valable, mais c'est alors un defaut macOS a documenter.
-5. Apres A3, rebrancher la seconde interface et refaire l'etape 3. Si la route disparait, le double branchement est la cause : l'app l'indiquera comme configuration non prise en charge.
+**A1. Restore the route (for you to do)**
+1. Turn off Wi-Fi AND unplug the USB Ethernet, or restart the Mac.
+2. Plug in a single interface and wait 3 min (the announcements arrive roughly every 180 s).
+3. Run `route -n get -inet6 fd77:9e:f4bb::1` then `python3 /private/tmp/claude-501/rtilist.py`.
+   - Expected: `gateway: fe80::...%enX`, and a single entry with `stateflags=0x1`.
+4. If it is still "not in table":
+   - restart the Mac;
+   - as a last resort, a provisional manual route (lost on restart): `sudo route -n add -inet6 -prefixlen 64 fd77:9e:f4bb:: fe80::cf4:afe0:c89a:397c%en0`
+   - to undo it: `sudo route -n delete -inet6 -prefixlen 64 fd77:9e:f4bb::`
+   - The rest of the test still holds, but this then becomes a macOS flaw to document.
+5. After A3, plug the second interface back in and redo step 3. If the route disappears, the dual connection is the cause: the app will flag it as an unsupported configuration.
 
-**A2. Ping et identification du pont en une fois**
-1. Terminal 1 : `ping6 -i 1 fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`
-2. Terminal 2 : `dns-sd -B _matter._tcp local.`
-3. Couper l'alimentation du pont 10 s, puis la remettre (pas de commande serie).
+**A2. Ping and bridge identification in one go**
+1. Terminal 1: `ping6 -i 1 fd77:9e:f4bb:0:6c06:6762:45d6:a3f0`
+2. Terminal 2: `dns-sd -B _matter._tcp local.`
+3. Cut power to the bridge for 10 s, then restore it (no serial command).
 
-Resultats :
-- **C'est bien le pont** : les reponses s'arretent a la coupure, ses instances `_matter` (une par fabric) passent en Rmv puis Add, et les reponses reviennent 20 a 30 s apres (pret_ms observe : environ 22 s). Le chemin IPv6 LAN -> Thread fonctionne.
-- **Les reponses ne s'arretent pas** : ce n'est pas le pont. Faire `dns-sd -L <instance> _matter._tcp local.` sur les instances passees en Rmv/Add, puis `dns-sd -G v6 <HOTE>.local`.
-- **Aucune reponse alors que la route est valide** : essayer d'autres bornes comme passerelle manuelle (`fe80::cb5:8b5f:9a0a:cf65`, `fe80::c62:3ffd:fab3:fed`, `fe80::8be:d542:2b01:7560`). Si aucune ne passe alors qu'Apple Home fonctionne : NO-GO par les bornes, voir la section 4.
+Results:
+- **It really is the bridge**: the responses stop at power-off, its `_matter` instances (one per fabric) go to Rmv then Add, and the responses come back 20 to 30 s later (pret_ms observed: about 22 s). The IPv6 LAN -> Thread path works.
+- **The responses do not stop**: this is not the bridge. Run `dns-sd -L <instance> _matter._tcp local.` on the instances that went to Rmv/Add, then `dns-sd -G v6 <HOTE>.local`.
+- **No response even though the route is valid**: try other border routers as the manual gateway (`fe80::cb5:8b5f:9a0a:cf65`, `fe80::c62:3ffd:fab3:fed`, `fe80::8be:d542:2b01:7560`). If none works even though Apple Home does: NO-GO via the border routers, see section 4.
 
-**A3. UDP vers un port ferme quelconque (40000, hors de la plage ephemere d'OpenThread)**
-- Commande : `python3 /private/tmp/claude-501/halo_udp_test.py refus fd77:9e:f4bb:0:6c06:6762:45d6:a3f0 40000 5` (script verifie en local).
-- **5/5 "REFUS"** : lwIP a renvoye un ICMPv6 "port injoignable", donc un port non annonce traverse la borne. GO pour une v1 sans service SRP.
-- **"DELAI" alors que A2 repond** : filtrage par port probable. Ce n'est pas concluant seul, car l'ICMP d'erreur peut se perdre. L'etape B tranche.
-- **"ERREUR 65"** : la route est perdue, revenir a A1.
+**A3. UDP to some arbitrary closed port (40000, outside OpenThread's ephemeral range)**
+- Command: `python3 /private/tmp/claude-501/halo_udp_test.py refus fd77:9e:f4bb:0:6c06:6762:45d6:a3f0 40000 5` (script verified locally).
+- **5/5 "REFUS"**: lwIP returned an ICMPv6 "port unreachable", so an unannounced port does get through the border router. GO for a v1 without an SRP service.
+- **"DELAI" while A2 responds**: port filtering likely. This is not conclusive by itself, since the ICMP error can get lost. Step B settles it.
+- **"ERREUR 65"**: the route is lost, go back to A1.
 
-## Etape B : sonde firmware de banc
+## Step B: bench firmware probe
 
-A faire seulement si A3 n'a pas donne "REFUS", ou pour valider le SRP et la radio. C'est toi qui flashes par USB. Taille : 2 a 4 Ko, sous `#if MATTER_NET_THREAD`, en commandes humaines seulement.
+To be done only if A3 did not give "REFUS", or to validate SRP and the radio. You are the one flashing over USB. Size: 2 to 4 KB, under `#if MATTER_NET_THREAD`, human commands only.
 
-**Ce que fait la sonde**
-- `udp test <port>` :
-  - ouvre un socket otUdp lie a `OT_NETIF_THREAD_INTERNAL`, sur un port fixe inferieur a 49152 (proposition : 5480, a fixer) ;
-  - le rappel de reception, qui tourne dans ot_task, ne fait que copier le message dans une file de 2 places ;
-  - la tache loop renvoie l'echo sous `otLockTry(0)`.
-- `udp etat` affiche :
-  - les adresses OMR et ML-EID ;
-  - le nom d'hote SRP (`otSrpClientGetHostInfo()->mName`) ;
-  - l'etat de notre service ;
-  - les compteurs rx, tx, pertes et erreurs, et le minimum de tampons OT libres.
-- `udp srp on|off` ajoute ou retire `_halo-pont._udp` :
-  - nom d'instance derive du nom d'hote SRP ;
-  - service place dans une zone statique alignee de 768 octets ;
-  - ajout seulement si l'hote et au moins un service CHIP sont Registered ;
-  - si le service reste en attente plus de 60 s : `otSrpClientClearService`.
-- `udp stop` ferme le tout.
+**What the probe does**
+- `udp test <port>`:
+  - opens an otUdp socket bound to `OT_NETIF_THREAD_INTERNAL`, on a fixed port below 49152 (proposed: 5480, to be finalized);
+  - the receive callback, which runs inside ot_task, only copies the message into a 2-slot queue;
+  - the loop task sends the echo back under `otLockTry(0)`.
+- `udp etat` displays:
+  - the OMR and ML-EID addresses;
+  - the SRP host name (`otSrpClientGetHostInfo()->mName`);
+  - the state of our service;
+  - the rx, tx, loss, and error counters, and the minimum of free OT buffers.
+- `udp srp on|off` adds or removes `_halo-pont._udp`:
+  - instance name derived from the SRP host name;
+  - service placed in an aligned 768-byte static zone;
+  - added only if the host and at least one CHIP service are Registered;
+  - if the service stays pending for more than 60 s: `otSrpClientClearService`.
+- `udp stop` closes everything.
 
-**B1. Echo sans SRP**
-- Sur le pont : `udp test 5480`.
-- Sur le Mac : `python3 /private/tmp/claude-501/halo_udp_test.py echo <OMR> 5480 16 256 512 1024 1232` (100 envois par taille, 1 par seconde).
-- **Echos recus** : un port quelconque passe (confirme A3). Noter les pertes et le RTT par taille.
-- **Rien, et `udp etat` montre rx=0** : la borne filtre, passer a B2.
-- **rx augmente mais aucun echo** : probleme d'adresse source au retour (verifier `mSockAddr`).
+**B1. Echo without SRP**
+- On the bridge: `udp test 5480`.
+- On the Mac: `python3 /private/tmp/claude-501/halo_udp_test.py echo <OMR> 5480 16 256 512 1024 1232` (100 sends per size, 1 per second).
+- **Echoes received**: any arbitrary port gets through (confirms A3). Note the losses and the RTT per size.
+- **Nothing, and `udp etat` shows rx=0**: the border router filters, move on to B2.
+- **rx increases but no echo**: source-address problem on the way back (check `mSockAddr`).
 
-**B2. Service SRP**
-- Sur le pont : `udp srp on`. `json reseau` doit montrer hote Registered et 3 services sur 3 enregistres.
-- Sur le Mac : `dns-sd -B _halo-pont._udp local.` puis `dns-sd -L Halo-... _halo-pont._udp local.`
-- **Instance visible, port 5480, hote `<HOTE>.local`** : les bornes republient un type tiers, la decouverte DNS-SD est possible.
-- **Enregistre (3/3) mais invisible depuis le Mac** : les bornes ne republient pas ce type, passer au repli F1 ou F2 (section 4).
-- **Reste en Adding, avec "SRP update error" dans `chiplog`** : le serveur rejette la mise a jour. Faire `udp srp off` tout de suite et verifier qu'Apple Home repond.
-- Refaire ensuite B1 avec le service enregistre : si l'echo ne passe qu'avec le service, le service SRP est obligatoire.
+**B2. SRP service**
+- On the bridge: `udp srp on`. `json reseau` should show the host Registered and 3 out of 3 services registered.
+- On the Mac: `dns-sd -B _halo-pont._udp local.` then `dns-sd -L Halo-... _halo-pont._udp local.`
+- **Instance visible, port 5480, host `<HOTE>.local`**: the border routers do republish a third-party type, DNS-SD discovery is possible.
+- **Registered (3/3) but invisible from the Mac**: the border routers do not republish this type, fall back to F1 or F2 (section 4).
+- **Stays in Adding, with "SRP update error" in `chiplog`**: the server rejects the update. Run `udp srp off` right away and check that Apple Home still responds.
+- Then redo B1 with the service registered: if the echo only gets through with the service, the SRP service is mandatory.
 
-**B3. Robustesse**
-- Redemarrer le pont : notre service se re-enregistre seul en moins de 60 s, et les services Matter restent intacts.
-- `udp srp off` ne provoque pas de plantage.
-- Apple Home reste reactif pendant tout le test.
+**B3. Robustness**
+- Restart the bridge: our service re-registers on its own in under 60 s, and the Matter services stay intact.
+- `udp srp off` does not cause a crash.
+- Apple Home stays responsive throughout the test.
 
-**B4. Radio (test R3)** : echo de 512 octets par seconde pendant 10 min, puis 10 min sans echo. Comparer `compteurs.pilote.tx.max_rt` et les livraisons de la lampe.
+**B4. Radio (test R3)**: 512-byte echo once a second for 10 min, then 10 min with no echo. Compare `compteurs.pilote.tx.max_rt` against the lamp's deliveries.
 
-**B5. iPhone (facultatif ici)** : build de test avec un `NWConnection` UDP vers `<OMR>:5480`, sur un vrai iPhone (le simulateur ne gere pas l'autorisation reseau local).
+**B5. iPhone (optional here)**: a test build with a UDP `NWConnection` to `<OMR>:5480`, on a real iPhone (the simulator does not handle the local network permission).
 
 ## Decision
 
-| Resultat | Decision |
+| Result | Decision |
 |---|---|
-| A1, A2 OK et A3 "REFUS" (ou B1 OK) | GO. v1 avec decouverte par nom d'hote appris en USB ; service SRP en option |
-| B1 echoue sans SRP mais passe avec | GO. Service SRP obligatoire, risques 3 et 4 a encadrer |
-| B2 invisible et B1 echoue | NO-GO par les bornes Apple, voir section 4 |
-| A2 echoue avec une route valide | NO-GO, voir section 4 |
-| Route du Mac instable avec deux interfaces | GO pour l'iPhone et pour un Mac a une seule interface ; message dans l'app |
-| MAX_RT nettement en hausse en B4 | GO avec un profil distant reduit : periode plus longue, datagrammes plus petits |
+| A1, A2 OK and A3 "REFUS" (or B1 OK) | GO. v1 with discovery by the host name learned over USB; SRP service optional |
+| B1 fails without SRP but passes with it | GO. SRP service mandatory, risks 3 and 4 to be managed |
+| B2 invisible and B1 fails | NO-GO via the Apple border routers, see section 4 |
+| A2 fails with a valid route | NO-GO, see section 4 |
+| Mac route unstable with two interfaces | GO for the iPhone and for a single-interface Mac; message in the app |
+| MAX_RT clearly rising in B4 | GO with a reduced remote profile: longer period, smaller datagrams |
 
-# 3. Mise en oeuvre (si GO)
+# 3. Implementation (if GO)
 
-## Phase 0 : documentation
+## Phase 0: documentation
 
-Corriger la section 10 avant d'ecrire du code (details en fin de section).
+Fix section 10 before writing any code (details at the end of the section).
 
-## Phase 1 : firmware
+## Phase 1: firmware
 
-**1a. Champs USB, sans risque (moins de 1 Ko)**
-- Ajouter a `json reseau` et a `matter` : le nom d'hote SRP, les adresses (OMR avec leur origine) et le port UDP.
-- Aujourd'hui, seul l'etat SRP est expose (matter_bridge.cpp:1532 et 2230).
+**1a. USB fields, no risk (under 1 KB)**
+- Add to `json reseau` and to `matter`: the SRP host name, the addresses (OMR with their origin), and the UDP port.
+- Today, only the SRP state is exposed (matter_bridge.cpp:1532 and 2230).
 
 **1b. `src/net_udp.{h,cpp}`**
-- Socket otUdp sur le port fixe.
-- File de reception de 2 places d'environ 560 octets.
-- Emission depuis la tache loop sous `otLockTry(0)`, une seule en vol, gestion de `NULL` et `OT_ERROR_NO_BUFS`.
-- Compteurs, et `udp` ajoute a `kFree` (cli.cpp:359).
-- Dans le rappel de reception : jamais de verrou CHIP, jamais de `Serial`.
+- otUdp socket on the fixed port.
+- 2-slot receive queue of about 560 bytes.
+- Transmission from the loop task under `otLockTry(0)`, one in flight at a time, handling `NULL` and `OT_ERROR_NO_BUFS`.
+- Counters, and `udp` added to `kFree` (cli.cpp:359).
+- In the receive callback: never a CHIP lock, never `Serial`.
 
-**1c. `src/h1.{h,cpp}` : enveloppe H1 (section 10.4)**
-- Poignee de main SALUT/DEFI, 1 session provisoire et 2 etablies.
-- Fenetre de 32, 2 DEFI par seconde au total, oubli apres 10 min, cache des 8 dernieres reponses.
-- HMAC avec `mbedtls_md_hmac` (SHA materiel), comparaison en temps constant ecrite par nous sur 16 octets.
-- Cle partagee en NVS `halo1/cle`, commandes `json cle nouvelle|cle|efface` par USB (emplacement deja reserve a json_mode.cpp:916).
+**1c. `src/h1.{h,cpp}`: H1 envelope (section 10.4)**
+- SALUT/DEFI (hello/challenge) handshake, 1 provisional session and 2 established.
+- Window of 32, 2 DEFI per second total, forgotten after 10 min, cache of the last 8 responses.
+- HMAC with `mbedtls_md_hmac` (hardware SHA), constant-time comparison written by us over 16 bytes.
+- Shared key in NVS `halo1/cle`, commands `json cle nouvelle|cle|efface` over USB (slot already reserved at json_mode.cpp:916).
 
-**1d. `json_mode` : le plus gros morceau**
-- Aujourd'hui, une seule session machine ecrit directement dans `Serial` (json_mode.cpp:98-114, 608, 703).
-- Il faut :
-  - une sortie par session (USB, et 2 sessions reseau) ;
-  - le profil distant (10.6) ;
-  - la liste blanche 10.5 appliquee par la carte, qui fait foi (`PolitiqueCommandes` cote app n'est qu'un confort) ;
-  - le decoupage des messages en 512 octets au plus.
+**1d. `json_mode`: the biggest piece**
+- Today, a single machine session writes directly to `Serial` (json_mode.cpp:98-114, 608, 703).
+- It needs:
+  - one output per session (USB, and 2 network sessions);
+  - the remote profile (10.6);
+  - the 10.5 allowlist enforced by the board, which is authoritative (`PolitiqueCommandes` on the app side is only a convenience);
+  - splitting messages into at most 512 bytes.
 
-**1e. Service `_halo-pont._udp` (seulement si B2 passe)**
-- Desactivable, avec les gardes de B2 : zone de 768 octets, garde de 60 s, nom d'instance derive du nom d'hote.
-- Re-ajout apres chaque `_ClearSrpHost` de CHIP.
+**1e. `_halo-pont._udp` service (only if B2 passes)**
+- Can be disabled, with the same guards as B2: 768-byte zone, 60 s guard, instance name derived from the host name.
+- Re-added after every CHIP `_ClearSrpHost`.
 
-**Taille estimee (non mesuree)**
-- Flash : 10 a 20 Ko sur les 143 Ko libres.
-- RAM : 5 a 7 Ko sur environ 128 Ko de tas libre (minimum mesure : 91 Ko).
-- Pas de tache supplementaire avec otUdp.
+**Estimated size (not measured)**
+- Flash: 10 to 20 KB out of the 143 KB free.
+- RAM: 5 to 7 KB out of about 128 KB of free heap (measured minimum: 91 KB).
+- No extra task with otUdp.
 
-## Phase 2 : app macOS
+## Phase 2: macOS app
 
-Implementee le 25/09/2026 sur la branche `source-reseau`, fusionnee puis
-essayee au banc avec Majid le 25/09 (resultats ci-dessous et dans le README
-de l'app ; voir aussi docs/PROTOCOLE-JSON.md 10). Ecart assume
-par rapport au plan ci-dessous : pas de nouveau framework `HaloReseau`
-separe ; `EnveloppeH1`, `ErreurReseau` et `TransportUDP` vivent dans
-`HaloProtocole` (`Reseau/`, `Transport/TransportUDP.swift`), qui deviendra
-multiplateforme en phase 3.
+Implemented on Sep 25, 2026 on the `source-reseau` branch, merged and then
+bench-tested with Majid on Sep 25 (results below and in the app's README;
+see also docs/PROTOCOLE-JSON.md 10). Deliberate deviation from the plan
+below: no new, separate `HaloReseau` framework; `EnveloppeH1`, `ErreurReseau`,
+and `TransportUDP` live inside `HaloProtocole` (`Reseau/`,
+`Transport/TransportUDP.swift`), which will become cross-platform in phase 3.
 
-**Plan initial (24/09) : nouveau framework `HaloReseau` (macOS et iOS)**
-- `EnveloppeH1`, avec des vecteurs de test communs au firmware.
-- `TransportUDP: Transport`, sur `NWConnection`.
-- `DecouverteHalo` : `<HOTE>.local` et port appris par USB ; `NWBrowser` seulement si B2 passe.
+**Initial plan (Sep 24): new `HaloReseau` framework (macOS and iOS)**
+- `EnveloppeH1`, with test vectors shared with the firmware.
+- `TransportUDP: Transport`, over `NWConnection`.
+- `DecouverteHalo`: `<HOTE>.local` and port learned over USB; `NWBrowser` only if B2 passes.
 - `TrousseauCle`.
-- Le squelette compile deja : `/private/tmp/halo-apple/verif/TransportUDP.swift` (283 lignes).
+- The skeleton already compiles: `/private/tmp/halo-apple/verif/TransportUDP.swift` (283 lines).
 
 **`Pont`**
-- Nouvelle source `Source.reseau`.
-- Reconnexion au reveil du Mac, au changement de chemin reseau et apres un silence (`.rouvrir`).
-- Messages clairs pour EHOSTUNREACH/ENETDOWN ("pas de route IPv6 vers le reseau Thread") et pour `localNetworkDenied`.
+- New source `Source.reseau`.
+- Reconnection on Mac wake, on network path change, and after a silence (`.rouvrir`).
+- Clear messages for EHOSTUNREACH/ENETDOWN ("no IPv6 route to the Thread network") and for `localNetworkDenied`.
 
-**Projet**
-- Droit `com.apple.security.network.client`.
-- `NSLocalNetworkUsageDescription`, plus `NSBonjourServices` dans une Info.plist partielle si l'app navigue en DNS-SD.
-- Signature Apple Development.
-- La navigation ne demarre que quand l'utilisateur choisit la source "Reseau", pour ne pas montrer l'alerte aux utilisateurs USB.
+**Project**
+- Entitlement `com.apple.security.network.client`.
+- `NSLocalNetworkUsageDescription`, plus `NSBonjourServices` in a partial Info.plist if the app browses via DNS-SD.
+- Apple Development signing.
+- Browsing only starts once the user picks the "Network" source, so as not to show the alert to USB users.
 
-**Taille estimee** : 800 a 1200 lignes Swift avec les tests (non mesure).
+**Estimated size**: 800 to 1200 lines of Swift including tests (not measured).
 
-## Phase 3 : iOS
+## Phase 3: iOS
 
-- `HaloProtocole` passe en multiplateforme, et `Pont` sort d'AppKit et d'IOKit.
+- `HaloProtocole` goes cross-platform, and `Pont` moves out of AppKit and IOKit.
 - iOS 18 minimum.
-- `json 0` et coupure au passage en arriere-plan, reconnexion au retour.
-- Cellulaire exclu.
-- Cle par le trousseau iCloud, ou par QR code a defaut.
+- `json 0` and disconnect when going to the background, reconnect on return.
+- Cellular excluded.
+- Key via the iCloud keychain, or via QR code failing that.
 
-## Phase 4 : tests (a ajouter en section 11)
+## Phase 4: tests (to be added to section 11)
 
-- **R1** : decouverte, par nom d'hote puis par `_halo-pont._udp`.
-- **R2** : message rejoue, mauvaise cle, mauvais sens et commande hors liste blanche rejetes comme `interdite`.
-- **R3** : MAX_RT avec et sans client distant.
-- **R4** : debrancher la borne passerelle et chronometrer la reprise.
-- **R5** : redemarrage du pont et changement d'OMR, suivis d'une nouvelle resolution.
-- **R6** : Mac branche sur deux interfaces.
-- **R7** : refus de l'autorisation reseau local, avec message clair.
-- **R8** : 1000 commandes (pertes, RTT, reponse rejouee sans reexecution).
+- **R1**: discovery, by host name then by `_halo-pont._udp`.
+- **R2**: replayed message, wrong key, wrong direction, and command outside the allowlist rejected as `interdite`.
+- **R3**: MAX_RT with and without a remote client.
+- **R4**: unplug the gateway border router and time the recovery.
+- **R5**: bridge restart and OMR change, followed by a new resolution.
+- **R6**: Mac connected on two interfaces.
+- **R7**: local network permission denied, with a clear message.
+- **R8**: 1000 commands (losses, RTT, replayed response without re-execution).
 
-## Changements dans docs/PROTOCOLE-JSON.md
+## Changes to docs/PROTOCOLE-JSON.md
 
 - **10.1**
-  - Le "A verifier" est resolu : CHIP attache deja l'interface Thread a lwIP.
-  - Ajouter que le client doit avoir la route RIO vers l'OMR (meme lien que les bornes), et que l'OMR peut venir d'une borne tierce et changer.
+  - The "to check" note is resolved: CHIP already attaches the Thread interface to lwIP.
+  - Add that the client must have the RIO route to the OMR (same link as the border routers), and that the OMR can come from a third-party border router and can change.
 - **10.2**
-  - Port fixe inferieur a 49152 : 52540 est dans la plage ephemere d'OpenThread (49152 a 65535).
-  - Voie otUdp au lieu de `sendto` et d'une tache dediee : `sendto` attend deux fois le verrou OT sans limite de temps, avec le verrou du coeur lwIP tenu.
-  - Datagramme conseille : 512 octets, 1232 au plus. Gerer NO_BUFS.
+  - Fixed port below 49152: 52540 is inside OpenThread's ephemeral range (49152 to 65535).
+  - otUdp path instead of `sendto` and a dedicated task: `sendto` waits twice on the OT lock with no time limit, while holding the lwIP core lock.
+  - Recommended datagram: 512 bytes, 1232 at most. Handle NO_BUFS.
 - **10.3**
-  - Retirer l'argument "MAX_SERVICES=5" : ce n'est que la reserve de tampons.
-  - Decouverte de base : nom d'hote SRP `<16 hexa>.local` et port, donnes par `json reseau` en USB et gardes par l'app avec la cle.
-  - `_halo-pont._udp` devient optionnel, avec ses gardes.
-  - `thread.srp.services` passe a 3.
+  - Remove the "MAX_SERVICES=5" argument: it is only the buffer reserve.
+  - Basic discovery: SRP host name `<16 hexa>.local` and port, given by `json reseau` over USB and kept by the app along with the key.
+  - `_halo-pont._udp` becomes optional, with its guards.
+  - `thread.srp.services` moves to 3.
 - **10.4**
-  - MAC tronque compare par notre propre code des deux cotes : CryptoKit refuse un MAC tronque.
-  - Publier un vecteur de test.
-- **10.5** : liste blanche appliquee par la carte ; ajouter `udp` aux commandes interdites.
-- **10.6** : cadences et tailles a fixer apres R3.
-- **Section 5** : nouveaux champs `thread.srp.nom`, `thread.omr` et un bloc `udp` (port, sessions, rx, tx, pertes, tampons_min).
+  - Truncated MAC compared by our own code on both sides: CryptoKit refuses a truncated MAC.
+  - Publish a test vector.
+- **10.5**: allowlist enforced by the board; add `udp` to the forbidden commands.
+- **10.6**: rate limits and sizes to be fixed after R3.
+- **Section 5**: new fields `thread.srp.nom`, `thread.omr`, and a `udp` block (port, sessions, rx, tx, pertes, tampons_min).
 
-# 4. Replis
+# 4. Fallbacks
 
-- **F1. La borne route mais ne republie pas notre service.**
-  - La decouverte par nom d'hote SRP fonctionne quand meme ; c'est de toute facon la base de la v1.
-  - Le nom change apres une nouvelle mise en service, peut-etre aussi apres un changement de reseau Thread (a verifier). L'app le relit a chaque branchement USB.
-- **F2. Enregistrement operationnel Matter.**
-  - Le pont publie deja une instance `_matter._tcp` par fabric, de la forme `<CompressedFabricId>-<NodeId>`, et les bornes la republient.
-  - La carte la donnerait par USB, depuis la table des fabrics.
-  - L'app fait `-L` sur ce nom pour obtenir l'hote puis l'AAAA, et parle ensuite a notre port.
-  - Survit a un changement de nom d'hote tant que la fabric existe, sans rien ajouter en SRP. Suppose que la borne ne filtre pas les ports.
-- **F3. Adresse IPv6 saisie a la main, ou derniere OMR lue par USB.** Depannage seulement : casse au changement d'OMR.
-- **F4. La borne filtre les ports ET ne republie pas notre service.**
-  - Pas de chemin propre par les bornes Apple : on garde l'USB.
-  - Derniere option, a reevaluer : l'env esp32c6supermini (Matter sur Wi-Fi, UDP direct sur le LAN).
-  - Mais Thread est alors abandonne.
-  - Et le canal Wi-Fi 1 (2402 a 2422 MHz) recouvre la lampe a 2405 MHz : il faudrait imposer les canaux 6 a 11 (a verifier sur la box).
-- **F5. Ce Mac ne garde pas la route.** Passer par l'iPhone (une seule interface) ou un Mac a une seule interface. L'app macOS retombe sur l'USB et explique pourquoi.
+- **F1. The border router routes but does not republish our service.**
+  - Discovery by the SRP host name still works; it is the v1 baseline anyway.
+  - The name changes after a new commissioning, maybe also after a Thread network change (to be checked). The app rereads it on every USB connection.
+- **F2. Matter's operational registration.**
+  - The bridge already publishes one `_matter._tcp` instance per fabric, of the form `<CompressedFabricId>-<NodeId>`, and the border routers do republish it.
+  - The board would provide it over USB, from the fabric table.
+  - The app does a `-L` on this name to get the host then the AAAA, and then talks to our port.
+  - Survives a host-name change as long as the fabric exists, without adding anything to SRP. Assumes the border router does not filter ports.
+- **F3. IPv6 address entered by hand, or last OMR read over USB.** Troubleshooting only: breaks when the OMR changes.
+- **F4. The border router filters ports AND does not republish our service.**
+  - No clean path via the Apple border routers: we keep USB.
+  - Last option, to be reassessed: the esp32c6supermini env (Matter over Wi-Fi, direct UDP on the LAN).
+  - But Thread is then abandoned.
+  - And Wi-Fi channel 1 (2402 to 2422 MHz) overlaps the lamp at 2405 MHz: channels 6 to 11 would need to be forced (to be checked on the router).
+- **F5. This Mac does not hold the route.** Go through the iPhone (single interface) or a single-interface Mac. The macOS app falls back to USB and explains why.
 
-Aucun fichier du depot n'a ete modifie, rien n'a ete flashe et aucun port serie n'a ete ouvert. Script de test ajoute : `/private/tmp/claude-501/halo_udp_test.py`.
+No file in the repository was modified, nothing was flashed, and no serial port was opened. Test script added: `/private/tmp/claude-501/halo_udp_test.py`.
 
 ---
 
-## Verification sceptique
+## Skeptical verification
 
-**Contre-expertise des cinq hypothèses du go/no-go (Thread via les bornes Apple)**
+**Counter-review of the five go/no-go hypotheses (Thread via the Apple border routers)**
 
-Recherche en lecture seule. Je n'ai rien modifié dans le dépôt, rien flashé et ouvert aucun port série. Aucun paquet n'a atteint le nœud : le seul essai UDP a échoué au `connect` sur « No route to host ». Mes fichiers de travail sont dans `/private/tmp/claude-501/skeptic/`.
+Read-only research. I did not modify anything in the repository, flash anything, or open any serial port. No packet reached the node: the only UDP attempt failed at `connect` with "No route to host". My working files are in `/private/tmp/claude-501/skeptic/`.
 
-## Synthèse
+## Summary
 
-| # | Hypothèse | Verdict |
+| # | Hypothesis | Verdict |
 |---|---|---|
-| 1 | Les bornes Apple font passer n'importe quel UDP entre le LAN et Thread | **Incertain.** L'annonce de route est confirmée. Le passage vers les ports enregistrés en SRP (5540) est confirmé ailleurs. Rien ne prouve le passage vers un port non annoncé. |
-| 2 | Le proxy des bornes republie un service SRP maison | **Probable, non prouvé.** Le code source ne filtre pas par type ; le logiciel livré sur les bornes n'est pas vérifié. |
-| 3 | Un second service SRP peut vivre à côté de ceux de CHIP | **Oui, sous conditions.** Les dangers sont confirmés, et j'en ajoute un. L'affirmation du rapport « apple-br » sur ce point est réfutée. |
-| 4 | Les sockets lwIP marchent sur l'interface Thread de ce build | **Confirmé**, avec les mises en garde du rapport « firmware », toutes vérifiées. |
-| 5 | Règles de confidentialité du réseau local sur iOS et macOS | **Confirmé sur le fond.** En revanche, les tests du rapport « app » ne vérifiaient pas ce point. |
-| — | Ce Mac joint le réseau Thread aujourd'hui | **Non.** C'est un état bloqué du noyau du Mac, et attendre ne le réparera pas. |
+| 1 | The Apple border routers pass any UDP traffic between the LAN and Thread | **Uncertain.** The route announcement is confirmed. Passage to ports registered via SRP (5540) is confirmed elsewhere. Nothing proves passage to an unannounced port. |
+| 2 | The border routers' proxy republishes our own SRP service | **Probable, not proven.** The source code does not filter by type; the software shipped on the border routers is not verified. |
+| 3 | A second SRP service can live alongside CHIP's | **Yes, under conditions.** The dangers are confirmed, and I add one more. The "apple-br" report's claim on this point is refuted. |
+| 4 | lwIP sockets work on this build's Thread interface | **Confirmed**, with the caveats from the "firmware" report, all verified. |
+| 5 | Local network privacy rules on iOS and macOS | **Confirmed in substance.** However, the "app" report's tests did not check this point. |
+| — | This Mac reaches the Thread network today | **No.** This is a stuck state in the Mac's kernel, and waiting will not fix it. |
 
-Deux erreurs dans les rapports :
-- **Le rapport « app » vise le mauvais nœud.** `32E1CCA9C1A0F448` annonce SII=6000 SAI=1100 SAT=500, comme 10 autres hôtes (autres marques), sur une seule fabric. Ce nom ne se résout même plus.
-- **Le nœud du rapport « apple-br » est probablement le bon.** `561F9A6463953778` → `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0` est le seul nœud Thread qui annonce les valeurs 2000/2000 du sdkconfig. L'autre hôte en 2000/2000 est le hub Aqara lui-même : `54EF448D15E50000.local`, port 5552, T=6, fabric à part. C'est à confirmer par USB ; ce n'est pas prouvé. Script : `/private/tmp/claude-501/skeptic/txt.py`.
+Two mistakes in the reports:
+- **The "app" report targets the wrong node.** `32E1CCA9C1A0F448` announces SII=6000 SAI=1100 SAT=500, like 10 other hosts (other brands), on a single fabric. This name does not even resolve anymore.
+- **The node in the "apple-br" report is probably the right one.** `561F9A6463953778` → `fd77:9e:f4bb:0:6c06:6762:45d6:a3f0` is the only Thread node announcing the sdkconfig's 2000/2000 values. The other host at 2000/2000 is the Aqara hub itself: `54EF448D15E50000.local`, port 5552, T=6, a separate fabric. This is to be confirmed over USB; it is not proven. Script: `/private/tmp/claude-501/skeptic/txt.py`.
 
-## Le Mac : pourquoi la route manque, et pourquoi attendre ne suffit pas
+## The Mac: why the route is missing, and why waiting is not enough
 
-- Relevé à nouveau à 16 h : `route -n get -inet6 fd77:9e:f4bb::1` → « not in table ». `ping6` et `connect` UDP → EHOSTUNREACH.
-- **Deux entrées marquées « installée » à la fois.** La liste des routes annoncées du noyau (`rtilist.py`) a deux entrées en `stateflags=0x1`, sans marque « scoped » : `fe80::cf4:afe0:c89a:397c%en0` et `fe80::42a:d4d9:3614:70d3%en18`.
-- **Le noyau ne tient qu'une seule route par préfixe.** XNU installe ces routes sans les lier à une interface (`nd6_rtr.c`, `defrouter_select` : « XXX For now we treat RTI routes as un-scoped »). Deux marques en même temps sont donc incohérentes. `defrouter_select` journalise d'ailleurs ce cas comme « this should not happen » (« more than one » routeur installé).
-- **Le noyau ne la réinstallera jamais seul.** `defrouter_addreq` sort sur « already installed » dès que la marque est posée, et ne la pose qu'après un `rtrequest` réussi. La route a donc été supprimée après coup sans que la marque soit effacée. Les annonces rafraîchies toutes les ~180 s ne la remettront pas : « débrancher en18 et attendre 3 min » ne suffit pas, parce que l'entrée en0 garde sa marque.
-- 200 s d'écoute de `route -n monitor` : aucun événement fd77.
-- **Test qui tranche (à faire par toi) :**
-  1. Couper le Wi‑Fi **et** débrancher l'Ethernet USB (ou redémarrer), puis rebrancher une seule interface.
-  2. Vérifier que `route -n get -inet6 fd77:9e:f4bb::1` donne une passerelle `fe80::…%enX`.
-  3. Rebrancher la seconde interface et relancer ce test. Si la route disparaît, le double branchement sur le même réseau est la cause. Il faudra alors l'indiquer comme configuration non prise en charge par l'app macOS.
+- Checked again at 16 h: `route -n get -inet6 fd77:9e:f4bb::1` → "not in table". `ping6` and UDP `connect` → EHOSTUNREACH.
+- **Two entries marked "installed" at the same time.** The kernel's list of announced routes (`rtilist.py`) has two entries at `stateflags=0x1`, with no "scoped" mark: `fe80::cf4:afe0:c89a:397c%en0` and `fe80::42a:d4d9:3614:70d3%en18`.
+- **The kernel keeps only one route per prefix.** XNU installs these routes without tying them to an interface (`nd6_rtr.c`, `defrouter_select`: "XXX For now we treat RTI routes as un-scoped"). Two marks at the same time are therefore inconsistent. `defrouter_select` even logs this case as "this should not happen" ("more than one" router installed).
+- **The kernel will never reinstall it on its own.** `defrouter_addreq` bails out on "already installed" as soon as the mark is set, and only sets it after a successful `rtrequest`. The route was therefore removed afterward without the mark being cleared. The announcements refreshed roughly every 180 s will not bring it back: "unplug en18 and wait 3 min" is not enough, because the en0 entry keeps its mark.
+- 200 s of listening to `route -n monitor`: no fd77 event.
+- **Decisive test (for you to do):**
+  1. Turn off Wi‑Fi **and** unplug the USB Ethernet (or restart), then plug in a single interface.
+  2. Check that `route -n get -inet6 fd77:9e:f4bb::1` gives a `fe80::…%enX` gateway.
+  3. Plug the second interface back in and rerun this test. If the route disappears, the dual connection on the same network is the cause. It will then need to be flagged as a configuration not supported by the macOS app.
 
-## 1. Passage de n'importe quel UDP par les bornes Apple : incertain
+## 1. Passage of any UDP traffic through the Apple border routers: uncertain
 
-**Confirmé :**
-- Les bornes annoncent la route : `fd77:9e:f4bb::/64`, 5 bornes Apple × 2 interfaces en préférence moyenne, plus l'Aqara en basse, durée 1800 s.
-- La prise en charge de ces annonces par XNU est notée « since xnu-7195 » (macOS 11 / iOS 14) dans un tableau tiers.
+**Confirmed:**
+- The border routers announce the route: `fd77:9e:f4bb::/64`, 5 Apple border routers × 2 interfaces at medium preference, plus the Aqara at low, lifetime 1800 s.
+- XNU's support for these announcements is noted as "since xnu-7195" (macOS 11 / iOS 14) in a third-party table.
 
-**Ce qui fragilise l'hypothèse :**
-- Le guide « Thread Border Router Best Practices » (Thread Group, §4.1) dit : « MUST ensure that only ingress traffic enters a Thread network that Thread hosts have expressed interest in ». Une borne peut donc légitimement ne laisser entrer que les ports annoncés en SRP.
-- Toutes les preuves publiques de passage par une borne Apple visent des ports enregistrés en SRP : Matter 5540 (python-matter-server) et `_hap._udp` (HomeKit Controller).
-- Sur ce réseau, rien ne montre un autre port : 57 des 58 services `_matter._tcp` sont sur 5540 (le 58e est l'Aqara, sur le réseau local), et il n'y a aucun `_hap._udp` (`hap.py`).
+**What weakens the hypothesis:**
+- The "Thread Border Router Best Practices" guide (Thread Group, §4.1) says: "MUST ensure that only ingress traffic enters a Thread network that Thread hosts have expressed interest in". A border router can therefore legitimately let in only the ports announced via SRP.
+- All the public evidence of passage through an Apple border router concerns ports registered via SRP: Matter 5540 (python-matter-server) and `_hap._udp` (HomeKit Controller).
+- On this network, nothing shows any other port: 57 of the 58 `_matter._tcp` services are on 5540 (the 58th is the Aqara, on the local network), and there is no `_hap._udp` at all (`hap.py`).
 
-**Test sans rien flasher, dès que la route existe :**
-- lwIP répond « port injoignable » (ICMPv6) sur un port fermé. `udp_input` appelle `icmp6_dest_unreach` à 0x4204ffea dans firmware.elf, et OpenThread passe à lwIP tout port qu'il n'utilise pas (`ip6.cpp:986`).
-- Commande :
+**Test without flashing anything, as soon as the route exists:**
+- lwIP replies "port unreachable" (ICMPv6) on a closed port. `udp_input` calls `icmp6_dest_unreach` at 0x4204ffea in firmware.elf, and OpenThread hands lwIP any port it does not use itself (`ip6.cpp:986`).
+- Command:
   ```
   python3 -c "import socket;s=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.settimeout(3);s.connect(('fd77:9e:f4bb:0:6c06:6762:45d6:a3f0',40000));s.send(b'x');s.recv(9)"
   ```
-- Lecture du résultat :
-  - `ConnectionRefusedError` : un port quelconque passe.
-  - Délai dépassé alors que `ping6` répond (lwIP répond aux pings, mode d'écho `RLOC_ALOC_ONLY`) : la borne filtre par port.
-- **Si la borne filtre**, le service SRP devient obligatoire, ce qui renverse la recommandation v1 « résoudre `<hôte>.local` ».
+- Reading the result:
+  - `ConnectionRefusedError`: any arbitrary port gets through.
+  - Timeout exceeded while `ping6` responds (lwIP answers pings, echo mode `RLOC_ALOC_ONLY`): the border router filters by port.
+- **If the border router filters**, the SRP service becomes mandatory, which overturns the v1 recommendation to "resolve `<hôte>.local`".
 
-## 2. Republication d'un service SRP maison : probable, non prouvé
+## 2. Republishing of our own SRP service: probable, not proven
 
-- **Code source :** mDNSResponder-2881.0.25 (commit d4658af). `_matter` et `_hap` ne servent qu'aux statistiques (`srp-mdns-proxy.c:358-372`). Il n'y a pas de limite de services par hôte. Le seul contrôle lié au type porte sur la cohérence des sous-types `_sub`.
-- **Incertain :** le logiciel livré sur HomePod et Apple TV peut différer. Je n'ai trouvé aucun rapport public d'un type tiers republié par une borne Apple.
-- **Test :** impossible sans flasher. Il faut la sonde du firmware (`udp srp on`), puis `dns-sd -B _halo-pont._udp local.` et `dns-sd -L`.
+- **Source code:** mDNSResponder-2881.0.25 (commit d4658af). `_matter` and `_hap` are only used for statistics (`srp-mdns-proxy.c:358-372`). There is no limit on services per host. The only type-related check concerns the consistency of `_sub` subtypes.
+- **Uncertain:** the software shipped on the HomePod and Apple TV may differ. I found no public report of a third-party type being republished by an Apple border router.
+- **Test:** impossible without flashing. It requires the firmware probe (`udp srp on`), then `dns-sd -B _halo-pont._udp local.` and `dns-sd -L`.
 
-## 3. Second service SRP à côté de ceux de CHIP : oui, sous conditions
+## 3. A second SRP service alongside CHIP's: yes, under conditions
 
-**Confirmé :**
-- CHIP efface 628 octets sur chaque service retiré : `memset(service,0,sizeof(Service))` (hpp:907), `li a2,628` à 0x421022e0. `mService` est bien le premier membre (.h:184).
-- `_ClearSrpHost` → `otSrpClientRemoveHostAndServices(false,true)` à chaque démarrage : notre service tombe avec ceux de CHIP.
-- `MAX_SERVICES=5` ne dimensionne que les tampons (`OPENTHREAD_CONFIG_SRP_CLIENT_BUFFERS_MAX_SERVICES`), ce n'est pas une limite.
+**Confirmed:**
+- CHIP clears 628 bytes on every service removed: `memset(service,0,sizeof(Service))` (hpp:907), `li a2,628` at 0x421022e0. `mService` is indeed the first member (.h:184).
+- `_ClearSrpHost` → `otSrpClientRemoveHostAndServices(false,true)` on every startup: our service falls along with CHIP's.
+- `MAX_SERVICES=5` only sizes the buffers (`OPENTHREAD_CONFIG_SRP_CLIENT_BUFFERS_MAX_SERVICES`), it is not a limit.
 
-**Réfuté (rapport « apple-br ») :** `_InvalidateAllSrpServices` et `_RemoveInvalidSrpServices` ne parcourent que `mSrpClient.mServices`, le tableau de CHIP. Elles ne retirent pas notre service.
+**Refuted (the "apple-br" report):** `_InvalidateAllSrpServices` and `_RemoveInvalidSrpServices` only walk `mSrpClient.mServices`, CHIP's own array. They do not remove our service.
 
-**Nouveau risque, lu dans le code d'Apple :**
-- Le serveur rejette la mise à jour entière (YXDOMAIN) si un nom d'instance pointe déjà vers un autre nom d'hôte (`srp-mdns-proxy.c`, `compare_instance`, lignes 3309-3352).
-- Une mise à jour SRP porte l'hôte et tous ses services. Un nom fixe `Halo-XXXXXX` resté sous l'ancien hôte bloquerait donc aussi les services Matter jusqu'à l'expiration de l'ancien bail. Cas typique : effacement complet par esptool puis nouvelle mise en service, sans la désinscription que CHIP envoie lors d'une vraie remise à zéro.
-- **Contre-mesures :** la surveillance « 60 s en ToAdd/Adding → `otSrpClientClearService` » proposée par le rapport « firmware » devient obligatoire. Et le nom d'instance doit dériver du nom d'hôte SRP.
-- C'est une raison de plus de faire la v1 sans service maison, sous réserve du test 1.
+**New risk, found reading Apple's code:**
+- The server rejects the entire update (YXDOMAIN) if an instance name already points to a different host name (`srp-mdns-proxy.c`, `compare_instance`, lines 3309-3352).
+- An SRP update carries the host and all its services. A fixed name `Halo-XXXXXX` left under the old host would therefore also block the Matter services until the old lease expires. Typical case: a full erase via esptool followed by a new commissioning, without the deregistration that CHIP sends during a genuine factory reset.
+- **Countermeasures:** the "60 s in ToAdd/Adding → `otSrpClientClearService`" watchdog proposed by the "firmware" report becomes mandatory. And the instance name must derive from the SRP host name.
+- This is one more reason to make v1 without our own service, pending test 1.
 
-## 4. Sockets lwIP sur l'interface Thread de ce build : confirmé
+## 4. lwIP sockets on this build's Thread interface: confirmed
 
-- `OpenthreadLauncher.cpp.obj` importe `esp_netif_new`, `esp_netif_attach` et `esp_openthread_netif_glue_init`.
-- `UDPEndPointImplLwIP::SendMsgImpl` est lié, et Matter fonctionne par ce chemin.
-- **Blocage :** `openthread_netif_transmit` (0x4218b544) et le crochet de choix d'adresse source (0x4218b3f8) prennent tous deux le verrou OpenThread sans limite de temps (`li a0,-1`).
-- **Filtre :** `IsPortInUse` (`ip6.cpp:986`) empêche lwIP de voir un port tenu par OpenThread.
-- **Port 52540 :** il est dans la plage éphémère d'OpenThread (49152–65535, `udp6.hpp:654`), et `GetEphemeralPort` ne saute que les ports réservés. Il faut un port fixe sous 49152, quelle que soit la voie.
-- **Flash :** 3 002 480 octets pour 0x300000, soit 143 248 octets libres. Confirmé.
+- `OpenthreadLauncher.cpp.obj` imports `esp_netif_new`, `esp_netif_attach`, and `esp_openthread_netif_glue_init`.
+- `UDPEndPointImplLwIP::SendMsgImpl` is linked, and Matter works through this path.
+- **Blocking:** `openthread_netif_transmit` (0x4218b544) and the source-address selection hook (0x4218b3f8) both take the OpenThread lock with no time limit (`li a0,-1`).
+- **Filter:** `IsPortInUse` (`ip6.cpp:986`) prevents lwIP from seeing a port held by OpenThread.
+- **Port 52540:** it is inside OpenThread's ephemeral range (49152–65535, `udp6.hpp:654`), and `GetEphemeralPort` only skips the reserved ports. A fixed port under 49152 is needed, whichever path is used.
+- **Flash:** 3,002,480 bytes for 0x300000, that is, 143,248 bytes free. Confirmed.
 
-## 5. Confidentialité du réseau local : confirmé, mais pas testé par le rapport « app »
+## 5. Local network privacy: confirmed, but not tested by the "app" report
 
-**Confirmé (TN3179) :**
-- Un envoi unicast vers une adresse jointe via un routeur n'est pas du « réseau local » : « Traffic to a local network address goes directly; it's not forwarded by a router ».
-- Mais « Resolving a local DNS name » (`.local`), ainsi que la navigation et la résolution Bonjour, demandent l'autorisation. L'alerte est donc inévitable pour les deux méthodes de découverte.
-- `NSBonjourServices` n'est nécessaire que pour la navigation.
-- Il faut signer avec une identité délivrée par Apple.
+**Confirmed (TN3179):**
+- A unicast send to an address reached via a router is not "local network": "Traffic to a local network address goes directly; it's not forwarded by a router".
+- But "Resolving a local DNS name" (`.local`), as well as Bonjour browsing and resolution, require permission. The alert is therefore unavoidable for both discovery methods.
+- `NSBonjourServices` is only needed for browsing.
+- Signing with an identity issued by Apple is required.
 
-**Les tests du rapport « app » ne couvrent pas ce point :**
-- Ce sont des exécutables `sbtest` signés en ad hoc, sans `NSLocalNetworkUsageDescription`.
-- Or TN3179 autorise d'office les « Command-line tools run from Terminal or over SSH, including any child processes ».
-- Seule la partie bac à sable est prouvée : `network.client` est nécessaire et suffit pour un UDP connecté.
+**The "app" report's tests do not cover this point:**
+- These are `sbtest` executables signed ad hoc, without `NSLocalNetworkUsageDescription`.
+- Yet TN3179 automatically allows "Command-line tools run from Terminal or over SSH, including any child processes".
+- Only the sandbox part is proven: `network.client` is necessary and sufficient for a connected UDP socket.
 
-**Test :** l'app réelle signée Apple Development, lancée depuis le Finder. Vérifier l'alerte, puis le cas de refus (`.waiting` avec `localNetworkDenied`). Refaire sur un vrai iPhone (le simulateur ne gère pas cette autorisation).
+**Test:** the real app, signed Apple Development, launched from the Finder. Check the alert, then the denial case (`.waiting` with `localNetworkDenied`). Redo on a real iPhone (the simulator does not handle this permission).
 
-**Banc du 25/09 (macOS 27, app signée Apple Development) :**
-- L'alerte apparaît bien à la première connexion réseau.
-- Refus : ni `localNetworkDenied` ni `PolicyDenied`. La résolution de `<nom>.local` rend `NoSuchRecord` (-65554) en 6 à 12 ms, chemin `satisfied`. Un nom `.local` absent, lui, ne rend rien (12 s sans réponse avec `dns-sd`) : l'app lit donc ce `NoSuchRecord` rapide sur un `.local` comme un refus.
-- Une session déjà ouverte continue après le refus : le flux routé vers l'ULA du pont n'est pas coupé. De même, un flux `NWConnection` ouvert survit au retrait de la route IPv6 (Network.framework garde son saut suivant ; `lsof` ne voit aucune socket).
-- Réautorisation : la connexion en attente repart seule, prête 20 ms après.
-- Sans route, une nouvelle connexion : `ENETDOWN` pour `NWConnection`, `EHOSTUNREACH` pour une socket ; la connexion en attente ne repart pas quand la route revient (aucun évènement de chemin).
+**The Sep 25 bench session (macOS 27, app signed Apple Development):**
+- The alert does appear on the first network connection.
+- Denial: neither `localNetworkDenied` nor `PolicyDenied`. Resolving `<nom>.local` returns `NoSuchRecord` (-65554) in 6 to 12 ms, path `satisfied`. A missing `.local` name, on the other hand, returns nothing (12 s with no answer via `dns-sd`): the app therefore reads this fast `NoSuchRecord` on a `.local` as a denial.
+- A session already open continues after the denial: the flow routed to the bridge's ULA is not cut off. Likewise, an open `NWConnection` flow survives the IPv6 route being withdrawn (Network.framework keeps its next hop; `lsof` sees no socket).
+- Re-authorization: the pending connection resumes on its own, ready 20 ms later.
+- With no route, a new connection: `ENETDOWN` for `NWConnection`, `EHOSTUNREACH` for a plain socket; the pending connection does not resume when the route comes back (no path event).
 
-## Identifier le nœud sans flasher
+## Identifying the node without flashing
 
-Couper puis rétablir l'alimentation du pont (pas par le port série) pendant que `dns-sd -B _matter._tcp local.` tourne.
+Cut then restore power to the bridge (not via the serial port) while `dns-sd -B _matter._tcp local.` is running.
 
-Au démarrage, CHIP retire puis réenregistre ses services (`_ClearSrpHost`). Les deux instances du pont devraient donc apparaître en « Rmv » puis « Add ». `dns-sd -L` sur l'une d'elles donnera ensuite l'hôte.
+At startup, CHIP removes then re-registers its services (`_ClearSrpHost`). The bridge's two instances should therefore appear as "Rmv" then "Add". `dns-sd -L` on either of them will then give the host.
 
 ## Sources
-- TN3179 : https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
-- Thread Group, BR Best Practices : https://www.threadgroup.org/Portals/0/documents/support/ThreadBorderRouterBestPractices_2530_1.pdf
-- mDNSResponder : https://github.com/apple-oss-distributions/mDNSResponder
-- XNU nd6_rtr.c : https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/nd6_rtr.c
-- Tableau de prise en charge RFC 4191 : https://github.com/dxdxdt/gists/blob/master/writeups/ipv6/rfc4191/rfc4191.md
-- HomeKit Controller : https://www.home-assistant.io/integrations/homekit_controller/
-- Forum Home Assistant : https://community.home-assistant.io/t/matter-over-thread-devices-periodically-go-unavailable-host-has-no-ipv6-route-to-thread-subnet-homepod-mini-tbr-apple-home-unaffected/1011614
+- TN3179: https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
+- Thread Group, BR Best Practices: https://www.threadgroup.org/Portals/0/documents/support/ThreadBorderRouterBestPractices_2530_1.pdf
+- mDNSResponder: https://github.com/apple-oss-distributions/mDNSResponder
+- XNU nd6_rtr.c: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/nd6_rtr.c
+- RFC 4191 support table: https://github.com/dxdxdt/gists/blob/master/writeups/ipv6/rfc4191/rfc4191.md
+- HomeKit Controller: https://www.home-assistant.io/integrations/homekit_controller/
+- Home Assistant forum: https://community.home-assistant.io/t/matter-over-thread-devices-periodically-go-unavailable-host-has-no-ipv6-route-to-thread-subnet-homepod-mini-tbr-apple-home-unaffected/1011614
 
-Fichiers dans `/private/tmp/claude-501/skeptic/` : `txt.py`, `hap.py`, `routemon.txt`, `tn3179.txt`, `brbp.txt`.
+Files in `/private/tmp/claude-501/skeptic/`: `txt.py`, `hap.py`, `routemon.txt`, `tn3179.txt`, `brbp.txt`.

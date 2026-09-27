@@ -1,56 +1,58 @@
-# Câblage
+[Français](WIRING.fr.md) · **English**
 
-## Module BM5602-60-1 → ESP32
+# Wiring
 
-Le BM5602 démarre en SPI **3 fils** (`SDIO` bidirectionnel). Le firmware bascule
-le registre `IO1` en mode **4 fils** dès l'init : `GIO2` devient alors la sortie
-de données, donc le MISO côté ESP32.
+## BM5602-60-1 module → ESP32
 
-## Brochage du module BM5602-60-1
+The BM5602 starts up in **3-wire** SPI (`SDIO` bidirectional). The firmware
+switches the `IO1` register to **4-wire** mode at init: `GIO2` then becomes
+the data output, i.e., the MISO on the ESP32 side.
 
-Le module **n'a aucun marquage sérigraphié** sur ses pastilles. Oriente-le
-antenne en haut, texte `BM5602-60-1 V1.0` lisible : les 9 pastilles du bord
-inférieur sont alors, **de gauche à droite** :
+## BM5602-60-1 module pinout
+
+The module **has no silkscreen markings** on its pads. Orient it with the
+antenna at the top and the `BM5602-60-1 V1.0` text readable: the 9 pads on
+the bottom edge are then, **left to right**:
 
 | # | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 |---|---|---|---|---|---|---|---|---|---|
 | | `VSS` | `VDD` | `GIO1` | `CSN` | `SCK` | `GIO2` | `SDIO` | `GIO3` | `GIO4` |
-| | GND | 3V3 | — | CS | horloge | **MISO** | **MOSI** | — | — |
+| | GND | 3V3 | — | CS | clock | **MISO** | **MOSI** | — | — |
 
-`GIO1`, `GIO3` et `GIO4` ne servent pas. Les deux pastilles isolées sur les
-bords gauche et droit, près de l'antenne, sont des `VSS` supplémentaires.
+`GIO1`, `GIO3`, and `GIO4` are not used. The two isolated pads on the left
+and right edges, near the antenna, are extra `VSS` pads.
 
-Source : le schéma de câblage du
-[projet Halo 2](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png).
+Source: the wiring diagram from the
+[Halo 2 project](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png).
 
-| BM5602-60-1 | Rôle SPI | **C6 SuperMini** | ESP32-C3 | ESP32-S3 | ESP32 (WROOM) |
+| BM5602-60-1 | SPI role | **C6 SuperMini** | ESP32-C3 | ESP32-S3 | ESP32 (WROOM) |
 |---|---|---|---|---|---|
-| `VDD`  | 3,3 V | 3V3 | 3V3 | 3V3 | 3V3 |
+| `VDD`  | 3.3 V | 3V3 | 3V3 | 3V3 | 3V3 |
 | `VSS`  | GND | GND | GND | GND | GND |
-| `SCK`  | horloge | **IO18** | GPIO 4 | GPIO 12 | GPIO 18 |
+| `SCK`  | clock | **IO18** | GPIO 4 | GPIO 12 | GPIO 18 |
 | `GIO2` | MISO | **IO19** | GPIO 5 | GPIO 13 | GPIO 19 |
 | `SDIO` | MOSI | **IO20** | GPIO 6 | GPIO 11 | GPIO 23 |
 | `CSN`  | chip select | **IO14** | GPIO 7 | GPIO 10 | GPIO 5 |
 
-### Pourquoi IO14 et IO18–20 sur le C6 SuperMini
+### Why IO14 and IO18–20 on the C6 SuperMini
 
-Cette carte a peu de broches vraiment libres :
+This board has few truly free pins:
 
-- **IO12 / IO13** portent l'USB natif — les utiliser coupe le port série ;
-- **IO2, IO4, IO5, IO8, IO9, IO15** sont des broches de *strapping* : leur
-  niveau est échantillonné au reset. Un module qui en pilote une pendant le
-  démarrage peut empêcher la carte de booter ;
-- **IO8** est une LED adressable WS2812 : c'est le voyant d'état du firmware ;
-- **IO15** porte une LED simple, laissée en entrée (donc éteinte) par le
-  firmware ; **IO9** est le bouton BOOT — le firmware s'en sert déjà.
+- **IO12 / IO13** carry the native USB — using them cuts off the serial port;
+- **IO2, IO4, IO5, IO8, IO9, IO15** are *strapping* pins: their level is
+  sampled at reset. A module driving one of them during boot-up can prevent
+  the board from booting;
+- **IO8** is an addressable WS2812 LED: it is the firmware's status LED;
+- **IO15** carries a simple LED, left as an input (so off) by the firmware;
+  **IO9** is the BOOT button — the firmware already uses it.
 
-Restent **IO14** et **IO18–IO20**, toutes sur le connecteur **extérieur
-gauche**, dont l'ordre est `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. Les
-six fils, alimentation comprise, tiennent donc sur une seule rangée :
+That leaves **IO14** and **IO18–IO20**, all on the **left outer** header,
+whose order is `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. The six wires,
+power included, therefore fit on a single row:
 
 ```
 IO14 ── CSN
-IO15    (LED simple, on saute)
+IO15    (simple LED, skipped)
 IO18 ── SCK
 IO19 ── GIO2
 IO20 ── SDIO
@@ -58,55 +60,57 @@ IO20 ── SDIO
 GND  ── VSS
 ```
 
-IO21 et IO22 existent aussi, mais en **trous intérieurs** et non sur le bord
-castellé : pénibles à souder, à éviter.
+IO21 and IO22 also exist, but as **inner holes** rather than on the
+castellated edge: painful to solder, to avoid.
 
-Les broches sont définies par `build_flags` dans [platformio.ini](../platformio.ini) —
-change-les là plutôt que dans le code.
+The pins are defined by `build_flags` in [platformio.ini](../platformio.ini) —
+change them there rather than in the code.
 
-> **3,3 V uniquement.** Le BC5602 ne tolère pas le 5 V. L'ESP32 étant lui aussi
-> en 3,3 V, aucun adaptateur de niveau n'est nécessaire.
+> **3.3 V only.** The BC5602 does not tolerate 5 V. Since the ESP32 is also
+> 3.3 V, no level shifter is necessary.
 
-## Points à ne pas négliger
+## Points not to overlook
 
-**Découplage (optionnel).** Un 100 nF **plus** un 10 µF au plus près de `VDD`
-est une bonne pratique peu coûteuse. Mais tout le projet a été mesuré **sans**
-(0 perte au banc hors Thread, 23/09), et le module a vraisemblablement son
-propre découplage : rien n'a jamais montré qu'il était nécessaire.
+**Decoupling (optional).** A 100 nF **plus** a 10 µF as close as possible to
+`VDD` is a low-cost good practice. But the whole project was measured
+**without** it (0 loss on the bench outside Thread, Sep 23), and the module
+most likely has its own decoupling: nothing has ever shown it to be
+necessary.
 
-**Cohabitation 2,4 GHz.** L'ESP32 émet en Wi-Fi jusqu'à +20 dBm ; le BenQ
-travaille à 2405 MHz, en plein sur le canal Wi-Fi 1. Deux précautions :
+**2.4 GHz coexistence.** The ESP32 transmits Wi-Fi up to +20 dBm; the BenQ
+operates at 2405 MHz, right on Wi-Fi channel 1. Two precautions:
 
-- éloigne physiquement le module de l'antenne de l'ESP32 (10–15 cm de nappe
-  suffisent, le SPI à 1 MHz supporte très bien) ;
-- mets ton point d'accès Wi-Fi sur le canal 11 (2462 MHz) si tu le peux.
+- physically move the module away from the ESP32's antenna (10–15 cm of
+  ribbon cable is enough, 1 MHz SPI handles it fine);
+- put your Wi-Fi access point on channel 11 (2462 MHz) if you can.
 
-Sans ça, la réception du BM5602 est désensibilisée à chaque émission Wi-Fi et
-les trames de la télécommande passent à la trappe.
+Without that, the BM5602's reception is desensitized by every Wi-Fi
+transmission, and the remote's frames fall through the cracks.
 
-**Longueur du bus SPI.** 1 MHz par défaut (`RF_SPI_HZ` dans
-[src/config.h](../src/config.h)). Inutile de monter plus haut : une commande
-Halo 1 porte 2 octets de charge. Si tu utilises une nappe longue, descends
-plutôt à 500 kHz.
+**SPI bus length.** 1 MHz by default (`RF_SPI_HZ` in
+[src/config.h](../src/config.h)). No need to go higher: a Halo 1 command
+carries a 2-byte payload. If you use a long ribbon cable, go down to
+500 kHz instead.
 
-**Antenne.** Le BM5602-60-1 embarque une antenne imprimée. Ne la colle pas
-contre une masse, un blindage ou un boîtier métallique.
+**Antenna.** The BM5602-60-1 has a built-in printed antenna. Do not place it
+against a ground plane, a shield, or a metal enclosure.
 
-## Vérification
+## Verification
 
-Au démarrage, le moniteur série doit afficher :
+At boot, the serial monitor should show:
 
 ```
 === BenQ ScreenBar Halo -> Matter ===
 firmware 0.2.0
 ```
 
-puis, avec `info` :
+then, with `info`:
 
 ```
   BM5602        : detecte (version puce 0x......)
 ```
 
-`ABSENT` signifie que la lecture SPI renvoie `0x000000` ou `0xFFFFFF` :
-- `0xFFFFFF` → MISO n'est pas relié, ou relié ailleurs que sur `GIO2` ;
-- `0x000000` → pas d'alimentation, `CSN` non relié, ou SCK/MOSI inversés.
+`ABSENT` means the SPI read returns `0x000000` or `0xFFFFFF`:
+- `0xFFFFFF` → MISO is not connected, or connected somewhere other than
+  `GIO2`;
+- `0x000000` → no power, `CSN` not connected, or SCK/MOSI swapped.

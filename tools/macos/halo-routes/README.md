@@ -1,113 +1,121 @@
-# halo-routes : assistant systeme du Mac pour le reseau Thread
+[Français](README.fr.md) · **English**
 
-Demon launchd (root) qui garde la route du Mac vers le reseau Thread, donc vers
-le pont Halo en UDP (docs/PROTOCOLE-JSON.md, section 10).
+# halo-routes: the Mac's system helper for the Thread network
 
-## Pourquoi
+A launchd daemon (root) that keeps the Mac's route to the Thread network,
+and so to the Halo bridge over UDP (docs/PROTOCOLE-JSON.md, section 10).
 
-Le Mac joint les noeuds Thread par le prefixe OMR (ULA `/64`) que les routeurs
-de bordure (HomePod, Apple TV) annoncent sur le LAN (option RIO des annonces de
-routeur). Bug du noyau de macOS (10.1) : il retire la route de ce prefixe quand
-il change de routeur (l'un d'eux parait un instant injoignable, ou son annonce
-expire), mais sa liste des routes annoncees peut la croire toujours posee. La
-route n'est alors plus remise : `No route to host` jusqu'au redemarrage de
-l'interface, parfois au-dela. Une route statique tient mieux, mais il faut etre
-root pour la poser, et une app ne peut pas choisir seule son routeur de sortie.
+## Why
 
-## Ce qu'il fait
+The Mac reaches Thread nodes through the OMR prefix (a `/64` ULA) that
+border routers (HomePod, Apple TV) advertise on the LAN (the RIO option of
+router advertisements). macOS kernel bug (10.1): it removes the route for
+this prefix when it switches routers (one of them looks briefly
+unreachable, or its advertisement expires), but its list of advertised
+routes may still believe it's in place. The route then never gets put
+back: `No route to host` until the interface restarts, sometimes even
+longer. A static route holds up better, but it takes root to set one, and
+an app can't choose its own outbound router on its own.
 
-A chaque message du noyau sur les routes (300 ms apres, les rafales sont
-fondues) et toutes les 10 s (un routeur perdu ne donne lieu a aucun message), il
-relit la liste des routes annoncees du noyau
-(`sysctl net.inet6.icmp6.nd6_rtilist`), l'etat des routeurs (cache des voisins)
-et celui des interfaces. Pour chaque prefixe ULA `/64` annonce :
+## What it does
 
-- aucune route : il en pose une, statique, marquee `RTF_PROTO1` (drapeau `1`
-  dans `netstat -rn`), via le routeur le plus sur : joignable d'abord (voisin
-  `REACHABLE`, `STALE`, `DELAY` ou `PROBE`, comme en juge le noyau), puis celui
-  que le noyau croit avoir installe (s'il tombe, le noyau retire lui-meme la
-  route et pose la sienne), puis sur l'interface principale ; jamais via une
-  interface tombee ;
-- notre route passe par un routeur qui n'annonce plus le prefixe : il change de
-  routeur ; par un routeur injoignable (ou dont l'interface est tombee) alors
-  qu'un autre est joignable : il change aussi, si c'est confirme a deux passages
-  espaces de 2 s au moins. Le changement se fait sur place (`route change` :
-  passerelle et interface, sans coupure) ; a defaut, retrait puis ajout ;
-- plus aucune annonce : il retire notre route (l'annonce expiree, le noyau
-  n'aurait plus de route non plus).
+On every kernel message about routes (300 ms later, to debounce bursts)
+and every 10 s (a lost router doesn't trigger any message), it re-reads
+the kernel's list of advertised routes
+(`sysctl net.inet6.icmp6.nd6_rtilist`), the state of the routers (neighbor
+cache), and that of the interfaces. For each advertised ULA `/64` prefix:
 
-La route statique n'est pas a l'abri : quand le noyau change de routeur ou
-qu'une annonce expire, il retire la route du prefixe, quelle qu'elle soit (par
-prefixe et masque), et pose en general la sienne ; sinon, le demon remet la
-sienne au passage suivant. Au plus 6 changements par prefixe et par minute ;
-apres un echec, rien avant la minute suivante. A l'arret (`launchctl bootout`,
-desinstallation), il retire les routes qu'il a posees.
+- no route: it sets one, static, marked `RTF_PROTO1` (flag `1` in
+  `netstat -rn`), via the safest router: reachable first (neighbor
+  `REACHABLE`, `STALE`, `DELAY`, or `PROBE`, as judged by the kernel), then
+  the one the kernel believes it has installed (if that one goes down, the
+  kernel itself removes the route and sets its own), then on the main
+  interface; never through a downed interface;
+- our route goes through a router that no longer advertises the prefix: it
+  switches routers; through a router that's unreachable (or whose
+  interface is down) while another is reachable: it also switches, if
+  that's confirmed over two passes at least 2 s apart. The switch happens
+  in place (`route change`: gateway and interface, with no drop); failing
+  that, removal then re-addition;
+- no more advertisement at all: it removes our route (the advertisement
+  having expired, the kernel wouldn't have a route either).
 
-## Ce qu'il ne fait pas
+The static route isn't safe from this: when the kernel switches routers or
+an advertisement expires, it removes the route for the prefix, whichever
+one it is (by prefix and mask), and generally sets its own; otherwise, the
+daemon puts its own back on the next pass. At most 6 changes per prefix
+per minute; after a failure, nothing before the next minute. On stopping
+(`launchctl bootout`, uninstall), it removes the routes it set.
 
-- Il ne touche a aucune route qui n'est pas a lui : celles du noyau, celles
-  posees a la main, et tout prefixe hors de `fc00::/7` ou d'une autre longueur
-  que 64. Il ne pose que ce que le noyau aurait pose lui-meme pour une annonce
-  qu'il a acceptee.
-- Aucune entree hors du noyau : ni port reseau, ni fichier de commande, ni
-  argument a l'execution. Les changements passent par `/sbin/route`, argv
-  fixe, sans shell.
-- Le prefixe du reseau Thread n'est pas ecrit en dur : s'il change, le demon
-  suit les annonces.
+## What it doesn't do
 
-## Installer
+- It doesn't touch any route that isn't its own: the kernel's, ones set by
+  hand, and any prefix outside `fc00::/7` or with a length other than 64.
+  It only sets what the kernel would have set itself for an advertisement
+  it accepted.
+- No input from outside the kernel: no network port, no command file, no
+  runtime argument. Changes go through `/sbin/route`, with fixed argv, no
+  shell.
+- The Thread network's prefix isn't hardcoded: if it changes, the daemon
+  follows the advertisements.
 
-Sous son compte, sans sudo (le programme est compile et teste ici ; seules la
-copie et la mise en service demandent le mot de passe administrateur) :
+## Installing
+
+Under your own account, without sudo (the program is built and tested
+here; only copying it into place and putting it into service require the
+administrator password):
 
 ```
 sh tools/macos/halo-routes/installer.sh
 ```
 
-L'installeur montre d'abord ce que le demon ferait (essai, rien n'est change).
-Une route posee a la main pour le meme prefixe reste a son proprietaire : le
-demon la laisse en place et ne la garde pas. L'installeur la signale ; la
-retirer pour qu'il en prenne la garde (`sudo route -n delete -inet6
--prefixlen 64 <prefixe>`).
+The installer first shows what the daemon would do (a dry run, nothing is
+changed). A route set by hand for the same prefix stays with its owner:
+the daemon leaves it in place and doesn't take it over. The installer
+flags it; remove it for the daemon to take over managing it
+(`sudo route -n delete -inet6 -prefixlen 64 <prefixe>`).
 
-Fichiers : `/Library/PrivilegedHelperTools/fr.djoko.halo.routes` (programme),
-`/Library/LaunchDaemons/fr.djoko.halo.routes.plist` (lancement au demarrage,
-relance s'il s'arrete), `/Library/Logs/fr.djoko.halo.routes.log` (journal).
+Files: `/Library/PrivilegedHelperTools/fr.djoko.halo.routes` (the
+program), `/Library/LaunchDaemons/fr.djoko.halo.routes.plist` (launches at
+startup, restarts if it stops), `/Library/Logs/fr.djoko.halo.routes.log`
+(log).
 
-## Verifier
+## Checking
 
 ```
 tail -f /Library/Logs/fr.djoko.halo.routes.log
 netstat -rn -f inet6 | grep '^fd'
 ```
 
-Une route du demon porte les drapeaux `S` (statique) et `1` (sa marque). Essai
-sans rien installer ni changer (pas besoin d'etre root) :
+A route set by the daemon carries the `S` (static) and `1` (its own
+marker) flags. A dry run with nothing installed or changed (no need to be
+root):
 
 ```
 sh tools/macos/halo-routes/tests.sh
 ```
 
-## Desinstaller
+## Uninstalling
 
 ```
 sh tools/macos/halo-routes/desinstaller.sh
 ```
 
-Le demon retire ses routes en s'arretant ; le journal est garde.
+The daemon removes its routes as it stops; the log is kept.
 
-## Limites
+## Limitations
 
-- Tue sans pouvoir se nettoyer (SIGKILL), il reprend ses routes a la relance
-  tant que leur prefixe est annonce ; une route dont le prefixe a disparu
-  entre-temps reste jusqu'au redemarrage du Mac.
-- Course minime : entre sa lecture de la table et un retrait ou un changement,
-  le noyau peut poser sa propre route pour le prefixe ; `route` vise le prefixe
-  et le masque sans regarder a qui est la route, et toucherait alors celle du
-  noyau (le passage suivant remet une route si besoin).
-- Au plus 32 prefixes ULA `/64` suivis (et 32 routeurs par prefixe) : au-dela,
-  les prefixes en trop sont ignores et, tant que la liste deborde, le demon ne
-  retire plus ses routes faute d'annonce ; le journal le signale.
-- Le journal n'est pas tourne : quelques lignes par incident du noyau.
-- Contourne le bug, ne le corrige pas : sans demon, la route du noyau peut
-  toujours disparaitre.
+- Killed without a chance to clean up (SIGKILL), it picks its routes back
+  up on restart as long as their prefix is still advertised; a route whose
+  prefix has since disappeared stays until the Mac reboots.
+- A small race: between its reading of the table and a removal or a
+  change, the kernel may set its own route for the prefix; `route` targets
+  the prefix and mask without checking who owns the route, and would then
+  touch the kernel's own (the next pass puts a route back if needed).
+- At most 32 ULA `/64` prefixes tracked (and 32 routers per prefix):
+  beyond that, the extra prefixes are ignored, and as long as the list
+  overflows, the daemon stops removing its routes for lack of an
+  advertisement; the log flags it.
+- The log isn't rotated: a few lines per kernel incident.
+- Works around the bug, doesn't fix it: without the daemon, the kernel's
+  route can still disappear.

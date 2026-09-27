@@ -177,7 +177,7 @@ See [docs/WIRING.md](docs/WIRING.md). In short, on the ESP32-C6 SuperMini
 
 > `GIO2` serves as MISO: the firmware switches the module to 4-wire SPI at
 > init. The module has no markings: the order of its pads is in
-> [docs/WIRING.md](docs/WIRING.md#brochage-du-module-bm5602-60-1).
+> [docs/WIRING.md](docs/WIRING.md#bm5602-60-1-module-pinout).
 
 ## Building
 
@@ -258,9 +258,9 @@ lives under the desk: 24/255 at most per channel, 8/255 for the white glow.
 | blinking blue (2 Hz) | not commissioned yet: add the accessory from the app |
 | slow orange (1 s on, 1 s off) | commissioned, but no network (Thread lost; Wi-Fi for `esp32c6supermini`) |
 | off, brief white glow every 10 s | all good (sign of life); also a glow when the network comes back |
-| steady red | radio module failed: automatic restarts did not help (see below), or module lost; lasts until it recovers |
+| steady red | radio module down: automatic restarts did not help (see below), or module lost; lasts until it recovers |
 | green flash (150 ms) | a command has just been delivered to the lamp (acknowledged) |
-| red, 3 blinks | lamp unreachable: the driver gives up the command (also when the radio module is lost or failed) |
+| red, 3 blinks | lamp unreachable: the driver gives up the command (also when the radio module is lost or down) |
 | rainbow | "Identify" requested from Apple Home (Identify cluster), for the whole identification |
 | red, black, purple, black, fast | BOOT button held 8 s: release to unpair, then unpairing in progress until the reboot (see "4. BOOT button") |
 | white flash (150 ms) | BOOT button, short press released: reboot |
@@ -301,7 +301,7 @@ restart. At most one restart per minute; after 3 restarts in a row without
 recovery (an acknowledgement, a listening window with mostly correct CRCs,
 or, after a restart for deafness, 10 s of listening during which the chip
 stays in receive mode with no timed-out transmission), if the symptom comes
-back, the module is **FAILED**: steady red, one attempt every 10 min. Each
+back, the module is **DOWN**: steady red, one attempt every 10 min. Each
 restart writes `[lampe] BM5602 : ...` lines on the console (never blocking:
 lost if the serial buffer is full); `lampe` shows the state and the last
 restart, `lampe stats` the restarts by cause and the latest ones, with
