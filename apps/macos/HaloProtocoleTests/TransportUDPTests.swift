@@ -290,6 +290,16 @@ struct TransportUDPTests {
         #expect(attendu != ErreurReseau.pasDeRoute.description)
     }
 
+    /// Sans route, pas d'attente de 5 s : la connexion ne repartirait pas seule
+    /// au retour de la route (banc du 25/09) ; le refus du reseau local, lui,
+    /// attend (la reautorisation relance la connexion en attente).
+    @Test func sansRouteAbandonneAvantOuverture() {
+        #expect(TransportUDP.abandonAvantOuverture(.pasDeRoute))
+        #expect(!TransportUDP.abandonAvantOuverture(.reseauLocalRefuse))
+        #expect(!TransportUDP.abandonAvantOuverture(.nomIntrouvable("x.local")))
+        #expect(!TransportUDP.abandonAvantOuverture(.autre("?")))
+    }
+
     @Test func textes() {
         #expect(!ErreurReseau.portInjoignable.repriseAutomatique)
         // Reseau local refuse : bandeau, mais la reconnexion reessaie (banc R7).

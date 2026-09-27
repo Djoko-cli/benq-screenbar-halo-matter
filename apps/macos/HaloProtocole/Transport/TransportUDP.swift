@@ -104,6 +104,14 @@ public final class TransportUDP: Transport {
 
     // MARK: - Connexion (file du transport)
 
+    /// `.waiting` avant l'ouverture : sans route (ENETDOWN, EHOSTUNREACH...),
+    /// la connexion en attente ne repart pas quand la route revient (aucun
+    /// evenement de chemin, banc du 25/09 : reprise 8 s apres son retour) ;
+    /// on abandonne tout de suite, la reconnexion reessaie a son rythme. Les
+    /// autres attentes vont jusqu'a `attentePret` : une reautorisation du
+    /// reseau local, elle, relance la connexion en attente.
+    static func abandonAvantOuverture(_ e: ErreurReseau) -> Bool { e == .pasDeRoute }
+
     /// Journal de mise au point (variable d'environnement HALO_DEBUG_RESEAU=1) :
     /// etats de la connexion et chemins, sur la sortie d'erreur.
     static let traces = ProcessInfo.processInfo.environment["HALO_DEBUG_RESEAU"] == "1"
@@ -125,13 +133,18 @@ public final class TransportUDP: Transport {
         case .ready:
             etat.withLock { $0.pret = true }
         case .waiting(let e):
-            // Avant .ready : cause candidate, la connexion peut encore aboutir.
+            // Avant .ready : cause candidate, la connexion peut encore aboutir
+            // (sauf sans route : abandonAvantOuverture).
             let err = ErreurReseau.depuis(e, chemin: c.currentPath, hote: hote)
             let ouverte = etat.withLock { et -> Bool in
                 et.erreur = err
                 return et.suite != nil
             }
-            if ouverte { terminer(Self.raisonPerte(err)) }
+            if ouverte {
+                terminer(Self.raisonPerte(err))
+            } else if Self.abandonAvantOuverture(err) {
+                echec(err)
+            }
         case .failed(let e):
             echec(ErreurReseau.depuis(e, chemin: c.currentPath, hote: hote))
         default:

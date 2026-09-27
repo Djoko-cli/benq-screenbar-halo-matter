@@ -157,6 +157,8 @@ public struct ChangementLed: Codable, Sendable, Equatable {
     public var motif: MotifLed
     public var avant: MotifLed?
     public var test: Bool?
+    /// Age de la phase du motif a l'emission (rev 4).
+    public var depuisMs: Int?
 }
 
 /// `log` : annonces et traces du firmware (7.10).
