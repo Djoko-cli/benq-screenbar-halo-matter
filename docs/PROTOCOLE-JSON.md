@@ -345,7 +345,7 @@ empechee pour un deluge qui met plus de 10 s a atteindre son seuil.
 |---|---|---|
 | `json` | etat de la session, en texte humain | |
 | `json 1 [bail <s>]` | passe en mode machine sur ce transport : echo et invite coupes, reglages de session remis aux valeurs par defaut, puis `hello`, `config` et l'instantane complet par la file des periodiques (~6,3 Ko au pire), la `reponse` `fin` apres la derniere ligne. Idempotent : renvoyer `json 1` resynchronise. | bail 0 (aucun) ou 10..600 s, defaut 30 |
-| `json 0` | retour au mode humain : message `fin`, puis l'invite `> ` | |
+| `json 0` | retour au mode humain : message `fin`, puis l'invite `> ` ; par le reseau, la place de la session revient aussi au client suivant (rev 4, 10.4) | |
 | `json etat` | instantane complet : `etat` (3 blocs), `compteurs` (3 blocs), `reseau` (2 blocs, 3 en build Thread), places dans la file des periodiques (une ligne par tour de `loop()`, 1024 octets libres apres, 2.3) ; la `reponse` `fin` part apres la derniere ligne. Pire cas cumule ~4,6 Ko (~5,4 Ko en build Thread), plus que le tampon de 4096 octets de `HWCDC` : jamais d'un seul trait. Marche aussi en mode humain (une fois). | |
 | `json hello` | `hello` (2 blocs) et `config`, par la meme file. Marche aussi en mode humain. | |
 | `json ping` | renouvelle le bail ; la `reponse` porte `bail_s` et `up_s` | |
@@ -610,7 +610,7 @@ en sortent.
 | `sys.heap`, `heap_min`, `heap_bloc` | octets | tas libre, minimum historique, plus grand bloc | `esp_get_free_heap_size()`, `esp_get_minimum_free_heap_size()`, `heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)` |
 | `sys.pile_boucle` | octets | pile de la tache loop jamais utilisee | `uxTaskGetStackHighWaterMark(NULL)` |
 | `sys.boucle_max_ms` | entier | plus long tour de `loop()` depuis le bloc precedent | mesure (a ajouter) |
-| `sys.json_perdus`, `json_trop_longs`, `rejets` | entiers | par transport (la session qui recoit la ligne) : lignes machine perdues (tampon d'emission ou file des datagrammes pleins, retard), trop longues (bogue), lignes de l'hote refusees (`trop_long`, `cadence`, `interdite`, et a distance une ligne sans `id`) | compteurs de la session (`json_mode.cpp : Sink`) |
+| `sys.json_perdus`, `json_trop_longs`, `rejets` | entiers | par transport (la session qui recoit la ligne) : lignes machine perdues (tampon d'emission ou file des datagrammes pleins, retard, ligne deja en cours de formatage), trop longues (bogue), lignes de l'hote refusees (`trop_long`, `cadence`, `interdite`, et a distance une ligne sans `id`) | compteurs de la session (`json_mode.cpp : Sink`) |
 
 `matterIsConnected()` sur Thread ne prend jamais le verrou OpenThread en
 attente (`netPoll` : `otLockTry(0)`, une fois par seconde) : sans risque pour
@@ -1051,6 +1051,9 @@ change. Champs : `motif`, `avant` (motif precedent), `test`, `depuis_ms`
 (rev 4 : age de la phase du motif, comme `sante.led.depuis_ms` ; 0 au debut
 d'un evenement, mais au retour en `operationnel` apres un eclat, la lueur
 reprend sa phase d'avant : `depuis_ms` compte depuis le passage en ligne).
+Rev 4 aussi : l'evenement part quand la phase repart sans changer de motif
+(eclat relance, fin de `led test` sur le motif normal) ; `avant` vaut alors
+`motif`.
 
 | `motif` | `statusled::Pattern` | Voyant |
 |---|---|---|
@@ -1391,12 +1394,14 @@ Sessions :
   change : l'app le renverra) : trois clients pour deux places ne se chassent
   pas en boucle, et des `SALUT` du LAN, sans la cle, ne touchent a rien ;
 - une session terminee par `json 0` reste etablie (ses dernieres lignes
-  partent, un renvoi du `json 0` recoit sa reponse) : seule sa place devient
-  reprenable tout de suite. L'app et `tools/halo_udp.py` terminent leurs
-  sessions par `json 0` et n'y reviennent jamais : une nouvelle connexion
-  refait une poignee de main. Avant la rev 4, la place ne revenait qu'apres
-  30 s de silence (banc du 25/09 : `hello` 43 s apres le `json 0` d'un
-  client, au lieu de l'essai suivant) ;
+  partent tant que sa place n'est pas reprise, un renvoi du `json 0` recoit
+  sa reponse) : seule sa place devient reprenable tout de suite. Toute
+  nouvelle commande de cette session (jamais un renvoi servi par le cache)
+  leve la marque : `halo_udp.py session <nom> "json 0" "json 1"` garde sa
+  place. L'app et `tools/halo_udp.py` terminent leurs sessions par `json 0` ;
+  une nouvelle connexion refait une poignee de main. Avant la rev 4, la place
+  ne revenait qu'apres 30 s de silence (banc du 25/09 : `hello` 43 s apres le
+  `json 0` d'un client, au lieu de l'essai suivant) ;
 - **2 `DEFI` par seconde au plus, EN TOUT** (pas par source : adresses
   usurpables) ;
 - adresse et port de l'app : ceux du plus recent message au MAC juste (`ctr`
@@ -1535,6 +1540,8 @@ Tests au banc :
 | R6 | Mac branche sur deux interfaces : la route tient-elle ? |
 | R7 | app signee, autorisation reseau local refusee : message clair |
 | R8 | 1000 commandes par le reseau : pertes, RTT, `reponse` rejouee sans reexecution ; `json_perdus` et `udp.tx_perdus` ; USB en parallele sans trou de `n` |
+| R9 | (rev 4) deux clients tiennent les places, un troisieme attend (`complet`) : `json 0` de l'un des deux, et le troisieme a son `hello` a son essai suivant, sans attendre 30 s |
+| U11 | (rev 4) voyant de l'app et lueur de la carte en phase (USB et reseau), y compris apres un eclat vert et apres `led test` |
 
 ## 12. Exemples
 
@@ -1554,7 +1561,7 @@ id=1 json 1
 Carte -> app :
 
 ```
-<RS>{"v":1,"t":"hello","n":0,"ms":83512,"bloc":"base","rev":2,"fw":"0.4.0-1a2b3c4","fw_desc":"0.4.0-1a2b3c4","date":"Sep 24 2026","heure":"14:02:11","env":"esp32c6thread","build":"produit","reseau_build":"thread","puce":"esp32c6","idf":"v5.5.5","arduino":"3.3.12","boot":"3FA2C901","reset":"logiciel","reset_n":3,"up_s":83,"session":{"transport":"usb","periode_ms":1000,"compteurs_ms":1000,"reseau_ms":5000,"bail_s":30,"trames":true,"log":false},"limites":{"ligne_max":1024,"cmd_max":127}}
+<RS>{"v":1,"t":"hello","n":0,"ms":83512,"bloc":"base","rev":4,"fw":"0.4.0-1a2b3c4","fw_desc":"0.4.0-1a2b3c4","date":"Sep 24 2026","heure":"14:02:11","env":"esp32c6thread","build":"produit","reseau_build":"thread","puce":"esp32c6","idf":"v5.5.5","arduino":"3.3.12","boot":"3FA2C901","reset":"logiciel","reset_n":3,"up_s":83,"session":{"transport":"usb","periode_ms":1000,"compteurs_ms":1000,"reseau_ms":5000,"bail_s":30,"trames":true,"log":false},"limites":{"ligne_max":1024,"cmd_max":127}}
 <RS>{"v":1,"t":"hello","n":1,"ms":83513,"bloc":"identite","boot":"3FA2C901","mac":"F0F5BD012345","id":{"fabricant":"Djoko-CLI","produit":"Pont ScreenBar Halo","serie":"HALO1-F0F5BD012345","nom":"Halo","hw":1,"hw_txt":"ESP32-C6 SuperMini + BM5602"},"caps":["matter","thread","garde","led","lampe_async","trames","log","udp","cle"]}
 <RS>{"v":1,"t":"config","n":2,"ms":83514,"lampe":{"adresse":"4FF0FD63","air":"63FDF04F","canal":5,"debit_kbps":125},"reglages":{"paquets":3,"accuses_min":2,"paquets_max":5,"ecart_ms":100,"reprise_ms":1000,"reprises":2,"rearm_ms":100,"silence_ms":500,"rearm_fort":false,"leger":false,"garde":true,"gamma_c":200},"seuils":{"delais_suite":3,"deluge_trames":100,"deluge_pct":90,"fenetre_ms":10000,"sourd_hors_rx":1000,"sans_guerison":3,"ecart_ms":60000,"repli_ms":600000},"matter":{"endpoints":{"principal":1,"avant":2,"arriere":3},"lampes_en":"lumieres","mired_min":153,"mired_max":370,"niveau_plancher":4,"med":1,"med_boot":1,"maxint_s":20,"reprise_auto":true}}
 <RS>{"v":1,"t":"etat","n":3,"ms":83515,"bloc":"lampe","boot":"3FA2C901","up_s":83,"consigne":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"cru":{"marche":true,"lampes":"deux","lum":165,"niveau":180,"temp":53,"mired":268},"a_livrer":[],"confirme":["marche","lum","temp"],"version":12,"phase":"repos","reprise_ms":null,"echecs":0,"lien":"ok","accuse_ms":41210,"dernier_a":0,"a_entendus":0,"memoire":"deux","livrees":4,"abandons":0,"sauve_attente":false,"ecoute":true,"trace":false}

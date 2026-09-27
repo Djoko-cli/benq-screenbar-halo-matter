@@ -415,7 +415,7 @@ humaine est inchangee.
 |---|---|
 | `json` | etat de la session, en texte |
 | `json 1 [bail 0\|10..600]` | mode machine : echo, invite et `Serial.flush()` coupes ; `hello`, `config` puis l'instantane complet ; bail de 30 s par defaut, renouvele par toute ligne recue (`json ping`) ; `bail 0` au banc : jusqu'a `json 0` |
-| `json 0` | retour au mode humain (message `fin`, puis l'invite) |
+| `json 0` | retour au mode humain (message `fin`, puis l'invite) ; par le reseau, rend aussi la place de la session (rev 4) |
 | `json etat` / `json hello` | instantane (`etat`, `compteurs`, `reseau`) / `hello` et `config`, une fois, meme en mode humain |
 | `json periode\|compteurs\|reseau <ms>` | periodes des `etat` (0 ou 200..60000, 1000 par defaut), `compteurs` (idem), `reseau` (0 ou 1000..60000, 5000) ; `hb` toutes les 2 s si les `etat` sont coupes ou lents |
 | `json trames 0\|1` / `json log 0\|1` | evenements `rx` et `tx` (oui par defaut) / annonces `[lampe]` et `[matter]` en messages `log` au lieu du texte |
