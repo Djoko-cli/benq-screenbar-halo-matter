@@ -46,6 +46,8 @@ void ccCsCapture(Print &out, uint32_t seconds, uint8_t maxWin, uint32_t minCs, u
 void ccFrontEnd(Print &out, uint32_t dwellMs);
 void ccFindAddress(Print &out, uint32_t nbits, uint8_t minRun, uint8_t repeats);
 extern uint8_t ccPins[8];
+// Outils 'cc*' refuses (message sur out) : broches partagees avec un BM5602 en service.
+bool ccRefused(Print &out);
 void cliPoll();
 
 // Ligne de commande recue par le transport reseau (net_udp.cpp), deja

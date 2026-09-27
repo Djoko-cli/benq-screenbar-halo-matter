@@ -521,6 +521,8 @@ static bool handleLine(char *line) {
     Serial.printf("CC2500 : SCK=%u MISO=%u MOSI=%u CSN=%u GDO0=%u GDO2=%u PA_EN=%u RX_EN=%u\n",
                   ccPins[0], ccPins[1], ccPins[2], ccPins[3], ccPins[4], ccPins[5], ccPins[6],
                   ccPins[7]);
+  } else if (!strncmp(line, "cc", 2) && ccRefused(Serial)) {
+    // Refusee : ccRefused() a dit pourquoi.
   } else if (!strcmp(line, "cc")) {
     ccIdentify(Serial);
   } else if (!strcmp(line, "ccdiag")) {
@@ -1157,6 +1159,30 @@ static jsonp::LineAssembler sLine;  // 127 caracteres au plus, prefixe id= compr
 // de plus a chaque essai.
 uint8_t ccPins[8] = {PIN_CC_SCK,  PIN_CC_MISO, PIN_CC_MOSI,  PIN_CC_CSN,
                      PIN_CC_GDO0, PIN_CC_GDO2, PIN_CC_PA_EN, PIN_CC_RX_EN};
+
+// Le CC2500 se branche a la place du BM5602 (carte de capture), sur les memes
+// broches par defaut. Tant qu'un BM5602 repond, les outils 'cc*' refusent :
+// leur SPI a la main reprend ces broches en GPIO (pinMode les detache du bus
+// SPI materiel du BM5602), et le prochain echange du pilote fait planter la
+// carte (signale au banc le 27/09) ; ils enverraient en plus des commandes
+// CC2500 au BM5602. 'ccpins' (broches) reste permis.
+bool ccRefused(Print &out) {
+  if (!halo.radio.present()) return false;
+  const int rf[] = {PIN_RF_SCK, PIN_RF_MISO, PIN_RF_MOSI, PIN_RF_CSN,
+#ifdef PIN_RF_CSN2
+                    PIN_RF_CSN2,
+#endif
+  };
+  for (uint8_t i = 0; i < 8; i++)
+    for (int p : rf)
+      if (ccPins[i] == p) {
+        out.printf("cc : IO%u est aussi une broche du BM5602, en service : commande refusee\n", (unsigned)ccPins[i]);
+        out.println("  (le SPI a la main du CC2500 couperait son bus SPI et ferait planter la carte).");
+        out.println("  CC2500 branche a la place du BM5602 : redemarrer la carte ; sinon, d'autres broches : ccpins.");
+        return true;
+      }
+  return false;
+}
 
 // Premier jalon : la puce repond-elle ? PARTNUM vaut 0x80 sur un CC2500 et
 // 0x00 sur un CC1101 -- ce qui tranchera du meme coup ce que cache le blob
