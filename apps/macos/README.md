@@ -3,17 +3,27 @@
 # Halo Compagnon (macOS)
 
 Native SwiftUI app that supervises the BenQ ScreenBar Halo 1's ESP32-C6
-bridge over USB, following the machine protocol from
-[`docs/PROTOCOLE-JSON.md`](../../docs/PROTOCOLE-JSON.md) (v1). The same
-protocol code will later serve the iOS app, over UDP on Thread (section 10).
+bridge over USB or over the Thread network (UDP, section 10), following the
+machine protocol from [`docs/PROTOCOLE-JSON.md`](../../docs/PROTOCOLE-JSON.md)
+(v1). The same protocol code will later serve the iOS app.
 
-> **Status.** Machine mode is arriving with firmware 0.4.0, written in
-> parallel; the app already decodes without error the lines its formatter
-> produces in the host tests (`tools/test_halo1.sh`), but nothing has been
-> tried yet with the board: see "To Verify on the Bench". Faced with older
-> firmware, the app detects it (`Commande inconnue : "id=1"`) and stays in
-> console-only mode. Everything can be seen in **Demo Mode**, with no
-> hardware.
+> **Status.** Tried on the bench with the bridge (firmware 0.4.0, protocol
+> revision 4) on Sep 25 and Sep 27, over USB and over the Thread network: see
+> "To Verify on the Bench". Faced with older firmware, the app detects it
+> (`Commande inconnue : "id=1"`) and stays in console-only mode. Everything
+> can be seen in **Demo Mode**, with no hardware: the screenshots below come
+> from it.
+
+## Screenshots
+
+Demo Mode, no hardware: dashboard, live frames, charts, controls and console.
+
+<p>
+  <img src="../../docs/images/compagnon-tableau-en.png" alt="Dashboard" width="49%">
+  <img src="../../docs/images/compagnon-trames-en.png" alt="Live Frames" width="49%">
+  <img src="../../docs/images/compagnon-graphiques-en.png" alt="Charts" width="49%">
+  <img src="../../docs/images/compagnon-commandes-en.png" alt="Controls &amp; Console" width="49%">
+</p>
 
 ## The Four Screens
 

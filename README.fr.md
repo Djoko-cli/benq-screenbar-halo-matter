@@ -94,6 +94,18 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
   differe. Sans carte, la meme version (`App version`) se lit avec :
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 
+## App compagnon (macOS)
+
+[Halo Compagnon](apps/macos/README.fr.md) supervise le pont par l'USB ou par le
+réseau Thread : consigne et état cru de la lampe, module radio, Thread et
+Matter, trames décodées en direct, graphiques, commandes et console. Captures
+en mode démo (sans matériel) :
+
+<p>
+  <img src="docs/images/compagnon-tableau-fr.png" alt="Halo Compagnon : tableau de bord" width="49%">
+  <img src="docs/images/compagnon-graphiques-fr.png" alt="Halo Compagnon : graphiques" width="49%">
+</p>
+
 ## Matériel
 
 | Élément | Rôle | Prix indicatif |
