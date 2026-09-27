@@ -3,16 +3,27 @@
 # Halo Compagnon (macOS)
 
 App SwiftUI native qui supervise le pont ESP32-C6 de la BenQ ScreenBar Halo 1
-par le port USB, selon le protocole machine de
-[`docs/PROTOCOLE-JSON.md`](../../docs/PROTOCOLE-JSON.fr.md) (v1). Le même code de
-protocole servira plus tard à l'app iOS, par UDP sur Thread (section 10).
+par le port USB ou par le réseau Thread (UDP, section 10), selon le protocole
+machine de [`docs/PROTOCOLE-JSON.md`](../../docs/PROTOCOLE-JSON.fr.md) (v1). Le
+même code de protocole servira plus tard à l'app iOS.
 
-> **État.** Le mode machine arrive avec le firmware 0.4.0, écrit en parallèle ;
-> l'app décode déjà sans erreur les lignes que produit son formateur dans les
-> tests hôte (`tools/test_halo1.sh`), mais rien n'a encore été essayé avec la
-> carte : voir « À vérifier au banc ». Face à un firmware plus ancien, l'app le
-> détecte (`Commande inconnue : "id=1"`) et reste en console seule. Tout se
-> voit en **mode démo**, sans matériel.
+> **État.** Essayée au banc avec le pont (firmware 0.4.0, révision 4 du
+> protocole) les 25 et 27/09, par l'USB et par le réseau Thread : voir « À
+> vérifier au banc ». Face à un firmware plus ancien, l'app le détecte
+> (`Commande inconnue : "id=1"`) et reste en console seule. Tout se voit en
+> **mode démo**, sans matériel : les captures ci-dessous en viennent.
+
+## Captures d'écran
+
+Mode démo, sans matériel : tableau de bord, trames en direct, graphiques,
+commandes et console.
+
+<p>
+  <img src="../../docs/images/compagnon-tableau-fr.png" alt="Tableau de bord" width="49%">
+  <img src="../../docs/images/compagnon-trames-fr.png" alt="Trames en direct" width="49%">
+  <img src="../../docs/images/compagnon-graphiques-fr.png" alt="Graphiques" width="49%">
+  <img src="../../docs/images/compagnon-commandes-fr.png" alt="Commandes et console" width="49%">
+</p>
 
 ## Les quatre écrans
 

@@ -96,6 +96,18 @@ macros, overridable with `-D`):
   board, the same version (`App version`) can be read with:
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 
+## Companion app (macOS)
+
+[Halo Compagnon](apps/macos/README.md) supervises the bridge over USB or over
+the Thread network: target and raw state of the lamp, radio module, Thread
+and Matter, live decoded frames, charts, commands and console. Screenshots in
+demo mode (no hardware):
+
+<p>
+  <img src="docs/images/compagnon-tableau-en.png" alt="Halo Compagnon: dashboard" width="49%">
+  <img src="docs/images/compagnon-graphiques-en.png" alt="Halo Compagnon: charts" width="49%">
+</p>
+
 ## Hardware
 
 | Part | Role | Approx. price |
