@@ -86,15 +86,16 @@ est une bonne pratique peu coûteuse. Mais tout le projet a été mesuré **sans
 (0 perte au banc hors Thread, 23/09), et le module a vraisemblablement son
 propre découplage : rien n'a jamais montré qu'il était nécessaire.
 
-**Cohabitation 2,4 GHz.** L'ESP32 émet en Wi-Fi jusqu'à +20 dBm ; le BenQ
-travaille à 2405 MHz, en plein sur le canal Wi-Fi 1. Deux précautions :
+**Cohabitation 2,4 GHz.** Le BenQ travaille à 2405 MHz. Le pont, lui, parle
+Thread, de préférence sur un canal loin de la lampe (le 25, à 2475 MHz, chez
+l'auteur). Mais chaque émission Thread du C6 désensibilise le BM5602 tout
+proche : au banc, 0 trame perdue sans Thread, jusqu'à 18 % de trames sans
+accusé avec Thread, toujours rattrapées par les renvois. Deux précautions :
 
-- éloigne physiquement le module de l'antenne de l'ESP32 (10–15 cm de nappe
-  suffisent, le SPI à 1 MHz supporte très bien) ;
-- mets ton point d'accès Wi-Fi sur le canal 11 (2462 MHz) si tu le peux.
-
-Sans ça, la réception du BM5602 est désensibilisée à chaque émission Wi-Fi et
-les trames de la télécommande passent à la trappe.
+- éloigne l'antenne du module de celle du C6, aux deux bouts du boîtier, et ne
+  la pose ni sur un plan de masse ni sous un fil ;
+- le canal Wi-Fi 1 (2412 MHz) recouvre celui de la lampe : si ton point
+  d'accès est tout près, mets-le sur le canal 11 (2462 MHz) si tu le peux.
 
 **Longueur du bus SPI.** 1 MHz par défaut (`RF_SPI_HZ` dans
 [src/config.h](../src/config.h)). Inutile de monter plus haut : une commande

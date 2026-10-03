@@ -201,14 +201,12 @@ flat side up, turned a quarter turn, antenna away from the C6:
 pio run -t upload -t monitor
 ```
 
-The default target is `esp32c6supermini` (Matter over Wi-Fi). The others are
-selected with `-e`: `esp32c6thread` (Matter over Thread), `esp32c3`,
-`esp32s3`, `esp32dev`.
+The default target is `esp32c6thread` (Matter over Thread), the bridge's. The
+others are selected with `-e`: `esp32c6supermini` (Matter over Wi-Fi),
+`esp32c3`, `esp32s3`, `esp32dev`.
 
-> A node paired over Thread (Apple Home) is reflashed with
-> `pio run -e esp32c6thread -t upload -t monitor`. The command without `-e`
-> would put the Wi-Fi build on it: the pairing stays in NVS, but the node
-> becomes unreachable until the Thread build comes back.
+> Do not flash a Wi-Fi build onto a node paired over Thread: the pairing stays
+> in NVS, but the node becomes unreachable until the Thread build comes back.
 
 If the board boot-loops right after flashing, the clone's flash memory does
 not like QIO mode: add `board_build.flash_mode = dio` to the environment.
