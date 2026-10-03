@@ -195,6 +195,45 @@ flat side up, turned a quarter turn, antenna away from the C6:
   <img src="docs/images/cablage-boitier-en.svg" alt="Halo bridge wiring in its enclosure: six wires between the C6 SuperMini seen from the back and the BM5602 flat side up" width="680">
 </p>
 
+## Enclosure
+
+A 3D-printed enclosure holds both boards, with their antennas at opposite ends
+(25 mm apart), and screws under the desk with two Ø3.5 × 16 mm countersunk wood
+screws. The WS2812 status LED shows through a diffusing window, and the USB-C
+port stays accessible.
+
+<p align="center">
+  <img src="docs/images/boitier-cablage.jpg" alt="Both boards wired in the enclosure base" width="24%">
+  <img src="docs/images/boitier-face.jpg" alt="Engraved Halo face, with the status LED window" width="24%">
+  <img src="docs/images/boitier-usb.jpg" alt="Closed enclosure, USB-C side" width="24%">
+  <img src="docs/images/boitier-pose.jpg" alt="Enclosure screwed under the desk" width="24%">
+</p>
+<p align="center">
+  <img src="docs/images/boitier-rendu-face.png" alt="Render: engraved face" width="24%">
+  <img src="docs/images/boitier-rendu-couvercle.png" alt="Render: lid, clips and springs" width="24%">
+  <img src="docs/images/boitier-rendu-eclate.png" alt="Exploded render: 25.3 mm between the antennas" width="24%">
+  <img src="docs/images/boitier-rendu-montage.png" alt="Render: both boards in the base" width="24%">
+</p>
+
+The files are in [hardware/boitier](hardware/boitier):
+
+| File | Part |
+|---|---|
+| `halo-bridge-housing.3mf` | Bambu Studio project: the four parts, already placed |
+| `Back.stl` | base (70.7 × 31.6 × 8.2 mm): the visible face, engraved "Halo" |
+| `Front.stl` | lid (70.7 × 31.6 × 7.0 mm): against the desk, clipped on; its springs press the boards down |
+| `Diffuser.stl` | white disc for the status LED window (AMS option) |
+| `Engravement.stl` | fill for "Halo", the R and the antenna marks (AMS option) |
+
+**Printing**: black PLA, 0.2 mm layers, 4 walls, 15 % infill, no supports.
+With an AMS, assign the engraving and the diffuser to a white PLA, without
+moving them. **Without an AMS, delete them before slicing**: printed in black,
+they would fill the engraving and block the status LED window.
+
+**Assembly**: the C6 components side down, USB-C in its opening; the BM5602
+flat side up, antenna toward the far wall (diagram above). The lid clips on,
+then the two screws go through the whole assembly.
+
 ## Building
 
 ```bash
@@ -505,6 +544,7 @@ docs/BRIEF-BOITIER.md     brief for the 3D-printed case
 docs/PISTES-FUTURES.md    ideas outside the current scope
 docs/ETUDE-THREAD-COMPAGNON.md  study of the network transport and of the companion app
 apps/macos/               macOS companion app (SwiftUI): USB and Thread network
+hardware/boitier/         3D-printed enclosure: 3MF project and 4 STL parts
 tools/test_halo1.sh       host tests of the Halo 1 protocol, module watchdog, status LED, BOOT button and JSON protocol, without a board
 tools/json_check.py       checks captured machine lines (and the examples in docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          git revision for FW_GIT_REV (PlatformIO dynamic flag)

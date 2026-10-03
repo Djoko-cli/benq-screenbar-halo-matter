@@ -191,6 +191,45 @@ visible, tourné d'un quart de tour, antenne à l'opposé du C6 :
   <img src="docs/images/cablage-boitier-fr.svg" alt="Câblage du pont Halo dans son boîtier : six fils entre le C6 SuperMini vu de dos et le BM5602 face plate" width="680">
 </p>
 
+## Boîtier
+
+Un boîtier imprimé en 3D tient les deux cartes, leurs antennes aux deux bouts
+(25 mm entre elles), et se visse sous le bureau par deux vis à bois
+Ø3,5 × 16 mm à tête fraisée. Le voyant WS2812 se voit à travers une fenêtre
+diffusante, et l'USB-C reste accessible.
+
+<p align="center">
+  <img src="docs/images/boitier-cablage.jpg" alt="Les deux cartes câblées dans le fond du boîtier" width="24%">
+  <img src="docs/images/boitier-face.jpg" alt="Face gravée Halo, avec la fenêtre du voyant" width="24%">
+  <img src="docs/images/boitier-usb.jpg" alt="Boîtier fermé, côté USB-C" width="24%">
+  <img src="docs/images/boitier-pose.jpg" alt="Boîtier vissé sous le bureau" width="24%">
+</p>
+<p align="center">
+  <img src="docs/images/boitier-rendu-face.png" alt="Rendu : face gravée" width="24%">
+  <img src="docs/images/boitier-rendu-couvercle.png" alt="Rendu : couvercle, pattes et ressorts" width="24%">
+  <img src="docs/images/boitier-rendu-eclate.png" alt="Rendu éclaté : 25,3 mm entre les antennes" width="24%">
+  <img src="docs/images/boitier-rendu-montage.png" alt="Rendu : les deux cartes dans le fond" width="24%">
+</p>
+
+Les fichiers sont dans [hardware/boitier](hardware/boitier) :
+
+| Fichier | Pièce |
+|---|---|
+| `halo-bridge-housing.3mf` | projet Bambu Studio : les quatre pièces, déjà placées |
+| `Back.stl` | fond (70,7 × 31,6 × 8,2 mm) : la face visible, gravée « Halo » |
+| `Front.stl` | couvercle (70,7 × 31,6 × 7,0 mm) : contre le bureau, clipsé ; ses ressorts plaquent les cartes |
+| `Diffuser.stl` | disque blanc de la fenêtre du voyant (option AMS) |
+| `Engravement.stl` | remplissage de « Halo », du R et des repères d'antenne (option AMS) |
+
+**Impression** : PLA noir, couches de 0,2 mm, 4 parois, 15 % de remplissage,
+sans supports. Avec un AMS, attribue la gravure et le diffuseur à un PLA blanc,
+sans les déplacer. **Sans AMS, supprime-les avant de trancher** : imprimés en
+noir, ils boucheraient la gravure et la fenêtre du voyant.
+
+**Montage** : le C6 composants vers le fond, USB-C dans son ouverture ; le
+BM5602 face plate en haut, antenne vers la paroi opposée (schéma ci-dessus).
+Le couvercle se clipse, puis les deux vis traversent l'ensemble.
+
 ## Compilation
 
 ```bash
@@ -503,6 +542,7 @@ docs/BRIEF-BOITIER.md     brief du boitier imprime 3D
 docs/PISTES-FUTURES.md    idees hors du perimetre actuel
 docs/ETUDE-THREAD-COMPAGNON.md  etude du transport reseau et de l'app compagnon
 apps/macos/               app compagnon macOS (SwiftUI) : USB et reseau Thread
+hardware/boitier/         boîtier imprimé en 3D : projet 3MF et 4 pièces STL
 tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du module, de la LED d'etat, du bouton BOOT et du protocole JSON, sans carte
 tools/json_check.py       verifie des lignes machine capturees (et les exemples de docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
