@@ -197,14 +197,13 @@ visible, tourné d'un quart de tour, antenne à l'opposé du C6 :
 pio run -t upload -t monitor
 ```
 
-La cible par défaut est `esp32c6supermini` (Matter sur Wi-Fi). Les autres se
-sélectionnent avec `-e` : `esp32c6thread` (Matter sur Thread), `esp32c3`,
-`esp32s3`, `esp32dev`.
+La cible par défaut est `esp32c6thread` (Matter sur Thread), celle du pont. Les
+autres se sélectionnent avec `-e` : `esp32c6supermini` (Matter sur Wi-Fi),
+`esp32c3`, `esp32s3`, `esp32dev`.
 
-> Un nœud appairé en Thread (Apple Home) se reflashe avec
-> `pio run -e esp32c6thread -t upload -t monitor`. La commande sans `-e` y
-> mettrait le build Wi-Fi : l'appairage reste en NVS, mais le nœud devient
-> injoignable jusqu'au retour du build Thread.
+> Ne flashe pas un build Wi-Fi sur un nœud appairé en Thread : l'appairage
+> reste en NVS, mais le nœud devient injoignable jusqu'au retour du build
+> Thread.
 
 Si la carte boucle au démarrage juste après le flash, c'est la mémoire flash du
 clone qui n'aime pas le mode QIO : ajoute `board_build.flash_mode = dio` dans

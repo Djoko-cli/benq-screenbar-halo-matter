@@ -88,15 +88,17 @@ change them there rather than in the code.
 most likely has its own decoupling: nothing has ever shown it to be
 necessary.
 
-**2.4 GHz coexistence.** The ESP32 transmits Wi-Fi up to +20 dBm; the BenQ
-operates at 2405 MHz, right on Wi-Fi channel 1. Two precautions:
+**2.4 GHz coexistence.** The BenQ operates at 2405 MHz. The bridge itself
+speaks Thread, preferably on a channel far from the lamp (25, at 2475 MHz, in
+the author's home). But every Thread transmission from the C6 desensitizes the
+nearby BM5602: on the bench, 0 frames lost without Thread, up to 18 % of frames
+without an acknowledgment with Thread, always recovered by the retries. Two
+precautions:
 
-- physically move the module away from the ESP32's antenna (10–15 cm of
-  ribbon cable is enough, 1 MHz SPI handles it fine);
-- put your Wi-Fi access point on channel 11 (2462 MHz) if you can.
-
-Without that, the BM5602's reception is desensitized by every Wi-Fi
-transmission, and the remote's frames fall through the cracks.
+- keep the module's antenna away from the C6's, at opposite ends of the
+  enclosure, and never over a ground plane or under a wire;
+- Wi-Fi channel 1 (2412 MHz) overlaps the lamp's: if your access point is very
+  close, move it to channel 11 (2462 MHz) if you can.
 
 **SPI bus length.** 1 MHz by default (`RF_SPI_HZ` in
 [src/config.h](../src/config.h)). No need to go higher: a Halo 1 command
