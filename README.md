@@ -115,7 +115,6 @@ demo mode (no hardware):
 |---|---|---|
 | **ESP32-C6 SuperMini** | MCU + Thread radio + Matter | ~€5 |
 | **Holtek BM5602-60-1 RF module** | 2.4 GHz transceiver | ~$3–4 |
-| 100 nF + 10 µF | decoupling of the module's supply | — |
 
 ### Why the ESP32-C6
 

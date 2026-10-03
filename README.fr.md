@@ -112,7 +112,6 @@ en mode démo (sans matériel) :
 |---|---|---|
 | **ESP32-C6 SuperMini** | MCU + radio Thread + Matter | ~5 € |
 | **Module RF Holtek BM5602-60-1** | transceiver 2,4 GHz | ~3–4 $ |
-| 100 nF + 10 µF | découplage de l'alim du module | — |
 
 ### Pourquoi l'ESP32-C6
 
