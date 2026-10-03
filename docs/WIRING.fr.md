@@ -10,20 +10,29 @@ de données, donc le MISO côté ESP32.
 
 ## Brochage du module BM5602-60-1
 
-Le module **n'a aucun marquage sérigraphié** sur ses pastilles. Oriente-le
-antenne en haut, texte `BM5602-60-1 V1.0` lisible : les 9 pastilles du bord
-inférieur sont alors, **de gauche à droite** :
+Le module **n'a aucun marquage sérigraphié** sur ses pastilles, et le texte
+`BM5602-60-1 V1.0` est imprimé sur **ses deux faces** : il ne suffit pas à
+l'orienter. Prends la **face composants**, celle de la puce et du quartz, antenne
+en haut : les 9 pastilles du bord inférieur sont alors, **de gauche à droite** :
 
 | # | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 |---|---|---|---|---|---|---|---|---|---|
 | | `VSS` | `VDD` | `GIO1` | `CSN` | `SCK` | `GIO2` | `SDIO` | `GIO3` | `GIO4` |
 | | GND | 3V3 | — | CS | horloge | **MISO** | **MOSI** | — | — |
 
+**Sur la face plate, l'ordre est inversé** : `GIO4` à gauche, `VSS` à droite.
+Les pastilles sont des trous traversants, visibles des deux côtés : c'est le
+piège.
+
 `GIO1`, `GIO3` et `GIO4` ne servent pas. Les deux pastilles isolées sur les
 bords gauche et droit, près de l'antenne, sont des `VSS` supplémentaires.
 
+**Vérifie avant de souder** : au multimètre, en continuité, la pastille 1
+(`VSS`) sonne avec ces pastilles isolées. C'est la seule de la rangée.
+
 Source : le schéma de câblage du
-[projet Halo 2](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png).
+[projet Halo 2](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png),
+qui montre la face composants.
 
 | BM5602-60-1 | Rôle SPI | **C6 SuperMini** | ESP32-C3 | ESP32-S3 | ESP32 (WROOM) |
 |---|---|---|---|---|---|
@@ -46,9 +55,10 @@ Cette carte a peu de broches vraiment libres :
 - **IO15** porte une LED simple, laissée en entrée (donc éteinte) par le
   firmware ; **IO9** est le bouton BOOT — le firmware s'en sert déjà.
 
-Restent **IO14** et **IO18–IO20**, toutes sur le connecteur **extérieur
-gauche**, dont l'ordre est `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. Les
-six fils, alimentation comprise, tiennent donc sur une seule rangée :
+Restent **IO14** et **IO18–IO20**, toutes sur la rangée qui porte aussi `3V3`,
+`GND` et `5V`. Dans l'ordre de la sérigraphie, au dos de la carte :
+`8 · 9 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. Les six fils, alimentation
+comprise, tiennent donc sur une seule rangée :
 
 ```
 IO14 ── CSN

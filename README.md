@@ -113,31 +113,26 @@ demo mode (no hardware):
 
 | Part | Role | Approx. price |
 |---|---|---|
-| **ESP32-C6 SuperMini** (or C3 / S3) | MCU + Wi-Fi + Matter | ~€5 |
+| **ESP32-C6 SuperMini** | MCU + Thread radio + Matter | ~€5 |
 | **Holtek BM5602-60-1 RF module** | 2.4 GHz transceiver | ~$3–4 |
 | 100 nF + 10 µF | decoupling of the module's supply | — |
 
-### Avoid the classic ESP32
+### Why the ESP32-C6
 
-`CONFIG_ENABLE_CHIPOBLE` — Matter commissioning over Bluetooth — **is not
-enabled in Arduino's precompiled libraries for the classic ESP32** (the
-Bluedroid stack does not fit). It is on C3, S3 and C6.
+The bridge joins Apple Home over **Matter over Thread** (`esp32c6thread`
+target). It needs an 802.15.4 radio: among the boards tried, only the C6 has
+one. The C3, the S3 and the classic ESP32 only have Wi-Fi. Their targets still
+build, as Matter over Wi-Fi, but the bridge does not use them and they are no
+longer tested.
 
-In practice:
+| Target | Matter network | Commissioning | Firmware size |
+|---|---|---|---|
+| **ESP32-C6 SuperMini** (`esp32c6thread`) ✅ | Thread | BLE | 2.50 MB |
+| ESP32-C3, ESP32-S3 | Wi-Fi only | BLE | 1.79 / 1.97 MB |
+| Classic ESP32 | Wi-Fi only | IP: credentials set first (`wifi <ssid> <mdp>`), the Bluetooth stack does not fit | 1.81 MB |
 
-| Target | Commissioning | Firmware size |
-|---|---|---|
-| **ESP32-C6 SuperMini** ✅ | BLE: the controller provides the Wi-Fi | 2.48 MB |
-| ESP32-C3 ✅ | BLE | 1.79 MB |
-| ESP32-S3 ✅ | BLE | 1.97 MB |
-| Classic ESP32 ⚠️ | IP: the Wi-Fi must be set first (`wifi <ssid> <mdp>`) | 1.81 MB |
-
-C6 size measured on Sep 24 (`esp32c6supermini`, 2,601,484 bytes; the
-`esp32c6thread` Thread bridge is 2,616,992 bytes). The three other targets
-have not been rebuilt since: those figures are older.
-
-The classic ESP32 remains usable — the `wifi` serial command stores the
-credentials in NVS, without recompiling — but it is one more step.
+C6 size measured on Sep 24 (2,616,992 bytes). The other targets have not been
+rebuilt since: their figures are older.
 
 ### Why the BM5602 and not a CC2500 or an nRF24L01+
 
@@ -189,8 +184,16 @@ See [docs/WIRING.md](docs/WIRING.md). In short, on the ESP32-C6 SuperMini
 | `CSN` | IO14 |
 
 > `GIO2` serves as MISO: the firmware switches the module to 4-wire SPI at
-> init. The module has no markings: the order of its pads is in
+> init. The module has no markings, and the order of its pads reverses
+> depending on the side you look at: see
 > [docs/WIRING.md](docs/WIRING.md#bm5602-60-1-module-pinout).
+
+In the enclosure, the C6 lies upside down (seen from the back) and the BM5602
+flat side up, turned a quarter turn, antenna away from the C6:
+
+<p align="center">
+  <img src="docs/images/cablage-boitier-en.svg" alt="Halo bridge wiring in its enclosure: six wires between the C6 SuperMini seen from the back and the BM5602 flat side up" width="680">
+</p>
 
 ## Building
 

@@ -110,31 +110,25 @@ en mode démo (sans matériel) :
 
 | Élément | Rôle | Prix indicatif |
 |---|---|---|
-| **ESP32-C6 SuperMini** (ou C3 / S3) | MCU + Wi-Fi + Matter | ~5 € |
+| **ESP32-C6 SuperMini** | MCU + radio Thread + Matter | ~5 € |
 | **Module RF Holtek BM5602-60-1** | transceiver 2,4 GHz | ~3–4 $ |
 | 100 nF + 10 µF | découplage de l'alim du module | — |
 
-### Évite l'ESP32 classique
+### Pourquoi l'ESP32-C6
 
-`CONFIG_ENABLE_CHIPOBLE` — la mise en service Matter par Bluetooth — **n'est pas
-activé dans les bibliothèques précompilées d'Arduino pour l'ESP32 classique**
-(la pile Bluedroid ne rentre pas). Il l'est sur C3, S3 et C6.
+Le pont rejoint Maison en **Matter sur Thread** (cible `esp32c6thread`). Il lui
+faut une radio 802.15.4 : parmi les cartes essayées, seul le C6 en a une. Le C3,
+le S3 et l'ESP32 classique n'ont que le Wi-Fi. Leurs cibles compilent encore, en
+Matter sur Wi-Fi, mais le pont ne s'en sert pas et elles ne sont plus testées.
 
-Concrètement :
+| Cible | Réseau Matter | Mise en service | Taille firmware |
+|---|---|---|---|
+| **ESP32-C6 SuperMini** (`esp32c6thread`) ✅ | Thread | BLE | 2,50 Mo |
+| ESP32-C3, ESP32-S3 | Wi-Fi seulement | BLE | 1,79 / 1,97 Mo |
+| ESP32 classique | Wi-Fi seulement | IP : identifiants à donner avant (`wifi <ssid> <mdp>`), la pile Bluetooth ne rentre pas | 1,81 Mo |
 
-| Cible | Mise en service | Taille firmware |
-|---|---|---|
-| **ESP32-C6 SuperMini** ✅ | BLE : le contrôleur fournit le Wi-Fi | 2,48 Mo |
-| ESP32-C3 ✅ | BLE | 1,79 Mo |
-| ESP32-S3 ✅ | BLE | 1,97 Mo |
-| ESP32 classique ⚠️ | IP : Wi-Fi à donner avant (`wifi <ssid> <mdp>`) | 1,81 Mo |
-
-Taille C6 relevée le 24/09 (`esp32c6supermini`, 2 601 484 octets ; le pont
-Thread `esp32c6thread` fait 2 616 992 octets). Les trois autres cibles n'ont
-pas été recompilées depuis : ces chiffres sont plus anciens.
-
-L'ESP32 classique reste utilisable — la commande série `wifi` enregistre les
-identifiants en NVS, sans recompilation — mais c'est une étape en plus.
+Taille C6 relevée le 24/09 (2 616 992 octets). Les autres cibles n'ont pas été
+recompilées depuis : leurs chiffres sont plus anciens.
 
 ### Pourquoi le BM5602 et pas un CC2500 ou un nRF24L01+
 
@@ -186,8 +180,16 @@ Voir [docs/WIRING.md](docs/WIRING.fr.md). En résumé, sur ESP32-C6 SuperMini
 | `CSN` | IO14 |
 
 > `GIO2` sert de MISO : le firmware bascule le module en SPI 4 fils à l'init.
-> Le module n'a aucun marquage : l'ordre de ses pastilles est dans
+> Le module n'a aucun marquage, et l'ordre de ses pastilles s'inverse selon la
+> face regardée : voir
 > [docs/WIRING.md](docs/WIRING.fr.md#brochage-du-module-bm5602-60-1).
+
+Dans le boîtier, le C6 est posé à l'envers (vu de dos) et le BM5602 face plate
+visible, tourné d'un quart de tour, antenne à l'opposé du C6 :
+
+<p align="center">
+  <img src="docs/images/cablage-boitier-fr.svg" alt="Câblage du pont Halo dans son boîtier : six fils entre le C6 SuperMini vu de dos et le BM5602 face plate" width="680">
+</p>
 
 ## Compilation
 

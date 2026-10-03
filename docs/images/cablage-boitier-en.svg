@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="700" viewBox="0 0 680 700" role="img">
+<title>Halo bridge in its enclosure, top view</title><desc>Top view of the enclosure: left, the ESP32-C6 SuperMini seen from the back; right, the BM5602 flat side up, turned a quarter turn, antenna on the right, pads on the left edge from 9 at the top to 1 at the bottom. Six wires: IO14 to CSN, IO18 to SCK, IO19 to GIO2, IO20 to SDIO, 3V3 to VDD, GND to VSS.</desc>
+<style>
+.fond{fill:#ffffff}.t{font:500 14px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1f2328}
+.ts{font:400 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#59636e}
+.c6{fill:#eeedfe;stroke:#534ab7;stroke-width:1}.mod{fill:#f6f8fa;stroke:#8c959f;stroke-width:1}
+.off{fill:#d0d7de;stroke:#8c959f;stroke-width:.5}.pt{fill:none;stroke:#8c959f;stroke-width:.6;stroke-dasharray:4 4}
+@media (prefers-color-scheme:dark){.fond{fill:#0d1117}.t{fill:#e6edf3}.ts{fill:#9198a1}
+.c6{fill:#26215c;stroke:#afa9ec}.mod{fill:#161b22;stroke:#6e7681}.off{fill:#30363d;stroke:#6e7681}.pt{stroke:#6e7681}}
+</style>
+<rect class="fond" x="0" y="0" width="680" height="700" rx="12"/>
+<text class="t" x="40" y="30">Halo bridge in its enclosure, top view</text>
+<rect class="c6" x="60" y="60" width="170" height="420" rx="6"/>
+<circle class="off" cx="75" cy="90" r="5" opacity=".6"/><text class="ts" x="88" y="94" opacity=".7">7</text>
+<circle class="off" cx="215" cy="90" r="6" opacity=".6"/><text class="ts" x="200" y="94" text-anchor="end" opacity=".7">8</text>
+<circle class="off" cx="75" cy="130" r="5" opacity=".6"/><text class="ts" x="88" y="134" opacity=".7">6</text>
+<circle class="off" cx="215" cy="130" r="6" opacity=".6"/><text class="ts" x="200" y="134" text-anchor="end" opacity=".7">9</text>
+<circle class="off" cx="75" cy="170" r="5" opacity=".6"/><text class="ts" x="88" y="174" opacity=".7">5</text>
+<circle cx="215" cy="170" r="6" fill="#7F77DD"/><text class="t" x="200" y="174" text-anchor="end">14</text>
+<circle class="off" cx="75" cy="210" r="5" opacity=".6"/><text class="ts" x="88" y="214" opacity=".7">4</text>
+<circle class="off" cx="215" cy="210" r="6" opacity=".6"/><text class="ts" x="200" y="214" text-anchor="end" opacity=".7">15</text>
+<circle class="off" cx="75" cy="250" r="5" opacity=".6"/><text class="ts" x="88" y="254" opacity=".7">3</text>
+<circle cx="215" cy="250" r="6" fill="#EF9F27"/><text class="t" x="200" y="254" text-anchor="end">18</text>
+<circle class="off" cx="75" cy="290" r="5" opacity=".6"/><text class="ts" x="88" y="294" opacity=".7">2</text>
+<circle cx="215" cy="290" r="6" fill="#639922"/><text class="t" x="200" y="294" text-anchor="end">19</text>
+<circle class="off" cx="75" cy="330" r="5" opacity=".6"/><text class="ts" x="88" y="334" opacity=".7">1</text>
+<circle cx="215" cy="330" r="6" fill="#378ADD"/><text class="t" x="200" y="334" text-anchor="end">20</text>
+<circle class="off" cx="75" cy="370" r="5" opacity=".6"/><text class="ts" x="88" y="374" opacity=".7">0</text>
+<circle cx="215" cy="370" r="6" fill="#E24B4A"/><text class="t" x="200" y="374" text-anchor="end">3V3</text>
+<circle class="off" cx="75" cy="410" r="5" opacity=".6"/><text class="ts" x="88" y="414" opacity=".7">17</text>
+<circle cx="215" cy="410" r="6" fill="#888780"/><text class="t" x="200" y="414" text-anchor="end">GND</text>
+<circle class="off" cx="75" cy="450" r="5" opacity=".6"/><text class="ts" x="88" y="454" opacity=".7">16</text>
+<circle class="off" cx="215" cy="450" r="6" opacity=".6"/><text class="ts" x="200" y="454" text-anchor="end" opacity=".7">5V</text>
+<text class="ts" x="145" y="246" text-anchor="middle">ESP32-C6</text>
+<text class="ts" x="145" y="262" text-anchor="middle">SuperMini</text>
+<text class="ts" x="145" y="278" text-anchor="middle">back side</text>
+<rect class="mod" x="400" y="160" width="200" height="250" rx="4"/>
+<rect class="pt" x="548" y="172" width="42" height="226" rx="4"/>
+<text class="ts" x="574" y="285" text-anchor="middle" transform="rotate(90 574 285)">printed antenna</text>
+<text class="t" x="512" y="285" text-anchor="middle" transform="rotate(90 512 285)">BM5602-60-1 V1.0</text>
+<rect x="565" y="160" width="12" height="8" rx="1" fill="#888780"/><rect x="565" y="402" width="12" height="8" rx="1" fill="#888780"/>
+<text class="ts" x="500" y="150" text-anchor="middle">flat side up</text>
+<rect class="off" x="401" y="200" width="14" height="12" rx="2" opacity=".6"/><text class="ts" x="424" y="210" opacity=".7">9</text>
+<rect class="off" x="401" y="222" width="14" height="12" rx="2" opacity=".6"/><text class="ts" x="424" y="232" opacity=".7">8</text>
+<rect x="401" y="244" width="14" height="12" rx="2" fill="#378ADD"/><text class="ts" x="424" y="254">7 · SDIO</text>
+<line x1="221" y1="330" x2="401" y2="250" stroke="#378ADD" stroke-width="3" stroke-linecap="round"/>
+<rect x="401" y="266" width="14" height="12" rx="2" fill="#639922"/><text class="ts" x="424" y="276">6 · GIO2</text>
+<line x1="221" y1="290" x2="401" y2="272" stroke="#639922" stroke-width="3" stroke-linecap="round"/>
+<rect x="401" y="288" width="14" height="12" rx="2" fill="#EF9F27"/><text class="ts" x="424" y="298">5 · SCK</text>
+<line x1="221" y1="250" x2="401" y2="294" stroke="#EF9F27" stroke-width="3" stroke-linecap="round"/>
+<rect x="401" y="310" width="14" height="12" rx="2" fill="#7F77DD"/><text class="ts" x="424" y="320">4 · CSN</text>
+<line x1="221" y1="170" x2="401" y2="316" stroke="#7F77DD" stroke-width="3" stroke-linecap="round"/>
+<rect class="off" x="401" y="332" width="14" height="12" rx="2" opacity=".6"/><text class="ts" x="424" y="342" opacity=".7">3</text>
+<rect x="401" y="354" width="14" height="12" rx="2" fill="#E24B4A"/><text class="ts" x="424" y="364">2 · VDD</text>
+<line x1="221" y1="370" x2="401" y2="360" stroke="#E24B4A" stroke-width="3" stroke-linecap="round"/>
+<rect x="401" y="376" width="14" height="12" rx="2" fill="#888780"/><text class="ts" x="424" y="386">1 · VSS</text>
+<line x1="221" y1="410" x2="401" y2="382" stroke="#888780" stroke-width="3" stroke-linecap="round"/>
+<line x1="60" y1="516" x2="92" y2="516" stroke="#888780" stroke-width="3" stroke-linecap="round"/><text class="t" x="102" y="521">GND → 1 · VSS</text>
+<line x1="60" y1="544" x2="92" y2="544" stroke="#E24B4A" stroke-width="3" stroke-linecap="round"/><text class="t" x="102" y="549">3V3 → 2 · VDD</text>
+<line x1="60" y1="572" x2="92" y2="572" stroke="#7F77DD" stroke-width="3" stroke-linecap="round"/><text class="t" x="102" y="577">IO14 → 4 · CSN</text>
+<line x1="360" y1="516" x2="392" y2="516" stroke="#EF9F27" stroke-width="3" stroke-linecap="round"/><text class="t" x="402" y="521">IO18 → 5 · SCK</text>
+<line x1="360" y1="544" x2="392" y2="544" stroke="#639922" stroke-width="3" stroke-linecap="round"/><text class="t" x="402" y="549">IO19 → 6 · GIO2</text>
+<line x1="360" y1="572" x2="392" y2="572" stroke="#378ADD" stroke-width="3" stroke-linecap="round"/><text class="t" x="402" y="577">IO20 → 7 · SDIO</text>
+<rect class="pt" x="40" y="598" width="600" height="84" rx="8"/>
+<text class="ts" x="56" y="622">Flat side up: reverse order of the component side. Pad 1 · VSS is at the bottom.</text>
+<text class="ts" x="56" y="646">Before soldering: pad 1 must beep with a small VSS pad near the antenna.</text>
+<text class="ts" x="56" y="670">The SPI wires cross, power runs straight. Nothing on pads 3, 8, 9 or IO15.</text>
+</svg>
