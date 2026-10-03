@@ -29,15 +29,18 @@
   confirmer sur la carte reelle) ;
 - boutons **BOOT (IO9)** et **RESET** pres de l'USB ; LED d'etat du firmware :
   la **WS2812 sur IO8** (la LED simple d'IO15 reste eteinte) ;
-- connecteur exterieur gauche, pas de 2,54 mm, dans cet ordre :
-  `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
+- rangee qui porte 3V3, GND et 5V, pas de 2,54 mm, dans l'ordre de la
+  serigraphie au dos : `8 · 9 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
   **IO21 et IO22 sont des trous interieurs** : ne pas les utiliser.
 
 **BM5602-60-1** (module Holtek, antenne imprimee integree) :
 - dimensions **a mesurer** (aucune fiche fiable) ;
-- aucune serigraphie. Antenne en haut, texte `BM5602-60-1 V1.0` lisible : les
-  9 pastilles du bord inferieur sont, de gauche a droite,
+- aucun marquage sur les pastilles, et le texte `BM5602-60-1 V1.0` est sur les
+  deux faces. Face composants (puce, quartz), antenne en haut : les 9 pastilles
+  du bord inferieur sont, de gauche a droite,
   `VSS · VDD · GIO1 · CSN · SCK · GIO2 · SDIO · GIO3 · GIO4`.
+  **Sur la face plate, l'ordre est inverse.** Les pastilles sont des trous
+  traversants : verifier la VSS au multimetre avant de souder.
   Deux pastilles isolees pres de l'antenne, a gauche et a droite, sont des VSS
   supplementaires (non necessaires).
 - **3,3 V uniquement** : ne jamais le relier au 5 V.

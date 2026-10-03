@@ -29,15 +29,18 @@
   be confirmed on the real board);
 - **BOOT (IO9)** and **RESET** buttons near the USB; firmware status LED:
   the **WS2812 on IO8** (the simple LED on IO15 stays off);
-- left outer header, 2.54 mm pitch, in this order:
-  `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
+- the row that carries 3V3, GND and 5V, 2.54 mm pitch, in the order printed
+  on the back: `8 · 9 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`.
   **IO21 and IO22 are inner holes**: do not use them.
 
 **BM5602-60-1** (Holtek module, integrated printed antenna):
 - dimensions **to be measured** (no reliable datasheet);
-- no silkscreen. Antenna at the top, `BM5602-60-1 V1.0` text readable: the
-  9 pads on the bottom edge are, left to right,
+- no markings on the pads, and the `BM5602-60-1 V1.0` text is on both sides.
+  Component side (chip, crystal), antenna at the top: the 9 pads on the bottom
+  edge are, left to right,
   `VSS · VDD · GIO1 · CSN · SCK · GIO2 · SDIO · GIO3 · GIO4`.
+  **On the flat side, the order is reversed.** The pads are through-holes:
+  check VSS with a multimeter before soldering.
   Two isolated pads near the antenna, on the left and right, are extra VSS
   pads (not needed).
 - **3.3 V only**: never connect it to 5 V.

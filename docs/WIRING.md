@@ -10,20 +10,30 @@ the data output, i.e., the MISO on the ESP32 side.
 
 ## BM5602-60-1 module pinout
 
-The module **has no silkscreen markings** on its pads. Orient it with the
-antenna at the top and the `BM5602-60-1 V1.0` text readable: the 9 pads on
-the bottom edge are then, **left to right**:
+The module **has no silkscreen markings** on its pads, and the
+`BM5602-60-1 V1.0` text is printed on **both sides**: it is not enough to
+orient it. Take the **component side**, the one with the chip and the crystal,
+antenna at the top: the 9 pads on the bottom edge are then, **left to right**:
 
 | # | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 |---|---|---|---|---|---|---|---|---|---|
 | | `VSS` | `VDD` | `GIO1` | `CSN` | `SCK` | `GIO2` | `SDIO` | `GIO3` | `GIO4` |
 | | GND | 3V3 | — | CS | clock | **MISO** | **MOSI** | — | — |
 
+**On the flat side, the order is reversed**: `GIO4` on the left, `VSS` on
+the right. The pads are through-holes, visible from both sides: that is the
+trap.
+
 `GIO1`, `GIO3`, and `GIO4` are not used. The two isolated pads on the left
 and right edges, near the antenna, are extra `VSS` pads.
 
+**Check before soldering**: with a multimeter in continuity mode, pad 1
+(`VSS`) beeps with these isolated pads. It is the only one in the row that
+does.
+
 Source: the wiring diagram from the
-[Halo 2 project](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png).
+[Halo 2 project](https://github.com/kuzmin-no/BenQ_ScreenBar_HALO_2_HA_integration/blob/main/img/connection_diagramm.png),
+which shows the component side.
 
 | BM5602-60-1 | SPI role | **C6 SuperMini** | ESP32-C3 | ESP32-S3 | ESP32 (WROOM) |
 |---|---|---|---|---|---|
@@ -46,9 +56,10 @@ This board has few truly free pins:
 - **IO15** carries a simple LED, left as an input (so off) by the firmware;
   **IO9** is the BOOT button — the firmware already uses it.
 
-That leaves **IO14** and **IO18–IO20**, all on the **left outer** header,
-whose order is `6 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. The six wires,
-power included, therefore fit on a single row:
+That leaves **IO14** and **IO18–IO20**, all on the row that also carries
+`3V3`, `GND`, and `5V`. In the order printed on the back of the board:
+`8 · 9 · 14 · 15 · 18 · 19 · 20 · 3V3 · GND · 5V`. The six wires, power
+included, therefore fit on a single row:
 
 ```
 IO14 ── CSN
