@@ -1120,7 +1120,7 @@ pio run -e esp32c6supermini    # size < 3 MB (current margin ~0.7 MB)
 
 To flash: `pio run -e esp32c6diag -t upload --upload-port /dev/cu.usbmodem144401`.
 
-We do not commit the modified `.pyc`: `git checkout -- tools/audit/indep_pll/__pycache__/pll.cpython-311.pyc`, and add `__pycache__/` to `.gitignore`.
+We do not commit the modified `.pyc`: `git checkout -- tools/audit/indep_pll/__pycache__/pll.cpython-311.pyc`, and add `__pycache__/` to `.gitignore`. This `.pyc` was later removed from the whole history when it was rewritten on 2026-10-05.
 
 **C1 "Neutralize the Halo 2 layer of the product path"**
 - Content: F.1.
