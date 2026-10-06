@@ -87,7 +87,7 @@ Un script par dépôt, `outils/publier.sh X.Y.Z`. Pour le pont Halo, il se trouv
 7. **La publication sur GitHub :** juste avant, l'état est relu (`main` inchangée et à jour, `gh` connecté, `git push --dry-run` qui passe, version publiée absente : toute autre réponse de `gh release view` est un refus). Puis `gh release create --target <commit vérifié>`, avec le `.dmg`, crée l'étiquette de l'app (`maillage-vX.Y.Z` ou `compagnon-vX.Y.Z`) et la version publiée. Chaque geste fait est noté dans `gestes.txt`, dans le dossier des produits, et la reprise, si le script s'arrête en route, part de ce fichier, geste par geste. Puis le flux est commité sur `main` (un `git add` de ce seul fichier, un message en français sans accents terminé par la ligne Co-Authored-By) et poussé aussitôt.
 8. **La remise :** le `.dmg` est copié sur le Bureau.
 
-**Les notes de version** viennent d'un fichier `NOTES-VERSIONS.md` par app, en français et en anglais, dont une section par version.
+**Les notes de version** viennent d'un fichier `NOTES-VERSIONS.md` par app, en anglais puis en français, dont une section par version.
 
 **Le README de chaque app** dit :
 - comment l'installer depuis les versions publiées ;
