@@ -108,9 +108,17 @@ struct PontReseauTests {
         #expect(t.lister().isEmpty)
     }
 
+    /// Sans route : ce que dit le bandeau, selon l'etat de Thread Route.
     @Test func textePasDeRoute() {
-        #expect(AlerteReseau.textePasDeRoute(assistant: false).contains("installer.sh"))
-        #expect(!AlerteReseau.textePasDeRoute(assistant: true).contains("installer.sh"))
+        let installer = "sh tools/macos/thread-route/installer.sh"
+        #expect(AlerteReseau.textePasDeRoute(.absent).contains(installer))
+        #expect(AlerteReseau.textePasDeRoute(.ancien).contains(installer), "halo-routes a remplacer")
+        #expect(!AlerteReseau.textePasDeRoute(.actif).contains("installer.sh"), "la route revient d'elle-meme")
+        #expect(AlerteReseau.textePasDeRoute(.aApprouver).contains("Réglages Système"))
+        #expect(!AlerteReseau.textePasDeRoute(.aApprouver).contains("installer.sh"))
+        for e in [EtatThreadRoute.absent, .aApprouver, .actif, .ancien] {
+            #expect(AlerteReseau.textePasDeRoute(e).hasPrefix(ErreurReseau.pasDeRoute.description + " "))
+        }
     }
 
     @Test func creerLaCleParLUSB() async throws {

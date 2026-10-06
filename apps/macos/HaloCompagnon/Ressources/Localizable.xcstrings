@@ -415,6 +415,22 @@
         }
       }
     },
+    "Absent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Absent"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Absent"
+          }
+        }
+      }
+    },
     "Abîmées · fragments" : {
       "localizations" : {
         "en" : {
@@ -453,6 +469,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Accès réseau Thread"
+          }
+        }
+      }
+    },
+    "Actif" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actif"
           }
         }
       }
@@ -1545,6 +1577,22 @@
         }
       }
     },
+    "Désactivé dans Réglages Système" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turned off in System Settings"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Désactivé dans Réglages Système"
+          }
+        }
+      }
+    },
     "EN PANNE" : {
       "localizations" : {
         "en" : {
@@ -1797,22 +1845,6 @@
         }
       }
     },
-    "Installer l'assistant système : sh tools/macos/halo-routes/installer.sh" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Install the system helper: sh tools/macos/halo-routes/installer.sh"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installer l'assistant système : sh tools/macos/halo-routes/installer.sh"
-          }
-        }
-      }
-    },
     "Instantané complet (json etat)" : {
       "localizations" : {
         "en" : {
@@ -1905,18 +1937,18 @@
         }
       }
     },
-    "L'assistant système halo-routes est installé : la route revient d'elle-même." : {
+    "L'autoriser dans Réglages Système, Général, Ouverture et extensions." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The halo-routes system helper is installed: the route will come back by itself."
+            "value" : "Allow it in System Settings, General, Login Items & Extensions."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "L'assistant système halo-routes est installé : la route revient d'elle-même."
+            "value" : "L'autoriser dans Réglages Système, Général, Ouverture et extensions."
           }
         }
       }
@@ -2505,6 +2537,22 @@
         }
       }
     },
+    "Ouvrir Réglages Système…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open System Settings…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvrir Réglages Système…"
+          }
+        }
+      }
+    },
     "PAN · puissance" : {
       "localizations" : {
         "en" : {
@@ -2775,6 +2823,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "To add it to another ecosystem (Google Home, Alexa…), open its settings in Home and choose “Turn On Pairing Mode”: Home then gives a temporary code."
+          }
+        }
+      }
+    },
+    "Pour l'installer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To install it: sh tools/macos/thread-route/installer.sh (administrator password)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour l'installer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)."
+          }
+        }
+      }
+    },
+    "Pour le remplacer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To replace it: sh tools/macos/thread-route/installer.sh (administrator password)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour le remplacer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)."
           }
         }
       }
@@ -3445,6 +3525,38 @@
         }
       }
     },
+    "Thread Route" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread Route"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread Route"
+          }
+        }
+      }
+    },
+    "Thread Route est actif : la route revient d'elle-même." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread Route is active: the route will come back by itself."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thread Route est actif : la route revient d'elle-même."
+          }
+        }
+      }
+    },
     "Thread et Matter" : {
       "localizations" : {
         "en" : {
@@ -4047,6 +4159,22 @@
         }
       }
     },
+    "halo-routes, son ancien nom, est encore installé" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "halo-routes, its former name, is still installed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "halo-routes, son ancien nom, est encore installé"
+          }
+        }
+      }
+    },
     "hors RX" : {
       "localizations" : {
         "en" : {
@@ -4573,6 +4701,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sent (tx)"
+          }
+        }
+      }
+    },
+    "État" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Status"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "État"
           }
         }
       }

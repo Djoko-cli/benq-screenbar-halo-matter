@@ -376,10 +376,14 @@ the board frees up right away. On a network source, "Release Port" has
 nothing to flash: the note and the sidebar say "Network session closed",
 and nothing reopens before "Reconnect".
 
-The "No IPv6 route" message depends on the `tools/macos/thread-route/` system
-helper: if its `/Library/LaunchDaemons/fr.djoko.thread.route.plist` file is
-visible from the sandbox, the message says the route comes back on its
-own; otherwise it points to `sh tools/macos/thread-route/installer.sh`.
+The "No IPv6 route" message depends on Thread Route, the
+`tools/macos/thread-route/` system helper (formerly halo-routes). The app
+reads its status from macOS (`SMAppService.statusForLegacyPlist`, which the
+sandbox allows), with every message and every time Settings opens (General,
+Thread Route): active, the message says the route comes back on its own;
+absent, or halo-routes still there, it points to
+`sh tools/macos/thread-route/installer.sh`; turned off in System Settings,
+it says to allow it there.
 
 **Signing and local network authorization.** The network source requires
 the `com.apple.security.network.client` entitlement and

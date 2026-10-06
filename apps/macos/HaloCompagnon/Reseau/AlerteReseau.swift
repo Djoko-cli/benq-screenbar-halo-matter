@@ -10,7 +10,7 @@ enum AlerteReseau: Equatable, Sendable {
 
     var texte: String {
         switch self {
-        case .transport(.pasDeRoute): Self.textePasDeRoute(assistant: Self.assistantInstalle)
+        case .transport(.pasDeRoute): Self.textePasDeRoute(EtatThreadRoute.lire())
         case .transport(let e): e.description
         case .trousseau(let e): e.description
         case .sansHello:
@@ -18,14 +18,9 @@ enum AlerteReseau: Equatable, Sendable {
         }
     }
 
-    static func textePasDeRoute(assistant: Bool) -> String {
-        ErreurReseau.pasDeRoute.description + " " + (assistant
-            ? tr("L'assistant système halo-routes est installé : la route revient d'elle-même.")
-            : tr("Installer l'assistant système : sh tools/macos/halo-routes/installer.sh"))
-    }
-
-    /// Le plist de l'assistant (10.1), si la sandbox laisse le voir.
-    static var assistantInstalle: Bool {
-        FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/fr.djoko.halo.routes.plist")
+    /// Sans route : la route revient d'elle-meme si Thread Route est actif (10.1) ; sinon, ce qu'il reste a faire.
+    static func textePasDeRoute(_ etat: EtatThreadRoute) -> String {
+        ErreurReseau.pasDeRoute.description + " "
+            + (etat.consigne ?? tr("Thread Route est actif : la route revient d'elle-même."))
     }
 }

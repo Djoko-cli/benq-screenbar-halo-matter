@@ -1,4 +1,5 @@
 import HaloProtocole
+import ServiceManagement
 import SwiftUI
 
 /// Fenetre Reglages (⌘,) : la langue de l'interface.
@@ -26,7 +27,7 @@ struct FenetreReglages: View {
     }
 }
 
-/// Onglet Général : langue de l'app.
+/// Onglet Général : langue de l'app, Thread Route.
 struct Reglages: View {
     @AppStorage(ReglageLangue.cle) private var choix: ChoixLangue = .systeme
 
@@ -58,9 +59,33 @@ struct Reglages: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            SectionThreadRoute()
         }
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Onglet General : Thread Route, le demon qui garde la route du Mac vers le reseau Thread (10.1). Son etat
+/// est relu a chaque apparition de l'onglet : une installation ou une approbation faites entre-temps s'y voient.
+struct SectionThreadRoute: View {
+    @State private var etat = EtatThreadRoute.lire()
+
+    var body: some View {
+        Section("Thread Route") {
+            LabeledContent("État", value: etat.libelle)
+            if let c = etat.consigne {
+                Text(c)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if etat == .aApprouver {
+                Button("Ouvrir Réglages Système…") { SMAppService.openSystemSettingsLoginItems() }
+            }
+        }
+        .onAppear { etat = EtatThreadRoute.lire() }
     }
 }

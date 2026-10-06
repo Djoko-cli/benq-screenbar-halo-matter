@@ -367,11 +367,13 @@ place sur la carte se libère tout de suite. Sur une source réseau,
 « Libérer le port » n'a rien à flasher : la note et la barre latérale disent
 « Session réseau fermée », et rien ne se rouvre avant « Reconnecter ».
 
-Le message « Pas de route » dépend de l'assistant système
-`tools/macos/thread-route/` : si son fichier
-`/Library/LaunchDaemons/fr.djoko.thread.route.plist` est visible depuis le bac
-à sable, le message dit que la route revient seule ; sinon il renvoie à
-`sh tools/macos/thread-route/installer.sh`.
+Le message « Pas de route » dépend de Thread Route, l'assistant système
+`tools/macos/thread-route/` (anciennement halo-routes). L'app lit son état
+auprès de macOS (`SMAppService.statusForLegacyPlist`, que permet le bac à
+sable), à chaque message et à chaque ouverture des Réglages (Général, Thread
+Route) : actif, le message dit que la route revient seule ; absent, ou
+halo-routes encore là, il renvoie à `sh tools/macos/thread-route/installer.sh` ;
+désactivé dans Réglages Système, il dit de l'y autoriser.
 
 **Signature et autorisation réseau local.** La source réseau demande le
 droit `com.apple.security.network.client` et
