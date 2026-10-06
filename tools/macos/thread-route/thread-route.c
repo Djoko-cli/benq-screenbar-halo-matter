@@ -1,5 +1,5 @@
 // ===========================================================================
-//  halo-routes : garde la route du reseau Thread sur un Mac
+//  thread-route : garde la route du reseau Thread sur un Mac
 //
 //  Le Mac joint les noeuds Thread (le pont Halo) par le prefixe OMR que les
 //  routeurs de bordure (HomePod, Apple TV) annoncent sur le LAN (option RIO).
@@ -89,7 +89,7 @@ static bool sTronquee = false;     // liste tronquee : nos routes ne sont plus r
 static bool sPleineNotee = false;  // sNotres pleine : un changement refuse
 
 // ---------------------------------------------------------------------------
-//  Journal (stderr : launchd le range dans /Library/Logs/fr.djoko.halo.routes.log)
+//  Journal (stderr : launchd le range dans /Library/Logs/fr.djoko.thread.route.log)
 // ---------------------------------------------------------------------------
 
 __attribute__((format(printf, 1, 2))) static void journal(const char *fmt, ...) {
@@ -98,7 +98,7 @@ __attribute__((format(printf, 1, 2))) static void journal(const char *fmt, ...) 
   struct tm tm;
   localtime_r(&t, &tm);
   strftime(quand, sizeof(quand), "%Y-%m-%d %H:%M:%S", &tm);
-  fprintf(stderr, "%s halo-routes : ", quand);
+  fprintf(stderr, "%s thread-route : ", quand);
   va_list ap;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
@@ -635,12 +635,12 @@ int main(int argc, char **argv) {
       case '1': unSeul = true; break;
       case 'v': sDetail = true; break;
       default:
-        fprintf(stderr, "usage : halo-routes [-n] [-1] [-v]\n");
+        fprintf(stderr, "usage : thread-route [-n] [-1] [-v]\n");
         return 2;
     }
   }
   if (!sEssai && geteuid() != 0) {
-    fprintf(stderr, "halo-routes : root requis pour poser des routes (ou -n pour un essai)\n");
+    fprintf(stderr, "thread-route : root requis pour poser des routes (ou -n pour un essai)\n");
     return 1;
   }
   sSockNd = socket(AF_INET6, SOCK_DGRAM, 0);

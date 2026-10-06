@@ -1,7 +1,7 @@
 #pragma once
 // ===========================================================================
-//  halo-routes : decision pure (sans appel systeme), testee sur le Mac
-//  (test_logique.c). Voir halo-routes.c pour le contexte.
+//  thread-route : decision pure (sans appel systeme), testee sur le Mac
+//  (test_logique.c). Voir thread-route.c pour le contexte.
 //
 //  Pour un prefixe annonce par les routeurs de bordure Thread (option RIO),
 //  a partir de ce que le noyau en sait (liste des routes annoncees, etat des

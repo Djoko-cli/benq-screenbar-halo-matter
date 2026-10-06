@@ -376,10 +376,10 @@ the board frees up right away. On a network source, "Release Port" has
 nothing to flash: the note and the sidebar say "Network session closed",
 and nothing reopens before "Reconnect".
 
-The "No IPv6 route" message depends on the `tools/macos/halo-routes/` system
-helper: if its `/Library/LaunchDaemons/fr.djoko.halo.routes.plist` file is
+The "No IPv6 route" message depends on the `tools/macos/thread-route/` system
+helper: if its `/Library/LaunchDaemons/fr.djoko.thread.route.plist` file is
 visible from the sandbox, the message says the route comes back on its
-own; otherwise it points to `sh tools/macos/halo-routes/installer.sh`.
+own; otherwise it points to `sh tools/macos/thread-route/installer.sh`.
 
 **Signing and local network authorization.** The network source requires
 the `com.apple.security.network.client` entitlement and
@@ -529,8 +529,8 @@ dnssd, and Synchronization, all available on iOS).
 - **Route**: remove the static IPv6 route to the OMR prefix → sidebar
   status line "No IPv6 route…" (no banner) and a console note, "Transport
   closed: Network connection lost: …" if a session was open; then
-  recovery by the `tools/macos/halo-routes` helper (log
-  `/Library/Logs/fr.djoko.halo.routes.log`). Note the errno seen: the
+  recovery by the `tools/macos/thread-route` helper (log
+  `/Library/Logs/fr.djoko.thread.route.log`). Note the errno seen: the
   message states it ("No IPv6 route": `EHOSTUNREACH`, `ENETUNREACH`, or
   `ENETDOWN`; "Bridge not found": `EHOSTDOWN` or a resolution failure);
   `python3 tools/halo_udp.py refus <adresse OMR> 5480` shows the raw
@@ -539,9 +539,9 @@ dnssd, and Synchronization, all available on iOS).
   route** (its flow keeps its existing next hop): only new connections
   fail. Helper active: a 0.3 s gap, nothing visible. To see the status
   line, stop the helper (`sudo launchctl bootout
-  system/fr.djoko.halo.routes`: it removes its routes on the way out),
+  system/fr.djoko.thread.route`: it removes its routes on the way out),
   then "Disconnect" and "Reconnect"; restart it (`sudo launchctl bootstrap
-  system /Library/LaunchDaemons/fr.djoko.halo.routes.plist`): recovery 8 s
+  system /Library/LaunchDaemons/fr.djoko.thread.route.plist`): recovery 8 s
   after the route came back on Sep 25, at most one reconnection delay
   since then (a connection with no route gives up right away).
 - **Bridge without a key**: `json cle efface` over USB, then a network

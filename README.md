@@ -558,7 +558,7 @@ tools/test_halo1.sh       host tests of the Halo 1 protocol, module watchdog, st
 tools/json_check.py       checks captured machine lines (and the examples in docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          git revision for FW_GIT_REV (PlatformIO dynamic flag)
 tools/halo_udp.py         bench client of the network transport (key, session, refusal)
-tools/macos/halo-routes/  macOS system helper that keeps the Thread route (kernel bug)
+tools/macos/thread-route/ macOS system helper that keeps the Thread route (kernel bug)
 ```
 
 ## Credits

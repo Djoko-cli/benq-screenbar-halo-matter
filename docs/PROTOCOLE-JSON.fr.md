@@ -1204,7 +1204,7 @@ bordure (RIO). Aucune dependance a Matter pour ce canal.
   expire alors qu'une entree est marquee installee, et pose alors en general
   sa propre route via un autre routeur. Choisir soi-meme le routeur de sortie
   (`IPV6_NEXTHOP`) exige d'etre root : une app ne peut pas contourner seule.
-  Sur le Mac, l'assistant systeme `tools/macos/halo-routes/` (demon launchd
+  Sur le Mac, l'assistant systeme `tools/macos/thread-route/` (demon launchd
   root, installe une fois) garde la route : il relit la liste des routes
   annoncees du noyau, pose une route statique pour chaque prefixe ULA `/64`
   annonce qui n'en a plus, et la remet si le noyau la retire sans poser la

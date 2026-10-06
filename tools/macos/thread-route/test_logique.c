@@ -1,5 +1,5 @@
-// Tests de la decision de halo-routes (logique.c), sans rien toucher au systeme.
-// Lancer : sh tools/macos/halo-routes/tests.sh
+// Tests de la decision de thread-route (logique.c), sans rien toucher au systeme.
+// Lancer : sh tools/macos/thread-route/tests.sh
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
@@ -232,6 +232,6 @@ int main(void) {
   CHECK(!hr_confirme(&s, true, 104.0), "apres remise a zero : premier constat");
   CHECK(hr_confirme(&s, true, 106.5), "deux constats a 2,5 s d'ecart : confirme");
 
-  printf("halo-routes : %d verification(s), %d echec(s)\n", gChecks, gFails);
+  printf("thread-route : %d verification(s), %d echec(s)\n", gChecks, gFails);
   return gFails ? 1 : 0;
 }

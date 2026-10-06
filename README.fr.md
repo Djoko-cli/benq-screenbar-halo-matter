@@ -556,7 +556,7 @@ tools/test_halo1.sh       tests hote du protocole Halo 1, de la surveillance du 
 tools/json_check.py       verifie des lignes machine capturees (et les exemples de docs/PROTOCOLE-JSON.md)
 tools/git_rev.py          revision git pour FW_GIT_REV (drapeau dynamique de PlatformIO)
 tools/halo_udp.py         client de banc du transport reseau (cle, session, refus)
-tools/macos/halo-routes/  assistant systeme macOS qui garde la route Thread (bug du noyau)
+tools/macos/thread-route/ assistant systeme macOS qui garde la route Thread (bug du noyau)
 ```
 
 ## Crédits

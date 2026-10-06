@@ -1,9 +1,15 @@
 [Français](README.fr.md) · **English**
 
-# halo-routes: the Mac's system helper for the Thread network
+# Thread Route: the Mac's system helper for the Thread network
 
-A launchd daemon (root) that keeps the Mac's route to the Thread network,
-and so to the Halo bridge over UDP (docs/PROTOCOLE-JSON.md, section 10).
+A launchd daemon (root) that keeps the Mac's route to the Thread network: to
+the Halo bridge over UDP (docs/PROTOCOLE-JSON.md, section 10, in the Halo
+bridge repository) and to Maillage Thread's probe over "Thread Network". It
+was called `halo-routes` (`fr.djoko.halo.routes`) until Oct 6, 2026.
+
+Its source lives in the Halo bridge repository (`tools/macos/thread-route`);
+Maillage Thread keeps an identical copy (`outils/thread-route`). The commands
+below run from this folder.
 
 ## Why
 
@@ -65,9 +71,7 @@ Under your own account, without sudo (the program is built and tested
 here; only copying it into place and putting it into service require the
 administrator password):
 
-```
-sh tools/macos/halo-routes/installer.sh
-```
+    sh installer.sh
 
 The installer first shows what the daemon would do (a dry run, nothing is
 changed). A route set by hand for the same prefix stays with its owner:
@@ -75,33 +79,47 @@ the daemon leaves it in place and doesn't take it over. The installer
 flags it; remove it for the daemon to take over managing it
 (`sudo route -n delete -inet6 -prefixlen 64 <prefixe>`).
 
-Files: `/Library/PrivilegedHelperTools/fr.djoko.halo.routes` (the
-program), `/Library/LaunchDaemons/fr.djoko.halo.routes.plist` (launches at
-startup, restarts if it stops), `/Library/Logs/fr.djoko.halo.routes.log`
+**From halo-routes.** The installer first stops and removes the old daemon
+(`fr.djoko.halo.routes`, its program and its plist), then puts Thread Route
+in place: the two never run together. The old log
+(`/Library/Logs/fr.djoko.halo.routes.log`) is kept. `sh installer.sh --plan`
+tells, without changing anything, what the installation would do.
+
+**Updating.** A new version of Thread Route installs the same way, by running
+`installer.sh` again: an app's automatic update doesn't touch it.
+
+**Why not from the app.** Halo Compagnon and Maillage Thread stay in the
+macOS sandbox. Trial of Oct 6, 2026: `SMAppService` refuses to register a
+daemon there that isn't sandboxed itself ("SMAppService target executable
+must be sandboxed because the app is sandboxed"), and a sandboxed daemon
+couldn't keep the routes. Both apps therefore only read its status
+(`SMAppService.statusForLegacyPlist`, which the sandbox allows): absent, to
+approve, active, or halo-routes still there.
+
+Files: `/Library/PrivilegedHelperTools/fr.djoko.thread.route` (the
+program), `/Library/LaunchDaemons/fr.djoko.thread.route.plist` (launches at
+startup, restarts if it stops), `/Library/Logs/fr.djoko.thread.route.log`
 (log).
 
 ## Checking
 
-```
-tail -f /Library/Logs/fr.djoko.halo.routes.log
-netstat -rn -f inet6 | grep '^fd'
-```
+    tail -f /Library/Logs/fr.djoko.thread.route.log
+    netstat -rn -f inet6 | grep '^fd'
 
 A route set by the daemon carries the `S` (static) and `1` (its own
-marker) flags. A dry run with nothing installed or changed (no need to be
-root):
+marker) flags. macOS also shows it in System Settings, General, Login Items
+& Extensions, "Allow in the Background": turned off there, it no longer runs
+("to approve" in the apps). A dry run with nothing installed or changed (no
+need to be root); its output shows the Thread network's prefix:
 
-```
-sh tools/macos/halo-routes/tests.sh
-```
+    sh tests.sh
 
 ## Uninstalling
 
-```
-sh tools/macos/halo-routes/desinstaller.sh
-```
+    sh desinstaller.sh
 
-The daemon removes its routes as it stops; the log is kept.
+The daemon removes its routes as it stops; the log is kept. A leftover
+`halo-routes` is removed too.
 
 ## Limitations
 

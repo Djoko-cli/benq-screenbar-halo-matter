@@ -21,7 +21,7 @@ Mac on USB Ethernet only (Wi-Fi off), Tailscale active.
 
 **Phase 1 (firmware) written on the evening of Sep 24, validated on the bench on Sep 25 (R1; R2 partly): docs/PROTOCOLE-JSON.md 10.**
 - Reviewed by 4 agents (OpenThread concurrency, H1 security, USB non-regression, robustness), then cross-checked by 2 agents; one major bug found and fixed (responses discarded as stale).
-- Mac route: the cause is a macOS kernel bug (removed by the kernel when a border router appears unreachable, never reinstated); only a static route holds. The `tools/macos/halo-routes/` system helper (a root launchd daemon) keeps the route (docs/PROTOCOLE-JSON.md 10.1).
+- Mac route: the cause is a macOS kernel bug (removed by the kernel when a border router appears unreachable, never reinstated); only a static route holds. The `tools/macos/thread-route/` system helper (a root launchd daemon) keeps the route (docs/PROTOCOLE-JSON.md 10.1).
 - `src/h1_proto.*` (pure, 78 host-side checks with Python vectors), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (OpenThread socket, RX/TX queues, NVS key), `json_mode.cpp` now has one session per transport (USB + 2 network), allowlist `jsonp::remoteRefusal`, cache of the last 8 responses per session.
 - Deliberate deviations from this study: port **5480**; one line = one datagram (1078 bytes at most, 6LoWPAN fragmented), no splitting at 512 (to revisit after R3); discovery by the SRP name (`reseau` block `ip`, `srp.nom`), no `_halo-pont._udp` service in v1; `json cle nouvelle` requires an `id` but not machine mode.
 - Bench client: `tools/halo_udp.py` (key over USB, session, commands, `refus` test).

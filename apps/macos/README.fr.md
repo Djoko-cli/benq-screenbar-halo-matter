@@ -368,10 +368,10 @@ place sur la carte se libère tout de suite. Sur une source réseau,
 « Session réseau fermée », et rien ne se rouvre avant « Reconnecter ».
 
 Le message « Pas de route » dépend de l'assistant système
-`tools/macos/halo-routes/` : si son fichier
-`/Library/LaunchDaemons/fr.djoko.halo.routes.plist` est visible depuis le bac
+`tools/macos/thread-route/` : si son fichier
+`/Library/LaunchDaemons/fr.djoko.thread.route.plist` est visible depuis le bac
 à sable, le message dit que la route revient seule ; sinon il renvoie à
-`sh tools/macos/halo-routes/installer.sh`.
+`sh tools/macos/thread-route/installer.sh`.
 
 **Signature et autorisation réseau local.** La source réseau demande le
 droit `com.apple.security.network.client` et
@@ -517,7 +517,7 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   d'état de la barre latérale « Pas de route IPv6… » (pas de bandeau) et une
   note dans la console, « Transport fermé : Connexion réseau perdue : … » si
   une session était ouverte ; puis reprise par l'assistant
-  `tools/macos/halo-routes` (journal `/Library/Logs/fr.djoko.halo.routes.log`).
+  `tools/macos/thread-route` (journal `/Library/Logs/fr.djoko.thread.route.log`).
   Noter l'errno vu : le message le dit (« Pas de route » : `EHOSTUNREACH`,
   `ENETUNREACH` ou `ENETDOWN` ; « Pont introuvable » : `EHOSTDOWN` ou échec de
   la résolution) ; `python3 tools/halo_udp.py refus <adresse OMR> 5480`
@@ -526,9 +526,9 @@ Network, dnssd et Synchronization, tous disponibles sur iOS).
   route** (son flux garde son saut suivant) : seules les nouvelles connexions
   échouent. Assistant actif : trou de 0,3 s, rien de visible. Pour voir la
   ligne d'état, arrêter l'assistant (`sudo launchctl bootout
-  system/fr.djoko.halo.routes` : il retire ses routes en partant), puis
+  system/fr.djoko.thread.route` : il retire ses routes en partant), puis
   « Déconnecter » et « Reconnecter » ; le relancer (`sudo launchctl bootstrap
-  system /Library/LaunchDaemons/fr.djoko.halo.routes.plist`) : reprise 8 s
+  system /Library/LaunchDaemons/fr.djoko.thread.route.plist`) : reprise 8 s
   après le retour de la route le 25/09, au plus un délai de reconnexion
   depuis (une connexion sans route abandonne tout de suite).
 - **Pont sans clé** : `json cle efface` par l'USB, puis connexion réseau →

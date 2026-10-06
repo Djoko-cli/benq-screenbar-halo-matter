@@ -1,9 +1,15 @@
 **Français** · [English](README.md)
 
-# halo-routes : assistant systeme du Mac pour le reseau Thread
+# Thread Route : assistant systeme du Mac pour le reseau Thread
 
-Demon launchd (root) qui garde la route du Mac vers le reseau Thread, donc vers
-le pont Halo en UDP (docs/PROTOCOLE-JSON.md, section 10).
+Demon launchd (root) qui garde la route du Mac vers le reseau Thread : vers le
+pont Halo en UDP (docs/PROTOCOLE-JSON.md, section 10, dans le depot du pont
+Halo) et vers la sonde de Maillage Thread par « Reseau Thread ». Il s'appelait
+`halo-routes` (`fr.djoko.halo.routes`) jusqu'au 06/10/2026.
+
+Sa source est dans le depot du pont Halo (`tools/macos/thread-route`) ;
+Maillage Thread en garde une copie a l'identique (`outils/thread-route`). Les
+commandes ci-dessous se lancent depuis ce dossier.
 
 ## Pourquoi
 
@@ -62,9 +68,7 @@ desinstallation), il retire les routes qu'il a posees.
 Sous son compte, sans sudo (le programme est compile et teste ici ; seules la
 copie et la mise en service demandent le mot de passe administrateur) :
 
-```
-sh tools/macos/halo-routes/installer.sh
-```
+    sh installer.sh
 
 L'installeur montre d'abord ce que le demon ferait (essai, rien n'est change).
 Une route posee a la main pour le meme prefixe reste a son proprietaire : le
@@ -72,31 +76,47 @@ demon la laisse en place et ne la garde pas. L'installeur la signale ; la
 retirer pour qu'il en prenne la garde (`sudo route -n delete -inet6
 -prefixlen 64 <prefixe>`).
 
-Fichiers : `/Library/PrivilegedHelperTools/fr.djoko.halo.routes` (programme),
-`/Library/LaunchDaemons/fr.djoko.halo.routes.plist` (lancement au demarrage,
-relance s'il s'arrete), `/Library/Logs/fr.djoko.halo.routes.log` (journal).
+**Depuis halo-routes.** L'installeur arrete et retire d'abord l'ancien demon
+(`fr.djoko.halo.routes`, son programme et son plist), puis pose Thread Route :
+les deux ne tournent jamais ensemble. L'ancien journal
+(`/Library/Logs/fr.djoko.halo.routes.log`) est garde. `sh installer.sh --plan`
+dit, sans rien changer, ce que l'installation ferait.
+
+**Mise a jour.** Une nouvelle version de Thread Route s'installe de meme, en
+relancant `installer.sh` : la mise a jour automatique d'une app ne le touche
+pas.
+
+**Pourquoi pas par l'app.** Halo Compagnon et Maillage Thread restent dans le
+bac a sable de macOS. Essai du 06/10/2026 : `SMAppService` refuse d'y inscrire
+un demon qui n'est pas lui-meme dans le bac a sable (« SMAppService target
+executable must be sandboxed because the app is sandboxed »), et un demon dans
+le bac a sable ne pourrait pas garder les routes. Les deux apps lisent donc
+seulement son etat (`SMAppService.statusForLegacyPlist`, que permet le bac a
+sable) : absent, a approuver, actif, ou halo-routes encore la.
+
+Fichiers : `/Library/PrivilegedHelperTools/fr.djoko.thread.route` (programme),
+`/Library/LaunchDaemons/fr.djoko.thread.route.plist` (lancement au demarrage,
+relance s'il s'arrete), `/Library/Logs/fr.djoko.thread.route.log` (journal).
 
 ## Verifier
 
-```
-tail -f /Library/Logs/fr.djoko.halo.routes.log
-netstat -rn -f inet6 | grep '^fd'
-```
+    tail -f /Library/Logs/fr.djoko.thread.route.log
+    netstat -rn -f inet6 | grep '^fd'
 
-Une route du demon porte les drapeaux `S` (statique) et `1` (sa marque). Essai
-sans rien installer ni changer (pas besoin d'etre root) :
+Une route du demon porte les drapeaux `S` (statique) et `1` (sa marque).
+macOS le montre aussi dans Reglages Systeme, General, Ouverture et extensions,
+« Autoriser en arriere-plan » : desactive la, il ne tourne plus (« a
+approuver » dans les apps). Essai sans rien installer ni changer (pas besoin
+d'etre root) ; sa sortie porte le prefixe du reseau Thread :
 
-```
-sh tools/macos/halo-routes/tests.sh
-```
+    sh tests.sh
 
 ## Desinstaller
 
-```
-sh tools/macos/halo-routes/desinstaller.sh
-```
+    sh desinstaller.sh
 
-Le demon retire ses routes en s'arretant ; le journal est garde.
+Le demon retire ses routes en s'arretant ; le journal est garde. Un
+`halo-routes` reste est retire aussi.
 
 ## Limites
 

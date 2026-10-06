@@ -1223,7 +1223,7 @@ Mac or iPhone (LAN) -> border router (HomePod, Apple TV) -> Thread -> node
   and then generally sets its own route through another router. Choosing
   the exit router yourself (`IPV6_NEXTHOP`) requires being root: an app
   cannot work around this on its own. On the Mac, the
-  `tools/macos/halo-routes/` system helper (a root launchd daemon,
+  `tools/macos/thread-route/` system helper (a root launchd daemon,
   installed once) keeps the route: it rereads the kernel's list of
   advertised routes, sets a static route for every advertised `/64` ULA
   prefix that no longer has one, and restores it if the kernel removes it

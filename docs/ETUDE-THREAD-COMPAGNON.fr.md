@@ -21,7 +21,7 @@ Mac sur l'Ethernet USB seul (Wi-Fi coupe), Tailscale actif.
 
 **Phase 1 (firmware) ecrite le 24/09 au soir, validee au banc le 25/09 (R1 ; R2 en partie) : docs/PROTOCOLE-JSON.md 10.**
 - Relue par 4 agents (concurrence OpenThread, securite H1, non-regression USB, robustesse), puis contre-verifiee par 2 agents ; un bug majeur trouve et corrige (reponses jetees comme perimees).
-- Route du Mac : la cause est un bug du noyau de macOS (suppression par le noyau quand un routeur de bordure parait injoignable, jamais remise) ; seule une route statique tient. L'assistant systeme `tools/macos/halo-routes/` (demon launchd root) garde la route (docs/PROTOCOLE-JSON.md 10.1).
+- Route du Mac : la cause est un bug du noyau de macOS (suppression par le noyau quand un routeur de bordure parait injoignable, jamais remise) ; seule une route statique tient. L'assistant systeme `tools/macos/thread-route/` (demon launchd root) garde la route (docs/PROTOCOLE-JSON.md 10.1).
 - `src/h1_proto.*` (pur, 78 verifications sur l'hote avec des vecteurs Python), `src/h1_crypto.cpp` (mbedTLS), `src/net_udp.*` (socket OpenThread, files RX/TX, cle NVS), `json_mode.cpp` a une session par transport (USB + 2 reseau), liste blanche `jsonp::remoteRefusal`, cache des 8 dernieres reponses par session.
 - Ecarts assumes par rapport a cette etude : port **5480** ; une ligne = un datagramme (1078 octets au plus, 6LoWPAN fragmente), pas de decoupage a 512 (a revoir apres R3) ; decouverte par le nom SRP (`reseau` bloc `ip`, `srp.nom`), pas de service `_halo-pont._udp` en v1 ; `json cle nouvelle` exige un `id` mais pas le mode machine.
 - Client de banc : `tools/halo_udp.py` (cle par l'USB, session, commandes, test `refus`).

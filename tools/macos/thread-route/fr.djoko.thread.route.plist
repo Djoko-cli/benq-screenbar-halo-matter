@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- halo-routes : garde la route du reseau Thread (voir README.md). Installe par installer.sh. -->
+<!-- thread-route : garde la route du reseau Thread (voir README.md). Installe par installer.sh. -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>fr.djoko.halo.routes</string>
+	<string>fr.djoko.thread.route</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Library/PrivilegedHelperTools/fr.djoko.halo.routes</string>
+		<string>/Library/PrivilegedHelperTools/fr.djoko.thread.route</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -20,8 +20,8 @@
 	<key>LowPriorityIO</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>/Library/Logs/fr.djoko.halo.routes.log</string>
+	<string>/Library/Logs/fr.djoko.thread.route.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Library/Logs/fr.djoko.halo.routes.log</string>
+	<string>/Library/Logs/fr.djoko.thread.route.log</string>
 </dict>
 </plist>
