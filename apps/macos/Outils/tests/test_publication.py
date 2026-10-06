@@ -94,10 +94,15 @@ FAUX = {
         a = sys.argv[1:]
         if a[:2] == ["-d", "-r-"]:
             print('designated => identifier "fr.exemple.essai" and certificate leaf = H"0123abcd"')
-        # Les droits de l'app signee : ceux attendus, ou alteres par FAUX_DROITS.
+        # Une signature par --entitlements : ses droits sont gardes, et rendus a la relecture.
+        etat = os.environ["FAUX_JOURNAL"] + ".droits"
+        if a[:1] == ["--force"] and "--entitlements" in a:
+            open(etat, "wb").write(open(a[a.index("--entitlements") + 1], "rb").read())
+        # Les droits de l'app : ceux que Xcode a poses, ou ceux de la signature ; alteres par FAUX_DROITS.
         if a[:4] == ["-d", "--entitlements", "-", "--xml"]:
             import plistlib
             cas = os.environ.get("FAUX_DROITS", "")
+            signee = os.path.exists(etat)
             droits = {"com.apple.security.app-sandbox": cas != "bac-a-sable-faux",
                       "com.apple.security.network.client": True,
                       "com.apple.security.temporary-exception.mach-lookup.global-name":
@@ -109,7 +114,13 @@ FAUX = {
                 del droits["com.apple.security.app-sandbox"]
             if cas == "get-task-allow":
                 droits["com.apple.security.get-task-allow"] = True
-            sys.stdout.buffer.write(b"" if cas == "illisibles" else plistlib.dumps(droits))
+            if cas == "validation-levee":
+                droits["com.apple.security.cs.disable-library-validation"] = True
+            if signee:
+                droits = plistlib.load(open(etat, "rb"))
+                if cas == "sans-validation":
+                    droits.pop("com.apple.security.cs.disable-library-validation", None)
+            sys.stdout.buffer.write(b"" if cas == "illisibles" and signee else plistlib.dumps(droits))
         extraire = a[:1] == ["-d"] and a[1].startswith("--extract-certificates=")
         if extraire and not os.environ.get("FAUX_SANS_CERTIFICAT"):
             open(a[1].split("=", 1)[1] + "0", "wb").write(b"FEUILLE")
@@ -315,8 +326,9 @@ class Monde:
 
     def oublier(self):
         """Un journal neuf, pour un cas de plus dans le meme monde."""
-        if os.path.exists(self.journal):
-            os.remove(self.journal)
+        for f in (self.journal, self.journal + '.droits'):
+            if os.path.exists(f):
+                os.remove(f)
 
     def arguments(self, *extra, bureau=False):
         return ['publier', '1.2.3', '--nom-app', 'Essai Inventee', '--fichier', 'Essai-Inventee',
@@ -900,14 +912,18 @@ class PublicationTests(unittest.TestCase):
             'Sparkle.framework',
             'Essai Inventee.app'])
         appels = self.m.appels()
-        for a in [a for a in appels if a.startswith('codesign --force')]:
+        app = os.path.join(self.m.dd, 'Build', 'Products', 'Release', 'Essai Inventee.app')
+        sortie = os.path.join(self.m.depot, 'build', 'publication', '1.2.3')
+        signe = [a for a in appels if a.startswith('codesign --force')]
+        for a in signe[:-1]:
             self.assertIn('--sign %s --options runtime --preserve-metadata=entitlements --timestamp=none'
                           % EMPREINTE, a)
+        self.assertEqual(signe[-1], 'codesign --force --sign %s --options runtime --entitlements %s/droits-app.plist '
+                                    '--timestamp=none %s' % (EMPREINTE, sortie, app))
+        for a in signe:
             self.assertNotIn(IDENTITE, a)
             self.assertNotIn('--keychain', a)
-        app = os.path.join(self.m.dd, 'Build', 'Products', 'Release', 'Essai Inventee.app')
         self.assertIn('codesign --verify --deep --strict ' + app, appels)
-        sortie = os.path.join(self.m.depot, 'build', 'publication', '1.2.3')
         self.assertIn('codesign -d --extract-certificates=%s/certificat- %s' % (sortie, app), appels)
         self.assertIn('openssl x509 -inform DER -in %s/certificat-0 -noout -subject -nameopt RFC2253 -fingerprint '
                       '-sha1' % sortie, appels)
@@ -919,7 +935,10 @@ class PublicationTests(unittest.TestCase):
         self.m.publier()
         app = os.path.join(self.m.dd, 'Build', 'Products', 'Release', 'Essai Inventee.app')
         appels = self.m.appels()
-        relus = appels.index('codesign -d --entitlements - --xml ' + app)
+        lectures = [i for i, a in enumerate(appels) if a == 'codesign -d --entitlements - --xml ' + app]
+        self.assertEqual(len(lectures), 2, 'avant la signature, puis la relecture')
+        self.assertLess(lectures[0], [i for i, a in enumerate(appels) if a.startswith('codesign --force')][0])
+        relus = lectures[1]
         self.assertGreater(relus, appels.index('codesign --verify --deep --strict ' + app))
         self.assertLess(relus, [i for i, a in enumerate(appels) if a.startswith('codesign -d --extract')][0])
         self.assertTrue([a for a in appels if a.startswith('hdiutil')], 'le .dmg est fait')
@@ -937,6 +956,33 @@ class PublicationTests(unittest.TestCase):
 
     def test_refus_droits_avec_get_task_allow(self):
         self.refuse_droits('get-task-allow', 'get-task-allow est present')
+
+    def test_droits_signes_levent_la_validation_des_bibliotheques(self):
+        """Sans notarisation : l'app est signee avec les droits de Xcode, plus la levee de la validation des
+        bibliotheques (sans equipe, l'app ne chargerait pas ses cadres) ; rien d'autre n'est ajoute."""
+        self.m.publier()
+        with open(os.path.join(self.m.depot, 'build', 'publication', '1.2.3', 'droits-app.plist'), 'rb') as f:
+            droits = plistlib.load(f)
+        self.assertEqual(droits, {'com.apple.security.app-sandbox': True,
+                                  'com.apple.security.network.client': True,
+                                  P.MACH_LOOKUP: ['fr.exemple.essai-spks', 'fr.exemple.essai-spki'],
+                                  P.VALIDATION_BIBLIOTHEQUES: True})
+
+    def test_refus_droits_sans_levee_de_la_validation(self):
+        self.refuse_droits('sans-validation', 'disable-library-validation manque')
+
+    def test_notarisation_sans_levee_de_la_validation(self):
+        """NOTARISER=1 (Developer ID, une equipe) : la levee n'est pas ajoutee, et refusee si Xcode l'a posee."""
+        env = {'NOTARISER': '1', 'PROFIL_NOTARISATION': 'profil-essai'}
+        self.m.publier(env=env)
+        with open(os.path.join(self.m.depot, 'build', 'publication', '1.2.3', 'droits-app.plist'), 'rb') as f:
+            self.assertNotIn(P.VALIDATION_BIBLIOTHEQUES, plistlib.load(f))
+
+    def test_refus_notarisation_avec_levee_de_la_validation(self):
+        env = {'NOTARISER': '1', 'PROFIL_NOTARISATION': 'profil-essai', 'FAUX_DROITS': 'validation-levee'}
+        appels = self.refuse(env=env, motif='disable-library-validation est present')
+        self.assertTrue([a for a in appels if a.startswith('codesign --force')], 'apres la signature')
+        self.assertFalse([a for a in appels if a.startswith(('hdiutil', 'sign_update'))], 'aucun .dmg')
 
     def test_refus_droits_mach_lookup_pas_exactement_ceux_de_sparkle(self):
         """Un service de plus, un de moins, ceux d'un autre identifiant, ou des droits illisibles : refus."""

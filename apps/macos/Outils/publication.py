@@ -23,9 +23,11 @@ Dans l'ordre :
      les binaires (strip : la table OSO nomme les fichiers objets sous DerivedData ; le dSYM reste a part, jamais
      publie) et avec les chemins des sources ramenes a des noms neutres (-file-prefix-map) ; puis signee par
      l'empreinte de l'identite (un certificat auto-signe stable, plus tard un Developer ID) : le code imbrique
-     d'abord, le runtime renforce, les droits gardes ; les droits de l'app signee sont relus (le bac a sable, les
-     seuls services de Sparkle en mach-lookup, jamais get-task-allow) ; le certificat feuille de la signature est
-     relu ; l'exigence de signature (codesign -d -r-) est ecrite dans exigence.txt ;
+     d'abord, le runtime renforce, les droits gardes ; l'app, avec les droits poses par Xcode et, sans notarisation,
+     la levee de la validation des bibliotheques (sans equipe, le runtime renforce refuse de charger les cadres de
+     l'app) ; les droits de l'app signee sont relus (le bac a sable, les seuls services de Sparkle en mach-lookup,
+     jamais get-task-allow, la levee de la validation des bibliotheques si et seulement si la publication n'est pas
+     notarisee) ; le certificat feuille de la signature est relu ; l'exigence de signature (codesign -d -r-) est ecrite dans exigence.txt ;
   4. le .dmg (hdiutil) : l'app, un raccourci vers Applications et la licence de Sparkle. Avant hdiutil, tout le
      contenu est refuse s'il porte un chemin personnel ($HOME, /Users/, le nom du compte) ou si le controle
      d'anonymisation y trouve une donnee reelle ; la liste des noms du contenu (chemins relatifs, cibles des liens),
@@ -87,6 +89,7 @@ NOREPLY = re.compile(r'^[^@\s<>]+@users\.noreply\.github\.com$')
 BAC_A_SABLE = 'com.apple.security.app-sandbox'
 MACH_LOOKUP = 'com.apple.security.temporary-exception.mach-lookup.global-name'
 GET_TASK_ALLOW = 'com.apple.security.get-task-allow'
+VALIDATION_BIBLIOTHEQUES = 'com.apple.security.cs.disable-library-validation'
 
 
 class Refus(Exception):
@@ -608,22 +611,21 @@ def code_imbrique(app):
     return liste
 
 
-def signer(a, o, empreinte, chemin, droits=True):
+def signer(a, o, empreinte, chemin, droits=True, fichier_droits=None):
     """Signe un code avec l'identite de la publication, par son empreinte (un nom seul prendrait aussi une identite
-    dont le nom le contient) : runtime renforce, droits gardes, horodatage si notarise."""
+    dont le nom le contient) : runtime renforce, droits gardes (ou ceux de fichier_droits), horodatage si notarise."""
     cmd = [o.codesign, '--force', '--sign', empreinte]
     if droits:
-        cmd += ['--options', 'runtime', '--preserve-metadata=entitlements']
+        cmd += ['--options', 'runtime']
+        cmd += ['--entitlements', fichier_droits] if fichier_droits else ['--preserve-metadata=entitlements']
     cmd.append('--timestamp' if notariser() else '--timestamp=none')
     if a.trousseau:
         cmd += ['--keychain', a.trousseau]
     lancer(cmd + [chemin])
 
 
-def verifier_droits(o, app, identifiant):
-    """Les droits de l'app signee, relus (codesign -d --entitlements - --xml) : le bac a sable, en mach-lookup les
-    seuls services de Sparkle (<identifiant>-spks et <identifiant>-spki, ni plus ni moins), et jamais get-task-allow
-    (un debogueur pourrait s'attacher a l'app). Leve Refus."""
+def lire_droits(o, app):
+    """Les droits d'une app, lus dans sa signature (codesign -d --entitlements - --xml). Leve Refus."""
     sortie = subprocess.run([o.codesign, '-d', '--entitlements', '-', '--xml', app], check=True,
                             capture_output=True).stdout
     try:
@@ -632,6 +634,29 @@ def verifier_droits(o, app, identifiant):
         droits = None
     if not isinstance(droits, dict):
         raise Refus("droits de l'app signee illisibles (codesign -d --entitlements)")
+    return droits
+
+
+def droits_pour_signer(o, app, sortie):
+    """Les droits avec lesquels l'app est signee : ceux que Xcode a poses, plus, sans notarisation, la levee de la
+    validation des bibliotheques. Un certificat auto-signe n'a pas d'equipe : le runtime renforce refuserait alors de
+    charger les cadres de l'app (« different Team IDs »), et l'app s'arreterait au lancement. Un Developer ID a une
+    equipe : la notarisation s'en passe. Ecrit droits-app.plist dans sortie et rend son chemin."""
+    droits = lire_droits(o, app)
+    if not notariser():
+        droits[VALIDATION_BIBLIOTHEQUES] = True
+    chemin = os.path.join(sortie, 'droits-app.plist')
+    with open(chemin, 'wb') as f:
+        plistlib.dump(droits, f)
+    return chemin
+
+
+def verifier_droits(o, app, identifiant):
+    """Les droits de l'app signee, relus : le bac a sable, en mach-lookup les seuls services de Sparkle
+    (<identifiant>-spks et <identifiant>-spki, ni plus ni moins), jamais get-task-allow (un debogueur pourrait
+    s'attacher a l'app), et la levee de la validation des bibliotheques si et seulement si la publication n'est pas
+    notarisee (voir droits_pour_signer). Leve Refus."""
+    droits = lire_droits(o, app)
     if droits.get(BAC_A_SABLE) is not True:
         raise Refus("droits de l'app signee : le bac a sable (%s) manque" % BAC_A_SABLE)
     services = droits.get(MACH_LOOKUP)
@@ -640,6 +665,13 @@ def verifier_droits(o, app, identifiant):
         raise Refus("droits de l'app signee : %s doit etre exactement %s" % (MACH_LOOKUP, ' et '.join(attendus)))
     if GET_TASK_ALLOW in droits:
         raise Refus("droits de l'app signee : %s est present" % GET_TASK_ALLOW)
+    if notariser():
+        if VALIDATION_BIBLIOTHEQUES in droits:
+            raise Refus("droits de l'app signee : %s est present, et la notarisation s'en passe"
+                        % VALIDATION_BIBLIOTHEQUES)
+    elif droits.get(VALIDATION_BIBLIOTHEQUES) is not True:
+        raise Refus("droits de l'app signee : %s manque (sans equipe, l'app ne chargerait pas ses cadres)"
+                    % VALIDATION_BIBLIOTHEQUES)
 
 
 def controler(o, fichiers):
@@ -733,8 +765,10 @@ def publier(a, o=None, maintenant=None):
     for cle, valeur in attendu.items():
         if info.get(cle) != valeur:
             raise Refus('Info.plist de l\'app compilee : %s = %r, attendu %r' % (cle, info.get(cle), valeur))
-    for chemin in code_imbrique(app) + [app]:
+    fichier_droits = droits_pour_signer(o, app, sortie)
+    for chemin in code_imbrique(app):
         signer(a, o, etat.empreinte, chemin)
+    signer(a, o, etat.empreinte, app, fichier_droits=fichier_droits)
     lancer([o.codesign, '--verify', '--deep', '--strict', app])
     if not info.get('CFBundleIdentifier'):
         raise Refus("Info.plist de l'app compilee : CFBundleIdentifier manque")
