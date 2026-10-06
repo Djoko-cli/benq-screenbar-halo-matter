@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Halo Compagnon</title>
+    <item>
+      <title>1.0.0</title>
+      <pubDate>Tue, 06 Oct 2026 18:48:59 +0000</pubDate>
+      <sparkle:version>167</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+<p><strong>Français</strong></p>
+<ul><li>Première version publiée : l'app qui supervise le pont de la BenQ ScreenBar Halo 1, par l'USB ou par le réseau Thread (tableau de bord, trames en direct, graphiques, commandes et console), en français et en anglais, avec son mode démo.</li><li>Mises à jour automatiques (Sparkle 2) : recherche au démarrage puis toutes les 24 heures, téléchargement et installation à la fermeture de l'app, ou tout de suite par « Installer et relancer ». « Rechercher les mises à jour… » est dans le menu Halo Compagnon ; Réglages, Général, « Mises à jour », permet de les arrêter.</li><li>Thread Route, l'assistant système qui garde la route du Mac vers le réseau Thread (anciennement halo-routes) : son état est dans Réglages, Général ; il s'installe par <code>sh tools/macos/thread-route/installer.sh</code>.</li></ul>
+<p><strong>English</strong></p>
+<ul><li>First published version: the app that supervises the BenQ ScreenBar Halo 1 bridge, over USB or over the Thread network (dashboard, live frames, charts, controls and console), in French and English, with its demo mode.</li><li>Automatic updates (Sparkle 2): a check at launch and then every 24 hours, download, and installation when the app quits, or right away with "Install and Relaunch". "Check for Updates…" is in the Halo Compagnon menu; Settings, General, "Updates", can turn them off.</li><li>Thread Route, the system helper that keeps the Mac's route to the Thread network (formerly halo-routes): its status is in Settings, General; it installs with <code>sh tools/macos/thread-route/installer.sh</code>.</li></ul>
+]]></description>
+      <enclosure url="https://github.com/Djoko-cli/benq-screenbar-halo-matter/releases/download/compagnon-v1.0.0/Halo-Compagnon-1.0.0.dmg" length="5529314" type="application/octet-stream" sparkle:edSignature="nytOzaLoLO+BEnI2BbNs06AriJA6arBF0+kd2a6jS4eJENknG7QCoV6PS9DWTqRM8JmMvfR6cfhdbk+hCmxyCA=="/>
+    </item>
+  </channel>
+</rss>
