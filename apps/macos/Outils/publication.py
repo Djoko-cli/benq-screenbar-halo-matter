@@ -23,8 +23,9 @@ Dans l'ordre :
      les binaires (strip : la table OSO nomme les fichiers objets sous DerivedData ; le dSYM reste a part, jamais
      publie) et avec les chemins des sources ramenes a des noms neutres (-file-prefix-map) ; puis signee par
      l'empreinte de l'identite (un certificat auto-signe stable, plus tard un Developer ID) : le code imbrique
-     d'abord, le runtime renforce, les droits gardes ; le certificat feuille de la signature est relu ; l'exigence
-     de signature (codesign -d -r-) est ecrite dans exigence.txt ;
+     d'abord, le runtime renforce, les droits gardes ; les droits de l'app signee sont relus (le bac a sable, les
+     seuls services de Sparkle en mach-lookup, jamais get-task-allow) ; le certificat feuille de la signature est
+     relu ; l'exigence de signature (codesign -d -r-) est ecrite dans exigence.txt ;
   4. le .dmg (hdiutil) : l'app, un raccourci vers Applications et la licence de Sparkle. Avant hdiutil, tout le
      contenu est refuse s'il porte un chemin personnel ($HOME, /Users/, le nom du compte) ou si le controle
      d'anonymisation y trouve une donnee reelle ; la liste des noms du contenu (chemins relatifs, cibles des liens),
@@ -83,6 +84,9 @@ VERSION = re.compile(r'^\d+\.\d+\.\d+$')
 ESPACE_SPARKLE = 'http://www.andymatuschak.org/xml-namespaces/sparkle'
 PRIVE = os.path.expanduser('~/Dev/maillage-thread/.superpowers/anonymisation')
 NOREPLY = re.compile(r'^[^@\s<>]+@users\.noreply\.github\.com$')
+BAC_A_SABLE = 'com.apple.security.app-sandbox'
+MACH_LOOKUP = 'com.apple.security.temporary-exception.mach-lookup.global-name'
+GET_TASK_ALLOW = 'com.apple.security.get-task-allow'
 
 
 class Refus(Exception):
@@ -605,6 +609,28 @@ def signer(a, o, empreinte, chemin, droits=True):
     lancer(cmd + [chemin])
 
 
+def verifier_droits(o, app, identifiant):
+    """Les droits de l'app signee, relus (codesign -d --entitlements - --xml) : le bac a sable, en mach-lookup les
+    seuls services de Sparkle (<identifiant>-spks et <identifiant>-spki, ni plus ni moins), et jamais get-task-allow
+    (un debogueur pourrait s'attacher a l'app). Leve Refus."""
+    sortie = subprocess.run([o.codesign, '-d', '--entitlements', '-', '--xml', app], check=True,
+                            capture_output=True).stdout
+    try:
+        droits = plistlib.loads(sortie)
+    except Exception:
+        droits = None
+    if not isinstance(droits, dict):
+        raise Refus("droits de l'app signee illisibles (codesign -d --entitlements)")
+    if droits.get(BAC_A_SABLE) is not True:
+        raise Refus("droits de l'app signee : le bac a sable (%s) manque" % BAC_A_SABLE)
+    services = droits.get(MACH_LOOKUP)
+    attendus = [identifiant + '-spks', identifiant + '-spki']
+    if not isinstance(services, list) or sorted(services) != sorted(attendus):
+        raise Refus("droits de l'app signee : %s doit etre exactement %s" % (MACH_LOOKUP, ' et '.join(attendus)))
+    if GET_TASK_ALLOW in droits:
+        raise Refus("droits de l'app signee : %s est present" % GET_TASK_ALLOW)
+
+
 def controler(o, fichiers):
     """Le controle d'anonymisation (prive) sur des fichiers, binaires compris : il n'imprime que des comptes."""
     r = subprocess.run(['/usr/bin/python3', o.controle, 'fichiers', '--table', o.table] + fichiers,
@@ -699,6 +725,9 @@ def publier(a, o=None, maintenant=None):
     for chemin in code_imbrique(app) + [app]:
         signer(a, o, etat.empreinte, chemin)
     lancer([o.codesign, '--verify', '--deep', '--strict', app])
+    if not info.get('CFBundleIdentifier'):
+        raise Refus("Info.plist de l'app compilee : CFBundleIdentifier manque")
+    verifier_droits(o, app, info['CFBundleIdentifier'])
     # Le certificat feuille de la signature, tel qu'il sera publie.
     prefixe = os.path.join(sortie, 'certificat-')
     for n in os.listdir(sortie):

@@ -94,6 +94,22 @@ FAUX = {
         a = sys.argv[1:]
         if a[:2] == ["-d", "-r-"]:
             print('designated => identifier "fr.exemple.essai" and certificate leaf = H"0123abcd"')
+        # Les droits de l'app signee : ceux attendus, ou alteres par FAUX_DROITS.
+        if a[:4] == ["-d", "--entitlements", "-", "--xml"]:
+            import plistlib
+            cas = os.environ.get("FAUX_DROITS", "")
+            droits = {"com.apple.security.app-sandbox": cas != "bac-a-sable-faux",
+                      "com.apple.security.network.client": True,
+                      "com.apple.security.temporary-exception.mach-lookup.global-name":
+                          {"en-trop": ["fr.exemple.essai-spks", "fr.exemple.essai-spki", "com.exemple.autre"],
+                           "manquant": ["fr.exemple.essai-spks"],
+                           "autre-identifiant": ["fr.exemple.autre-spks", "fr.exemple.autre-spki"]}.get(
+                              cas, ["fr.exemple.essai-spks", "fr.exemple.essai-spki"])}
+            if cas == "sans-bac-a-sable":
+                del droits["com.apple.security.app-sandbox"]
+            if cas == "get-task-allow":
+                droits["com.apple.security.get-task-allow"] = True
+            sys.stdout.buffer.write(b"" if cas == "illisibles" else plistlib.dumps(droits))
         extraire = a[:1] == ["-d"] and a[1].startswith("--extract-certificates=")
         if extraire and not os.environ.get("FAUX_SANS_CERTIFICAT"):
             open(a[1].split("=", 1)[1] + "0", "wb").write(b"FEUILLE")
@@ -174,7 +190,7 @@ FAUX = {
                 os.remove(autre)
             os.symlink(cible_lien, autre)
         cle = AUTRE if os.environ.get('FAUX_INFO') == 'cle' else lu('CLE_MISES_A_JOUR')
-        plistlib.dump({'CFBundleShortVersionString': lu('MARKETING_VERSION'),
+        plistlib.dump({'CFBundleIdentifier': 'fr.exemple.essai', 'CFBundleShortVersionString': lu('MARKETING_VERSION'),
                        'CFBundleVersion': reglages['CURRENT_PROJECT_VERSION'],
                        'SUFeedURL': lu('FLUX_MISES_A_JOUR'), 'SUPublicEDKey': cle},
                       open(os.path.join(app, 'Info.plist'), 'wb'))
@@ -896,6 +912,40 @@ class PublicationTests(unittest.TestCase):
         self.assertIn('openssl x509 -inform DER -in %s/certificat-0 -noout -subject -nameopt RFC2253 -fingerprint '
                       '-sha1' % sortie, appels)
         self.assertIn('certificate leaf', lire(os.path.join(sortie, 'exigence.txt')))
+
+    def test_droits_de_l_app_signee(self):
+        """Les droits attendus (bac a sable, les deux services de Sparkle de l'identifiant) : relus apres la
+        signature et la verification, avant le certificat feuille ; la publication continue."""
+        self.m.publier()
+        app = os.path.join(self.m.dd, 'Build', 'Products', 'Release', 'Essai Inventee.app')
+        appels = self.m.appels()
+        relus = appels.index('codesign -d --entitlements - --xml ' + app)
+        self.assertGreater(relus, appels.index('codesign --verify --deep --strict ' + app))
+        self.assertLess(relus, [i for i, a in enumerate(appels) if a.startswith('codesign -d --extract')][0])
+        self.assertTrue([a for a in appels if a.startswith('hdiutil')], 'le .dmg est fait')
+
+    def refuse_droits(self, cas, motif):
+        appels = self.refuse(env={'FAUX_DROITS': cas}, motif=motif)
+        self.assertTrue([a for a in appels if a.startswith('codesign --force')], 'apres la signature')
+        self.assertFalse([a for a in appels if a.startswith(('hdiutil', 'sign_update'))], 'aucun .dmg')
+
+    def test_refus_droits_sans_bac_a_sable(self):
+        for cas in ('sans-bac-a-sable', 'bac-a-sable-faux'):
+            with self.subTest(cas=cas):
+                self.m.oublier()
+                self.refuse_droits(cas, 'bac a sable')
+
+    def test_refus_droits_avec_get_task_allow(self):
+        self.refuse_droits('get-task-allow', 'get-task-allow est present')
+
+    def test_refus_droits_mach_lookup_pas_exactement_ceux_de_sparkle(self):
+        """Un service de plus, un de moins, ceux d'un autre identifiant, ou des droits illisibles : refus."""
+        for cas, motif in (('en-trop', 'doit etre exactement fr.exemple.essai-spks et fr.exemple.essai-spki'),
+                           ('manquant', 'doit etre exactement'), ('autre-identifiant', 'doit etre exactement'),
+                           ('illisibles', 'illisibles')):
+            with self.subTest(cas=cas):
+                self.m.oublier()
+                self.refuse_droits(cas, motif)
 
     def test_signature_dans_un_trousseau_a_part(self):
         """En repetition, un certificat d'essai dans un trousseau a part : codesign et security y cherchent."""
