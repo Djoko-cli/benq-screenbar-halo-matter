@@ -27,9 +27,10 @@ struct FenetreReglages: View {
     }
 }
 
-/// Onglet Général : langue de l'app, Thread Route.
+/// Onglet Général : langue de l'app, mises a jour, Thread Route.
 struct Reglages: View {
     @AppStorage(ReglageLangue.cle) private var choix: ChoixLangue = .systeme
+    @Environment(MisesAJour.self) private var misesAJour
 
     var body: some View {
         Form {
@@ -58,6 +59,16 @@ struct Reglages: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            // Les mises a jour (Sparkle) : recherche et installation automatiques, cochees par defaut.
+            Section("Mises à jour") {
+                Toggle("Rechercher automatiquement",
+                       isOn: Binding(get: { misesAJour.rechercheAuto }, set: { misesAJour.rechercheAuto = $0 }))
+                Toggle("Installer automatiquement",
+                       isOn: Binding(get: { misesAJour.installationAuto }, set: { misesAJour.installationAuto = $0 }))
+                    .disabled(!misesAJour.rechercheAuto)
+                Button("Rechercher les mises à jour…") { misesAJour.rechercher() }
+                    .disabled(!misesAJour.peutRechercher)
             }
             SectionThreadRoute()
         }

@@ -9,6 +9,11 @@ options:
 configFiles:
   Debug: Signature.xcconfig
   Release: Signature.xcconfig
+# Sparkle 2 : les mises a jour de l'app, a une version figee (gestionnaire de paquets Swift).
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -44,6 +49,23 @@ targets:
       - path: HaloCompagnon
     dependencies:
       - target: HaloProtocole
+      - package: Sparkle
+    # Les cles que la generation de l'Info.plist par Xcode ne connait pas : ce fichier, genere par XcodeGen, est
+    # complete par celles de INFOPLIST_KEY_ (GENERATE_INFOPLIST_FILE).
+    info:
+      path: HaloCompagnon/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Mises a jour (Sparkle 2) : le flux des versions publiees et la cle publique Ed25519 (reglages ci-dessous) ;
+        # recherche au demarrage puis toutes les 24 h, telechargement et installation automatiques ; installation
+        # par le service de Sparkle, l'app restant dans le bac a sable.
+        SUFeedURL: $(FLUX_MISES_A_JOUR)
+        SUPublicEDKey: $(CLE_MISES_A_JOUR)
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
+        SUAutomaticallyUpdate: true
+        SUEnableInstallerLauncherService: true
     settings:
       base:
         PRODUCT_NAME: Halo Compagnon
@@ -54,8 +76,14 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Halo Compagnon joint le pont Halo sur le réseau local (Thread, par les routeurs de bordure)."
-        MARKETING_VERSION: "1.0"
+        # La version publiee (Outils/publier.sh) ; le numero de compilation, que compare Sparkle, est donne a la
+        # publication : le nombre de commits de main.
+        MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
+        # Le flux des mises a jour (apps/macos/appcast.xml du depot, que publier.sh tient a jour, a son adresse brute)
+        # et la cle publique ; la repetition les remplace en ligne de commande.
+        FLUX_MISES_A_JOUR: https://raw.githubusercontent.com/Djoko-cli/benq-screenbar-halo-matter/main/apps/macos/appcast.xml
+        CLE_MISES_A_JOUR: lkPxEHj5erw+omLlr1AVsIoyhfz4YnoLa/N9147SNgc=
         CODE_SIGN_ENTITLEMENTS: HaloCompagnon/HaloCompagnon.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -4,12 +4,15 @@ import SwiftUI
 @main
 struct HaloCompagnonApp: App {
     @State private var pont = Pont()
+    @State private var misesAJour: MisesAJour
     /// Lu dans `body` : un changement de langue reconstruit aussi les menus.
     @AppStorage(ReglageLangue.cle) private var choixLangue: ChoixLangue = .systeme
 
     init() {
         // Avant la premiere vue : les textes calcules partent dans la bonne langue.
         ReglageLangue.appliquerAuLancement()
+        // Les mises a jour : jamais sous les tests (aucune recherche, aucun reseau).
+        _misesAJour = State(initialValue: MisesAJour(demarrer: MisesAJour.demarrerAuLancement))
     }
 
     /// `--args -ecran trames|graphiques|commandes` : ecran affiche au lancement.
@@ -35,6 +38,10 @@ struct HaloCompagnonApp: App {
         .commands {
             // Titres calcules (tr) et non `LocalizedStringKey` : les menus ne
             // recoivent pas la locale de l'environnement des fenetres.
+            CommandGroup(after: .appInfo) {
+                Button(tr("Rechercher les mises à jour…")) { misesAJour.rechercher() }
+                    .disabled(!misesAJour.peutRechercher)
+            }
             CommandGroup(after: .newItem) {
                 Button(tr("Mode démo")) { pont.connecter(.demo) }
                     .keyboardShortcut("d", modifiers: [.command, .shift])
@@ -51,6 +58,7 @@ struct HaloCompagnonApp: App {
         Settings {
             FenetreReglages()
                 .environment(pont)
+                .environment(misesAJour)
                 .langueDeLInterface()
         }
     }

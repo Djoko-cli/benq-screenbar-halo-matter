@@ -15,3 +15,6 @@ __pycache__/
 
 # Signature propre au poste (equipe Apple Development) : voir Signature.xcconfig
 Local.xcconfig
+
+# Genere par xcodegen depuis project.yml (info:)
+HaloCompagnon/Info.plist
