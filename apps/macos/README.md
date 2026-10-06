@@ -34,12 +34,51 @@ Demo Mode, no hardware: dashboard, live frames, charts, controls and console.
 | **Charts** | Swift Charts, computed as section 8 describes: `compteurs` block differences over a 10 s or 1 min window, new segment on a negative difference, `raz`, or restart. TX loss rate and its complement, dropped targets (and `livraison` `abandon` markers), bad CRC per minute and as a share of frames (flood thresholds), reception refusals (`rearm_hors_rx` with the deafness threshold, `tx.fifo`, `garde.refus`), stacked restarts by cause (`relance`, `module` markers), Matter health (active subscribers, parent RSSI, role changes). `lampe stats raz` with confirmation. |
 | **Controls & Console** | Turn on, turn off, lamps (`lampe mode`, `lampe avant/arriere on/off`), button A, `lampe sync`; brightness slider in Matter level with the board's gamma mapping (`gamma_c`) plotted (level → raw 4C..FE); temperature slider from coldest to warmest (mireds, nominal Kelvin, raw value); raw values (`lampe lum`, `lampe temp`); recent commands and their fate (accepted, delivered, dropped, no response...). Raw console: each line leaves with an `id`, the text received between `reponse debut` and `fin` is attached to it, `reponse` and `livraison` are rendered human-readable there. |
 
+## Installing
+
+Download `Halo-Compagnon-X.Y.Z.dmg` from the latest Halo Compagnon
+[release](https://github.com/Djoko-cli/benq-screenbar-halo-matter/releases) (`compagnon-vX.Y.Z`),
+open it, and drag **Halo Compagnon** onto **Applications**. macOS 15 or later.
+
+- **First launch (Gatekeeper).** The app is signed with a self-signed
+  certificate, `Djoko-cli Code Signing`, not with an Apple Developer ID, and
+  isn't notarized. macOS refuses to open it the first time: in System
+  Settings, Privacy & Security, click "Open Anyway" next to Halo Compagnon,
+  then confirm with your password (since macOS 15, a right-click no longer
+  does it). Only once.
+- **Automatic Updates** (Sparkle 2). The app checks for a new version at
+  launch and then every 24 hours, downloads it, checks its Ed25519 signature,
+  and installs it when the app quits, or right away with "Install and
+  Relaunch". An update installed this way doesn't go back through Gatekeeper:
+  the signature takes its place. "Check for Updates…" is in the Halo
+  Compagnon menu; Settings, General, "Updates", has "Check for updates
+  automatically" and "Install updates automatically", both on by default. A
+  copy downloaded before the first version with Sparkle (1.0.0) doesn't
+  update itself.
+- **Keychain.** Every published version is signed by the same certificate:
+  an update keeps access to the bridge's key in the keychain (network
+  source). macOS will likely ask again only when switching between a work
+  build, signed ad hoc, and a published version.
+- **Thread Route.** The network source needs the Mac's route to the Thread
+  network, which Thread Route keeps (see "No IPv6 route" under "Network
+  Source"). It installs from a copy of this repository:
+  `sh tools/macos/thread-route/installer.sh` (administrator password). If
+  halo-routes, its former name, is still there, the installer stops it, waits
+  (up to 25 s) until launchd has unloaded it, and only then removes its files;
+  if the wait runs out, it stops with nothing removed. Settings, General,
+  shows its status.
+
+## Credits
+
+The app embeds [Sparkle](https://sparkle-project.org) 2.10.0 (automatic updates), under the MIT
+license; the text of the license is shipped in the `.dmg`, next to the app (`Sparkle-LICENSE.txt`).
+
 ## Build, Test, Run
 
 Requirements: macOS 15 or later, Xcode 16 or later (developed with Xcode 27),
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
-No third-party dependencies. The Xcode project is generated: only
-`project.yml` is tracked.
+One dependency, Sparkle 2 (2.10.0, the updates), through the Swift Package
+Manager. The Xcode project is generated: only `project.yml` is tracked.
 
 ```sh
 cd apps/macos
@@ -94,6 +133,47 @@ Two pitfalls hit on Sep 25:
   DD=$HOME/Library/Developer/Xcode/DerivedData/halo-sdd
   xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test
   ```
+
+### Publishing a Version
+
+`apps/macos/Outils/publier.sh X.Y.Z` publishes version X.Y.Z, the
+`MARKETING_VERSION` of `project.yml`, from an up-to-date `main`. Before any
+test, it checks that the tag and the version in the feed don't exist yet (and
+that the version is higher than the head of the feed), that the tree is clean,
+that the Git author and committer are `Djoko-cli` at the GitHub noreply address,
+that the keychain holds a single `Djoko-cli Code Signing` certificate whose subject is
+only that name, and that the anonymization check is on the Mac (it is
+private): outside a rehearsal, without it, nothing is published. Then it runs
+all the tests (the app in French and English, the host tests of the bridge,
+Thread Route), builds in Release without debug symbols and with neutral source
+paths, signs the app with that certificate (`IDENTITE_SIGNATURE`, in
+`publier.sh` only: work builds and tests stay ad hoc), and makes the `.dmg`
+(the app, a shortcut to Applications and Sparkle's license). It refuses any
+binary (Sparkle's included) that carries the home folder, `/Users/` or the
+account name, and any real data found by the anonymization check. It signs the
+`.dmg` with the Ed25519 key of the keychain (`sign_update` from the Sparkle
+2.10.0 archive, whose `bin` folder is given by `SPARKLE_BIN`), then adds the
+version, with the notes of `NOTES-VERSIONS.md`, at the top of the update feed,
+`apps/macos/appcast.xml`, which keeps every published version. Just before the
+first public step it reads the state again (`main` unchanged and up to date,
+`gh` logged in, `git push --dry-run` passing, release absent). It then creates
+the GitHub release with `gh release create --target`, which also creates the
+`compagnon-vX.Y.Z` tag (the app's own tags, apart from the bridge's) on the
+checked commit, with the `.dmg`; commits the feed on `main` and pushes it right
+away; and copies the `.dmg` to the Desktop. Each step done is noted in
+`gestes.txt`, in `apps/macos/build/publication/X.Y.Z/`: if the script stops
+halfway, the rest is resumed from that file and that folder, step by step, not
+by running the script again. The build number, which Sparkle compares, is the
+number of commits of `main` (the whole repository).
+The app reads its feed in the repository, at
+`https://raw.githubusercontent.com/Djoko-cli/benq-screenbar-halo-matter/main/apps/macos/appcast.xml`;
+each `.dmg` stays in its release.
+With `--repetition`, the same without GitHub or Desktop, for a local trial,
+with a test key pair and a test certificate in a separate keychain if given;
+only there may the anonymization check be missing.
+A notarization step (Developer ID) is written but off: `NOTARISER=1`, with
+`PROFIL_NOTARISATION`, the keychain profile of `notarytool store-credentials`.
+Tests: `/usr/bin/python3 -m unittest discover -s Outils/tests`.
 
 ## Languages: French and English
 
@@ -429,12 +509,13 @@ apps/macos/
 ├── HaloCompagnon/               the app
 │   ├── Serie/                   PortSerie (POSIX, DTR/RTS), TransportSerie (DispatchSource), SurveillantUSB (IOKit)
 │   ├── Demo/                    ScriptDemo, SimulateurDemo (actor), TransportDemo
-│   ├── Modele/                  Pont (@Observable, main actor): connects transport, receiver, engine, state, logs; language setting; network source and key creation
-│   ├── Reseau/                  Trousseau (this Mac's session keychain, service fr.djoko.halo.pont), AlerteReseau (banner, "No IPv6 route" message)
+│   ├── Modele/                  Pont (@Observable, main actor): connects transport, receiver, engine, state, logs; language setting; network source and key creation; updates (MisesAJour, Sparkle)
+│   ├── Reseau/                  Trousseau (this Mac's session keychain, service fr.djoko.halo.pont), AlerteReseau (banner, "No IPv6 route" message), ThreadRoute (Thread Route status)
 │   ├── Vues/                    the four screens, their components, Settings
 │   └── Ressources/              demo-halo.jsonl, text catalogs (Localizable, Titres)
 ├── HaloCompagnonTests/          end-to-end on the simulated board (connection, delivered command, refusal, whole timeline sped up, restart, source change), app language
-└── Outils/generer_demo.py       demo timeline generator
+├── NOTES-VERSIONS.md            release notes, in French and English
+└── Outils/                      generer_demo.py (demo timeline generator), publier.sh and publication.py (publishing a version, tests in Outils/tests)
 ```
 
 The protocol layer is pure code: `RecepteurLignes`, `MoteurSession`, and

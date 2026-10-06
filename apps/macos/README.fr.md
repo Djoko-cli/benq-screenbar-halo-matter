@@ -34,11 +34,52 @@ commandes et console.
 | **Graphiques** | Swift Charts, calculés comme la section 8 le dit : différences de blocs `compteurs` par fenêtre de 10 s ou 1 min, nouveau segment sur différence négative, `raz` ou redémarrage. Taux de perte TX et son complément, consignes abandonnées (et marqueurs des `livraison` `abandon`), CRC faux par minute et en part des trames (seuils du déluge), refus en réception (`rearm_hors_rx` avec le seuil de surdité, `tx.fifo`, `garde.refus`), relances empilées par cause (marqueurs `relance`, `module`), santé Matter (abonnés actifs, RSSI du parent, changements de rôle). `lampe stats raz` avec confirmation. |
 | **Commandes et console** | Allumer, éteindre, lampes (`lampe mode`, `lampe avant/arriere on/off`), bouton A, `lampe sync` ; curseur de luminosité en niveau Matter avec la correspondance gamma de la carte (`gamma_c`) tracée (niveau → brut 4C..FE) ; curseur de température du plus froid au plus chaud (mireds, Kelvin nominaux, valeur brute) ; valeurs brutes (`lampe lum`, `lampe temp`) ; commandes récentes et leur sort (acceptée, livrée, abandonnée, sans réponse...). Console brute : chaque ligne part avec un `id`, le texte reçu entre `reponse debut` et `fin` lui est rattaché, `reponse` et `livraison` y sont rendues lisibles. |
 
+## Installer
+
+Télécharger `Halo-Compagnon-X.Y.Z.dmg` depuis la dernière
+[version publiée](https://github.com/Djoko-cli/benq-screenbar-halo-matter/releases) de Halo Compagnon (`compagnon-vX.Y.Z`),
+l'ouvrir, et glisser **Halo Compagnon** sur **Applications**. macOS 15 ou plus.
+
+- **Première ouverture (Gatekeeper).** L'app est signée par un certificat
+  auto-signé, `Djoko-cli Code Signing`, sans Developer ID d'Apple ni
+  notarisation. macOS refuse de l'ouvrir la première fois : dans Réglages
+  Système, Confidentialité et sécurité, cliquer « Ouvrir quand même » en face
+  de Halo Compagnon, puis confirmer avec son mot de passe (depuis macOS 15, le
+  clic droit ne suffit plus). Une seule fois.
+- **Mises à jour automatiques** (Sparkle 2). L'app recherche une nouvelle
+  version au démarrage puis toutes les 24 heures, la télécharge, vérifie sa
+  signature Ed25519, et l'installe quand l'app se ferme, ou tout de suite par
+  « Installer et relancer ». Une mise à jour installée ainsi ne repasse pas
+  par Gatekeeper : la signature en tient lieu. « Rechercher les mises à
+  jour… » est dans le menu Halo Compagnon ; Réglages, Général, « Mises à
+  jour », porte « Rechercher automatiquement » et « Installer
+  automatiquement », cochés par défaut. Une copie téléchargée avant la
+  première version avec Sparkle (1.0.0) ne se met pas à jour seule.
+- **Trousseau.** Toutes les versions publiées sont signées par le même
+  certificat : une mise à jour garde l'accès à la clé du pont dans le
+  trousseau (source réseau). macOS le redemandera sans doute seulement au
+  passage d'une compilation de travail, signée ad hoc, à une version publiée,
+  et inversement.
+- **Thread Route.** La source réseau demande la route du Mac vers le réseau
+  Thread, que garde Thread Route (voir « Pas de route » dans « Source
+  réseau »). Il s'installe depuis une copie de ce dépôt :
+  `sh tools/macos/thread-route/installer.sh` (mot de passe administrateur). Si
+  halo-routes, son ancien nom, est encore là, l'installateur l'arrête, attend
+  (25 s au plus) que launchd l'ait déchargé, et ne retire ses fichiers
+  qu'ensuite ; si l'attente expire, il s'arrête sans rien retirer. Réglages,
+  Général, montre son état.
+
+## Crédits
+
+L'app embarque [Sparkle](https://sparkle-project.org) 2.10.0 (les mises à jour automatiques), sous
+licence MIT ; le texte de la licence est livré dans le `.dmg`, à côté de l'app (`Sparkle-LICENSE.txt`).
+
 ## Construire, tester, lancer
 
 Prérequis : macOS 15 ou plus, Xcode 16 ou plus (développé avec Xcode 27),
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
-Aucune dépendance tierce. Le projet Xcode est généré : seul `project.yml` est suivi.
+Une dépendance, Sparkle 2 (2.10.0, les mises à jour), par le gestionnaire de
+paquets Swift. Le projet Xcode est généré : seul `project.yml` est suivi.
 
 ```sh
 cd apps/macos
@@ -93,6 +134,49 @@ Deux pièges rencontrés le 25/09 :
   DD=$HOME/Library/Developer/Xcode/DerivedData/halo-sdd
   xcodebuild -project HaloCompagnon.xcodeproj -scheme HaloCompagnon -destination 'platform=macOS' -derivedDataPath "$DD" test
   ```
+
+### Publier une version
+
+`apps/macos/Outils/publier.sh X.Y.Z` publie la version X.Y.Z, le
+`MARKETING_VERSION` de `project.yml`, depuis `main` à jour. Avant tout test,
+il vérifie que l'étiquette et la version dans le flux n'existent pas encore
+(et que la version dépasse la tête du flux), que l'arbre est propre, que
+l'auteur et le committer Git sont `Djoko-cli`, à l'adresse noreply de GitHub, que le
+trousseau porte un seul certificat `Djoko-cli Code Signing`, dont le sujet n'est que ce
+nom, et que le contrôle d'anonymisation est sur le Mac (il est privé) : hors
+répétition, sans lui, rien n'est publié. Puis il lance tous les tests (l'app en
+français et en anglais, les tests hôte du pont, Thread Route), compile en
+Release sans symboles de débogage et avec des chemins de sources neutres,
+signe l'app par ce certificat (`IDENTITE_SIGNATURE`, dans `publier.sh`
+seulement : les compilations de travail et les tests restent ad hoc), et fait
+le `.dmg` (l'app, un raccourci vers Applications et la licence de Sparkle). Il
+refuse tout binaire (celui de Sparkle compris) qui porte le dossier
+personnel, `/Users/` ou le nom du compte, et toute donnée réelle que trouve le
+contrôle d'anonymisation. Il signe le `.dmg` avec la clé Ed25519 du trousseau
+(`sign_update` de l'archive de Sparkle 2.10.0, dont `SPARKLE_BIN` donne le
+dossier `bin`), puis ajoute la version, avec les notes de `NOTES-VERSIONS.md`,
+en tête du flux des mises à jour, `apps/macos/appcast.xml`, qui garde toutes
+les versions publiées. Juste avant le premier geste public, il relit l'état
+(`main` inchangée et à jour, `gh` connecté, `git push --dry-run` qui passe,
+version publiée absente). Il crée alors la version publiée sur GitHub par
+`gh release create --target`, qui crée aussi l'étiquette `compagnon-vX.Y.Z`
+(les étiquettes propres à l'app, à part de celles du pont) sur le commit
+vérifié, avec le `.dmg` ; commite le flux sur `main` et le pousse aussitôt ; et
+copie le `.dmg` sur le Bureau. Chaque geste fait est noté dans `gestes.txt`,
+dans `apps/macos/build/publication/X.Y.Z/` : si le script s'arrête en route,
+la suite se reprend depuis ce fichier et ce dossier, geste par geste, sans
+relancer le script. Le numéro de compilation, que compare Sparkle, est le
+nombre de commits de `main` (tout le dépôt).
+L'app lit son flux dans le dépôt, à
+`https://raw.githubusercontent.com/Djoko-cli/benq-screenbar-halo-matter/main/apps/macos/appcast.xml` ;
+chaque `.dmg` reste dans sa version publiée.
+Avec `--repetition`, la même chose sans GitHub ni Bureau, pour un essai
+local, avec une paire de clés d'essai et un certificat d'essai dans un
+trousseau à part, s'ils sont donnés ; là seulement, le contrôle
+d'anonymisation peut manquer. Une étape de notarisation (Developer ID) est
+écrite, désactivée : `NOTARISER=1`, avec `PROFIL_NOTARISATION`, le profil du
+trousseau que range `notarytool store-credentials`.
+Tests : `/usr/bin/python3 -m unittest discover -s Outils/tests`.
 
 ## Langues : français et anglais
 
@@ -420,12 +504,13 @@ apps/macos/
 ├── HaloCompagnon/               l'app
 │   ├── Serie/                   PortSerie (POSIX, DTR/RTS), TransportSerie (DispatchSource), SurveillantUSB (IOKit)
 │   ├── Demo/                    ScriptDemo, SimulateurDemo (acteur), TransportDemo
-│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux ; réglage de la langue ; source réseau et création de clé
-│   ├── Reseau/                  Trousseau (trousseau de session macOS, service fr.djoko.halo.pont), AlerteReseau (bandeau, message "pas de route")
+│   ├── Modele/                  Pont (@Observable, acteur principal) : relie transport, récepteur, moteur, état, journaux ; réglage de la langue ; source réseau et création de clé ; mises à jour (MisesAJour, Sparkle)
+│   ├── Reseau/                  Trousseau (trousseau de session macOS, service fr.djoko.halo.pont), AlerteReseau (bandeau, message "pas de route"), ThreadRoute (état de Thread Route)
 │   ├── Vues/                    les quatre écrans, leurs composants, les Réglages
 │   └── Ressources/              demo-halo.jsonl, catalogues de textes (Localizable, Titres)
 ├── HaloCompagnonTests/          bout en bout sur la carte simulée (connexion, commande livrée, refus, chronologie entière accélérée, redémarrage, changement de source), langue de l'app
-└── Outils/generer_demo.py       générateur de la chronologie de démo
+├── NOTES-VERSIONS.md            notes de version, en français et en anglais
+└── Outils/                      generer_demo.py (générateur de la chronologie de démo), publier.sh et publication.py (publication d'une version, tests dans Outils/tests)
 ```
 
 La couche protocole est du code pur : `RecepteurLignes`, `MoteurSession` et
