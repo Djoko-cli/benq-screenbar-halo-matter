@@ -41,13 +41,18 @@ struct MisesAJourTests {
         #expect(reseau == true)
     }
 
-    /// La decision de demarrer le moteur : oui dans l'app (environnement ordinaire), non sous les tests (Xcode
-    /// pose `XCTestConfigurationFilePath`). Sans le cas « oui », une app qui ne cherche jamais passerait.
+    /// La decision de demarrer le moteur : oui dans l'app publiee (environnement ordinaire), non sous les tests
+    /// (Xcode pose `XCTestConfigurationFilePath`), non dans une compilation de travail (numero 1, ou absent). Sans
+    /// le cas « oui », une app qui ne cherche jamais passerait.
     @Test func decisionDeDemarrer() {
-        #expect(MisesAJour.doitDemarrer(environnement: [:]))
-        #expect(MisesAJour.doitDemarrer(environnement: ["HOME": "/tmp", "PATH": "/usr/bin"]))
-        #expect(!MisesAJour.doitDemarrer(environnement: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]))
-        #expect(!MisesAJour.doitDemarrer(environnement: ["HOME": "/tmp", "XCTestConfigurationFilePath": ""]))
+        #expect(MisesAJour.doitDemarrer(numero: "435", environnement: [:]))
+        #expect(MisesAJour.doitDemarrer(numero: "435", environnement: ["HOME": "/tmp", "PATH": "/usr/bin"]))
+        #expect(!MisesAJour.doitDemarrer(numero: "1", environnement: [:]))
+        #expect(!MisesAJour.doitDemarrer(numero: "1", environnement: ["HOME": "/tmp", "PATH": "/usr/bin"]))
+        #expect(!MisesAJour.doitDemarrer(numero: nil, environnement: [:]))
+        #expect(!MisesAJour.doitDemarrer(numero: "435",
+                                         environnement: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]))
+        #expect(!MisesAJour.doitDemarrer(numero: "435", environnement: ["HOME": "/tmp", "XCTestConfigurationFilePath": ""]))
     }
 
     /// Celle de l'app, creee a son lancement, n'est pas demarree sous les tests : aucune recherche, aucun reseau.

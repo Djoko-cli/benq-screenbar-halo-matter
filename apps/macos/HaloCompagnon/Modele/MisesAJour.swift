@@ -10,7 +10,8 @@ import Sparkle
 /// textes de sa fenetre viennent de ses propres traductions.
 ///
 /// Sous les tests, le moteur n'est jamais demarre : aucune recherche, aucun acces au reseau, et les reglages ne
-/// sont pas ecrits (les preferences sont celles de l'app installee).
+/// sont pas ecrits (les preferences sont celles de l'app installee). Ni dans une compilation de travail (numero de
+/// compilation 1, jamais publie) : elle ne se remplace jamais par la version publiee.
 @MainActor
 @Observable
 final class MisesAJour {
@@ -45,15 +46,17 @@ final class MisesAJour {
         Self.deLApp = self
     }
 
-    /// Le moteur demarre au lancement de l'app, sauf sous les tests.
+    /// Le moteur demarre au lancement de l'app, sauf sous les tests et dans une compilation de travail.
     static var demarrerAuLancement: Bool {
-        doitDemarrer(environnement: ProcessInfo.processInfo.environment)
+        doitDemarrer(numero: Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
+                     environnement: ProcessInfo.processInfo.environment)
     }
 
     /// La decision, pure : oui, sauf si l'environnement porte celui des tests (Xcode pose
-    /// `XCTestConfigurationFilePath`).
-    nonisolated static func doitDemarrer(environnement: [String: String]) -> Bool {
-        environnement["XCTestConfigurationFilePath"] == nil
+    /// `XCTestConfigurationFilePath`), et si le numero de compilation (`CFBundleVersion`) est celui d'une
+    /// compilation de travail, 1 (project.yml ; publier.sh donne le nombre de commits de main) ou absent.
+    nonisolated static func doitDemarrer(numero: String?, environnement: [String: String]) -> Bool {
+        numero != nil && numero != "1" && environnement["XCTestConfigurationFilePath"] == nil
     }
 
     /// « Rechercher les mises a jour… » : la fenetre de Sparkle dit ce qu'elle trouve.
