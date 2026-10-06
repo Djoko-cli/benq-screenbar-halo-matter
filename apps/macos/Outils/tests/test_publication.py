@@ -116,10 +116,16 @@ FAUX = {
                 droits["com.apple.security.get-task-allow"] = True
             if cas == "validation-levee":
                 droits["com.apple.security.cs.disable-library-validation"] = True
+            if cas == "validation-fausse":
+                droits["com.apple.security.cs.disable-library-validation"] = False
+            if cas == "variables-dyld":
+                droits["com.apple.security.cs.allow-dyld-environment-variables"] = True
             if signee:
                 droits = plistlib.load(open(etat, "rb"))
                 if cas == "sans-validation":
                     droits.pop("com.apple.security.cs.disable-library-validation", None)
+                if cas == "validation-fausse" and "com.apple.security.cs.disable-library-validation" in droits:
+                    droits["com.apple.security.cs.disable-library-validation"] = False
             sys.stdout.buffer.write(b"" if cas == "illisibles" and signee else plistlib.dumps(droits))
         extraire = a[:1] == ["-d"] and a[1].startswith("--extract-certificates=")
         if extraire and not os.environ.get("FAUX_SANS_CERTIFICAT"):
@@ -900,7 +906,8 @@ class PublicationTests(unittest.TestCase):
 
     def test_signature_du_code(self):
         """Le code imbrique d'abord, du plus profond au moins profond, chaque cadre apres son contenu, l'app en
-        dernier ; par l'empreinte de l'identite, jamais son nom ; le runtime renforce, les droits gardes ; puis la
+        dernier ; par l'empreinte de l'identite, jamais son nom ; le runtime renforce, les droits gardes (l'app : ceux de
+        droits-app.plist) ; puis la
         verification, le certificat feuille relu et l'exigence de signature."""
         self.m.publier()
         self.assertEqual(self.signatures(), [
@@ -969,7 +976,15 @@ class PublicationTests(unittest.TestCase):
                                   P.VALIDATION_BIBLIOTHEQUES: True})
 
     def test_refus_droits_sans_levee_de_la_validation(self):
-        self.refuse_droits('sans-validation', 'disable-library-validation manque')
+        for cas in ('sans-validation', 'validation-fausse'):
+            with self.subTest(cas=cas):
+                self.m.oublier()
+                self.refuse_droits(cas, 'disable-library-validation manque')
+
+    def test_refus_droits_autre_exception_du_runtime(self):
+        """Une autre exception du runtime renforce (ici les variables DYLD_) : refus, la levee seule est admise."""
+        self.refuse_droits('variables-dyld', 'exception du runtime renforce '
+                                             'com.apple.security.cs.allow-dyld-environment-variables')
 
     def test_notarisation_sans_levee_de_la_validation(self):
         """NOTARISER=1 (Developer ID, une equipe) : la levee n'est pas ajoutee, et refusee si Xcode l'a posee."""
@@ -979,10 +994,14 @@ class PublicationTests(unittest.TestCase):
             self.assertNotIn(P.VALIDATION_BIBLIOTHEQUES, plistlib.load(f))
 
     def test_refus_notarisation_avec_levee_de_la_validation(self):
-        env = {'NOTARISER': '1', 'PROFIL_NOTARISATION': 'profil-essai', 'FAUX_DROITS': 'validation-levee'}
-        appels = self.refuse(env=env, motif='disable-library-validation est present')
-        self.assertTrue([a for a in appels if a.startswith('codesign --force')], 'apres la signature')
-        self.assertFalse([a for a in appels if a.startswith(('hdiutil', 'sign_update'))], 'aucun .dmg')
+        """Avec NOTARISER=1, la levee posee par Xcode est refusee, meme a false."""
+        for cas in ('validation-levee', 'validation-fausse'):
+            with self.subTest(cas=cas):
+                self.m.oublier()
+                env = {'NOTARISER': '1', 'PROFIL_NOTARISATION': 'profil-essai', 'FAUX_DROITS': cas}
+                appels = self.refuse(env=env, motif='disable-library-validation est present')
+                self.assertTrue([a for a in appels if a.startswith('codesign --force')], 'apres la signature')
+                self.assertFalse([a for a in appels if a.startswith(('hdiutil', 'sign_update'))], 'aucun .dmg')
 
     def test_refus_droits_mach_lookup_pas_exactement_ceux_de_sparkle(self):
         """Un service de plus, un de moins, ceux d'un autre identifiant, ou des droits illisibles : refus."""

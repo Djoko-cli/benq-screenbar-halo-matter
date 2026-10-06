@@ -654,8 +654,9 @@ def droits_pour_signer(o, app, sortie):
 def verifier_droits(o, app, identifiant):
     """Les droits de l'app signee, relus : le bac a sable, en mach-lookup les seuls services de Sparkle
     (<identifiant>-spks et <identifiant>-spki, ni plus ni moins), jamais get-task-allow (un debogueur pourrait
-    s'attacher a l'app), et la levee de la validation des bibliotheques si et seulement si la publication n'est pas
-    notarisee (voir droits_pour_signer). Leve Refus."""
+    s'attacher a l'app), la levee de la validation des bibliotheques si et seulement si la publication n'est pas
+    notarisee (voir droits_pour_signer), et aucune autre exception du runtime renforce (com.apple.security.cs.*) :
+    avec la levee, allow-dyld-environment-variables rendrait l'injection de code triviale. Leve Refus."""
     droits = lire_droits(o, app)
     if droits.get(BAC_A_SABLE) is not True:
         raise Refus("droits de l'app signee : le bac a sable (%s) manque" % BAC_A_SABLE)
@@ -665,6 +666,9 @@ def verifier_droits(o, app, identifiant):
         raise Refus("droits de l'app signee : %s doit etre exactement %s" % (MACH_LOOKUP, ' et '.join(attendus)))
     if GET_TASK_ALLOW in droits:
         raise Refus("droits de l'app signee : %s est present" % GET_TASK_ALLOW)
+    exceptions = sorted(k for k in droits if k.startswith('com.apple.security.cs.') and k != VALIDATION_BIBLIOTHEQUES)
+    if exceptions:
+        raise Refus("droits de l'app signee : exception du runtime renforce %s" % ', '.join(exceptions))
     if notariser():
         if VALIDATION_BIBLIOTHEQUES in droits:
             raise Refus("droits de l'app signee : %s est present, et la notarisation s'en passe"
