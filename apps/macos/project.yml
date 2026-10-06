@@ -83,7 +83,7 @@ targets:
         # Le flux des mises a jour (apps/macos/appcast.xml du depot, que publier.sh tient a jour, a son adresse brute)
         # et la cle publique ; la repetition les remplace en ligne de commande.
         FLUX_MISES_A_JOUR: https://raw.githubusercontent.com/Djoko-cli/benq-screenbar-halo-matter/main/apps/macos/appcast.xml
-        CLE_MISES_A_JOUR: lkPxEHj5erw+omLlr1AVsIoyhfz4YnoLa/N9147SNgc=
+        CLE_MISES_A_JOUR: nRIVHOXbEktqGduJ4ukxhjZzlUaiE/yqR3sgbW9Ie6E=
         CODE_SIGN_ENTITLEMENTS: HaloCompagnon/HaloCompagnon.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
