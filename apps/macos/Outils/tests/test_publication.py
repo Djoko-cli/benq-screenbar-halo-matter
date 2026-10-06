@@ -4,7 +4,8 @@ les controles avant publication et juste avant les gestes publics, leur ordre, l
 compilation sans chemin personnel, la signature du code et son certificat, le contenu du .dmg (licence de Sparkle
 comprise), la notarisation (desactivee par defaut), sur un faux depot et de fausses commandes (xcodebuild, codesign,
 security, openssl, ditto, hdiutil, sign_update, xcrun, gh...). Aucun reseau, aucun trousseau, aucun outil reel hors
-git ; HOME est un dossier temporaire, et le nom du compte, invente (USER, LOGNAME).
+git ; HOME est un dossier temporaire, et le nom du compte, invente (USER, LOGNAME) ; le PATH est restreint a /usr/bin et
+/bin (ni gh, ni sign_update, ni generate_keys) et git n'accepte que le protocole file (GIT_ALLOW_PROTOCOL).
 
   /usr/bin/python3 -m unittest discover -s <dossier de ces tests>
 """
@@ -31,7 +32,11 @@ EMPREINTE = 'A1B2C3D4E5F60718293A4B5C6D7E8F9012345678'
 AUTRE_EMPREINTE = '0F1E2D3C4B5A69788796A5B4C3D2E1F00F1E2D3C'
 COMPTE = 'compte-invente'
 AUTRE_CLE = 'lkPxEHj5erw+omLlr1AVsIoyhfz4YnoLa/N9147SNgc='
-GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_SYSTEM='/dev/null',
+# Aucune vraie commande reseau ne peut partir : git ne parle que le protocole file, et le PATH ne porte ni gh, ni les
+# outils de Sparkle, ni xcodegen (les fausses commandes sont donnees par leur chemin, par l'environnement).
+PATH_ISOLE = '/usr/bin:/bin'
+GIT_ENV = dict(os.environ, PATH=PATH_ISOLE, GIT_ALLOW_PROTOCOL='file',
+               GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_SYSTEM='/dev/null',
                GIT_AUTHOR_NAME='Essai', GIT_AUTHOR_EMAIL='essai@example.invalid',
                GIT_COMMITTER_NAME='Essai', GIT_COMMITTER_EMAIL='essai@example.invalid')
 
@@ -161,6 +166,13 @@ FAUX = {
             os.remove(lien)
         if os.environ.get('FAUX_LIEN'):
             os.symlink(perso['home'], lien)
+        # Un lien dont le nom et la cible ne sont dans aucun contenu de fichier (FAUX_LIEN_NOM_CIBLE = nom:cible).
+        nom_lien, _, cible_lien = os.environ.get('FAUX_LIEN_NOM_CIBLE', ':').partition(':')
+        if nom_lien:
+            autre = os.path.join(app, 'Resources', nom_lien)
+            if os.path.lexists(autre):
+                os.remove(autre)
+            os.symlink(cible_lien, autre)
         cle = AUTRE if os.environ.get('FAUX_INFO') == 'cle' else lu('CLE_MISES_A_JOUR')
         plistlib.dump({'CFBundleShortVersionString': lu('MARKETING_VERSION'),
                        'CFBundleVersion': reglages['CURRENT_PROJECT_VERSION'],
@@ -181,7 +193,8 @@ FAUX = {
     'sign_update': 'print("U0lHTkFUVVJFLUlOVkVOVEVF")\n',
     'generate_keys': 'print(os.environ["FAUSSE_CLE"])\n',
     # GitHub simule : release view (« release not found », ou FAUX_VUE, ou publiee), auth status, et release create,
-    # qui note l'etat de l'origine a ce moment, puis cree l'etiquette sur la cible, comme GitHub.
+    # qui note l'etat de l'origine a ce moment, puis cree l'etiquette sur la cible, comme GitHub ; FAUX_ECHEC_CREATE=1
+    # echoue avant de creer, =apres echoue apres (la version existe, la reponse est perdue).
     'gh': textwrap.dedent('''\
         import subprocess
         a = sys.argv[1:]
@@ -196,14 +209,21 @@ FAUX = {
             origine = os.environ['FAUSSE_ORIGINE']
             main = subprocess.run(['git', '-C', origine, 'rev-parse', 'main'], capture_output=True, text=True)
             open(os.environ['FAUX_JOURNAL'], 'a').write('origine au moment de la publication ' + main.stdout)
-            if os.environ.get('FAUX_ECHEC_CREATE'):
+            echec = os.environ.get('FAUX_ECHEC_CREATE')
+            if echec == '1':
                 sys.exit(1)
             subprocess.run(['git', '-C', origine, 'tag', a[2], a[a.index('--target') + 1]], check=True)
+            if echec == 'apres':
+                sys.stderr.write('connexion perdue apres la creation\\n')
+                sys.exit(1)
         '''),
-    # Le controle d'anonymisation simule : il trouve si un de ses arguments contient FAUX_TROUVE.
+    # Le controle d'anonymisation simule : il trouve si un de ses arguments, ou le contenu d'un fichier donne, contient
+    # FAUX_TROUVE.
     'controles.py': textwrap.dedent('''\
         t = os.environ.get('FAUX_TROUVE')
-        trouve = bool(t) and t in ' '.join(sys.argv[1:])
+        def contenu(f):
+            return open(f, 'rb').read().decode('latin-1') if os.path.isfile(f) else ''
+        trouve = bool(t) and (t in ' '.join(sys.argv[1:]) or any(t in contenu(f) for f in sys.argv[1:]))
         print('trouve : ' + ('1' if trouve else 'aucun'))
         sys.exit(1 if trouve else 0)
         '''),
@@ -532,6 +552,15 @@ class PublicationTests(unittest.TestCase):
     def rien_compile(self, appels):
         self.assertFalse([a for a in appels if a.startswith('xcodebuild')], 'rien de compile')
 
+    def lignes_gestes(self, sortie=None):
+        """Les lignes de gestes.txt, sans l'horodatage (une liste vide s'il n'existe pas)."""
+        chemin = os.path.join(sortie or os.path.join(self.m.depot, 'build', 'publication', '1.2.3'), 'gestes.txt')
+        return [l.split(' ', 1)[1] for l in lire(chemin).splitlines()] if os.path.exists(chemin) else []
+
+    def gestes(self, sortie=None):
+        """Le premier mot de chaque ligne de gestes.txt, avant « : » : tentative, echec, ou le geste fait."""
+        return [l.split(' :')[0] for l in self.lignes_gestes(sortie)]
+
     # --- la repetition et la publication ---------------------------------------------------------------------
 
     def test_repetition(self):
@@ -566,7 +595,7 @@ class PublicationTests(unittest.TestCase):
         self.assertIn(os.path.join(sortie, 'appcast.xml'), controle)
         self.assertIn('project.yml', controle)
         self.assertEqual(git(self.m.depot, 'tag', '-l'), '')
-        self.assertEqual(lire(os.path.join(sortie, 'gestes.txt')).count('\n'), 1, 'le commit du flux seul')
+        self.assertEqual(self.gestes(sortie), ['tentative', 'flux commite'], 'le commit du flux seul')
 
     def test_repetition_avec_la_cle_du_trousseau(self):
         """Sans paire d'essai : la cle publique de project.yml, celle du trousseau, et la signature par le trousseau."""
@@ -626,13 +655,16 @@ class PublicationTests(unittest.TestCase):
         self.m.publier()
         self.assertIn('origine au moment de la publication ' + avant, self.m.appels())
         self.assertNotEqual(git(self.m.origine, 'rev-parse', 'main'), avant, 'le flux, pousse ensuite')
-        gestes = lire(os.path.join(self.m.depot, 'build', 'publication', '1.2.3', 'gestes.txt')).splitlines()
-        self.assertEqual([g.split(' ', 1)[1].split(' :')[0] for g in gestes],
-                         ['version publiee', 'flux commite', 'flux pousse sur main'])
-        self.assertIn('essai-v1.2.3, etiquette creee sur ' + avant, gestes[0])
+        self.assertEqual(self.gestes(), ['tentative', 'version publiee', 'tentative', 'flux commite', 'tentative',
+                                         'flux pousse sur main'], 'chaque geste : la tentative, puis sa reussite')
+        gestes = self.lignes_gestes()
+        self.assertIn('gh release create essai-v1.2.3 sur ' + avant, gestes[0])
+        self.assertIn('essai-v1.2.3, etiquette creee sur ' + avant, gestes[1])
+        self.assertIn('appcast.xml (%s)' % git(self.m.depot, 'rev-parse', 'HEAD'), gestes[3], 'le commit du flux')
 
     def test_echec_de_la_version_publiee(self):
-        """gh release create en echec : le flux n'est ni commite ni pousse, et gestes.txt ne note rien."""
+        """gh release create en echec, rien cree : le flux n'est ni commite ni pousse ; gestes.txt note la tentative
+        (avant le geste) puis l'echec, jamais « version publiee »."""
         with self.assertRaises(subprocess.CalledProcessError):
             self.m.publier(env={'FAUX_ECHEC_CREATE': '1'})
         self.assertFalse(os.path.exists(os.path.join(self.m.depot, 'appcast.xml')), 'le flux du depot ne change pas')
@@ -640,8 +672,88 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(git(self.m.origine, 'rev-list', '--count', 'main'), '3', 'origine inchangee')
         self.assertEqual(git(self.m.origine, 'tag', '-l'), '', 'aucune etiquette poussee a part')
         self.assertEqual(git(self.m.depot, 'status', '--porcelain'), '')
-        gestes = os.path.join(self.m.depot, 'build', 'publication', '1.2.3', 'gestes.txt')
-        self.assertFalse(os.path.exists(gestes) and lire(gestes).strip(), 'aucun geste fait')
+        self.assertEqual(self.gestes(), ['tentative', 'echec'], 'ni « version publiee », ni « flux commite »')
+        self.assertIn('relancer publier.sh', self.lignes_gestes()[1])
+
+    def test_echec_ambigu_de_la_version_publiee(self):
+        """gh release create echoue alors que GitHub a cree la version (la reponse est perdue) : l'etiquette est sur
+        GitHub, le flux n'est pas commite, et gestes.txt le dit : echec ambigu, lire GitHub avant de reprendre. Une
+        relance refuse d'elle-meme."""
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.m.publier(env={'FAUX_ECHEC_CREATE': 'apres'})
+        self.assertEqual(git(self.m.origine, 'tag', '-l'), 'essai-v1.2.3', 'la version existe malgre l\'erreur')
+        self.assertFalse(os.path.exists(os.path.join(self.m.depot, 'appcast.xml')))
+        self.assertEqual(git(self.m.depot, 'rev-list', '--count', 'HEAD'), '3', 'aucun commit')
+        self.assertEqual(self.gestes(), ['tentative', 'echec'], 'le geste ambigu est note, pas comme fait')
+        echec = self.lignes_gestes()[1]
+        self.assertIn('peut-etre cree la version', echec)
+        self.assertIn('gh release view essai-v1.2.3', echec)
+        self.assertIn('git ls-remote --tags origin', echec)
+        with self.assertRaises(P.Refus) as r:
+            self.m.publier()
+        self.assertIn('existe deja sur GitHub', str(r.exception))
+        self.assertEqual(self.gestes(), ['tentative', 'echec'], 'la relance refusee ne change pas gestes.txt')
+
+    def test_echec_du_commit_du_flux(self):
+        """Apres la version publiee, le commit du flux echoue (un crochet pre-commit refuse) : gestes.txt dit que la
+        version est publiee, que le flux ne l'est pas, et ou reprendre ; « flux commite » n'y est pas."""
+        crochet = os.path.join(self.m.depot, '.git', 'hooks', 'pre-commit')
+        ecrire(crochet, '#!/bin/sh\nexit 1\n')
+        os.chmod(crochet, 0o755)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.m.publier()
+        self.assertEqual(git(self.m.origine, 'tag', '-l'), 'essai-v1.2.3', 'la version est publiee')
+        self.assertEqual(git(self.m.origine, 'rev-list', '--count', 'main'), '3', 'le flux n\'est pas pousse')
+        self.assertEqual(git(self.m.depot, 'rev-list', '--count', 'HEAD'), '3', 'le flux n\'est pas commite')
+        self.assertEqual(self.gestes(), ['tentative', 'version publiee', 'tentative', 'echec'])
+        echec = self.lignes_gestes()[3]
+        self.assertIn('tentative : commit du flux', self.lignes_gestes()[2])
+        for attendu in ('commit du flux', "la version est publiee, le flux ne l'est pas", 'git commit -F message-commit.txt',
+                        'git push origin HEAD:main'):
+            self.assertIn(attendu, echec)
+
+    def test_echec_du_push_du_flux(self):
+        """Le push du flux echoue apres le commit (un crochet pre-receive refuse ; le --dry-run, lui, passe) :
+        gestes.txt dit que la version est publiee, le flux commite en local, et reprend au push ; « flux pousse » n'y
+        est pas."""
+        crochet = os.path.join(self.m.origine, 'hooks', 'pre-receive')
+        ecrire(crochet, '#!/bin/sh\nexit 1\n')
+        os.chmod(crochet, 0o755)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.m.publier()
+        self.assertEqual(git(self.m.origine, 'tag', '-l'), 'essai-v1.2.3', 'la version est publiee')
+        self.assertEqual(git(self.m.origine, 'rev-list', '--count', 'main'), '3', 'le flux n\'est pas pousse')
+        self.assertEqual(git(self.m.depot, 'rev-list', '--count', 'HEAD'), '4', 'le flux est commite en local')
+        self.assertEqual(self.gestes(), ['tentative', 'version publiee', 'tentative', 'flux commite', 'tentative',
+                                         'echec'])
+        echec = self.lignes_gestes()[5]
+        self.assertIn('push du flux', self.lignes_gestes()[4])
+        for attendu in ('push du flux', 'la version est publiee et le flux est commite en local',
+                        'git ls-remote origin refs/heads/main', 'git push origin HEAD:main'):
+            self.assertIn(attendu, echec)
+
+    def test_push_du_flux_verifie_sur_github(self):
+        """Un push qui reussit sans que main de GitHub arrive au commit du flux (ici, il part ailleurs : pushurl) est
+        un echec, note comme tel : « flux pousse sur main » ne l'est qu'apres la verification (ls-remote)."""
+        miroir = os.path.join(self.dossier, 'miroir.git')
+        subprocess.run(['git', 'clone', '-q', '--bare', self.m.origine, miroir], check=True, env=GIT_ENV)
+        git(self.m.depot, 'config', 'remote.origin.pushurl', miroir)
+        with self.assertRaises(P.Refus) as r:
+            self.m.publier()
+        self.assertIn("main de GitHub n'est pas au commit du flux", str(r.exception))
+        self.assertEqual(git(miroir, 'rev-parse', 'main'), git(self.m.depot, 'rev-parse', 'HEAD'), 'le push est parti')
+        self.assertEqual(git(self.m.origine, 'rev-list', '--count', 'main'), '3')
+        self.assertEqual(self.gestes(), ['tentative', 'version publiee', 'tentative', 'flux commite', 'tentative',
+                                         'echec'])
+
+    def test_push_du_flux_par_head_main(self):
+        """HEAD detache pendant les tests, au commit verifie (la relecture le tolere) : le flux est commite sur HEAD,
+        et git push origin main ne pousserait rien. Le push par HEAD:main le pousse, et ls-remote le verifie."""
+        self.m.publier('--test', 'git checkout -q --detach')
+        flux = git(self.m.depot, 'rev-parse', 'HEAD')
+        self.assertEqual(git(self.m.origine, 'rev-parse', 'main'), flux, 'le flux est sur main de GitHub')
+        self.assertEqual(git(self.m.origine, 'show', '--name-only', '--format=', 'main'), 'appcast.xml')
+        self.assertEqual(self.gestes()[-1], 'flux pousse sur main')
 
     def test_app_dans_un_sous_dossier(self):
         """Le cas du pont : l'app et son flux dans apps/macos, macOS 15.0 minimum, publier.sh lance de la."""
@@ -723,6 +835,24 @@ class PublicationTests(unittest.TestCase):
                         '/dmg/Sparkle-LICENSE.txt'):
             self.assertIn(attendu, controle)
         self.assertIn('--table %s/table.json' % self.m.bin, controle)
+        sortie = os.path.join(self.m.depot, 'build', 'publication', '1.2.3')
+        self.assertIn(' %s/contenu-dmg.txt' % sortie, controle, 'la liste des noms passe aussi par le controle')
+        liste = lire(os.path.join(sortie, 'contenu-dmg.txt')).splitlines()
+        for attendu in ('Applications -> /Applications', 'Sparkle-LICENSE.txt', 'Essai Inventee.app/Contents/Resources',
+                        'Essai Inventee.app/Contents/Resources/fr.lproj/Localizable.strings'):
+            self.assertIn(attendu, liste)
+
+    def test_noms_du_contenu_du_dmg_controles(self):
+        """Les noms passent aussi par le controle d'anonymisation, pas seulement les contenus : le nom d'un lien, ou
+        sa cible, qui ne sont dans le contenu d'aucun fichier."""
+        cas = [('nom-de-lien-invente:/Applications', 'nom-de-lien-invente'),
+               ('lien-banal:/cible-inventee/x', 'cible-inventee')]
+        for lien, trouve in cas:
+            with self.subTest(lien=lien):
+                self.m.oublier()
+                appels = self.refuse(env={'FAUX_LIEN_NOM_CIBLE': lien, 'FAUX_TROUVE': trouve},
+                                     motif='contenu du .dmg')
+                self.assertFalse([a for a in appels if a.startswith(('hdiutil', 'sign_update'))], 'aucun .dmg')
 
     def test_refus_controle_du_contenu_du_dmg(self):
         appels = self.refuse(env={'FAUX_TROUVE': 'Sparkle.framework'}, motif='contenu du .dmg')
@@ -1035,7 +1165,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_refus_repetition_dans_une_copie_de_github(self):
         """Un flux d'essai commite dans un clone de GitHub pourrait y etre pousse a la main : refus."""
-        git(self.m.depot, 'remote', 'set-url', 'origin', 'https://github.com/Exemple/essai.git')
+        git(self.m.depot, 'remote', 'set-url', 'origin', 'https://github.com.invalid/Exemple/essai.git')
         appels = self.refuse('--repetition', os.path.join(self.dossier, 'repetition'), '--url-base',
                              'http://127.0.0.1:8123', '--sans-tests', motif='GitHub')
         self.rien_compile(appels)
@@ -1074,6 +1204,20 @@ class PublicationTests(unittest.TestCase):
         self.assertIn('echec', erreurs)
         self.assertNotIn('Traceback', erreurs)
         self.assertFalse([a for a in self.m.appels() if a.startswith('gh release create')])
+
+    def test_isolement_des_tests(self):
+        """Aucune vraie commande reseau ne peut partir : un PATH restreint (ni gh, ni les outils de Sparkle, ni
+        xcodegen), et git ne parle que le protocole file."""
+        env = self.m.environnement(None)
+        self.assertEqual(env['PATH'], PATH_ISOLE)
+        self.assertEqual(PATH_ISOLE, '/usr/bin:/bin')
+        self.assertEqual(env['GIT_ALLOW_PROTOCOL'], 'file')
+        for outil in ('gh', 'sign_update', 'generate_keys', 'xcodegen'):
+            self.assertIsNone(shutil.which(outil, path=env['PATH']), outil)
+        r = subprocess.run(['git', 'ls-remote', 'https://github.com.invalid/Exemple/essai.git'], env=env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('not allowed', r.stderr, 'git refuse tout protocole autre que file')
 
     def test_aucun_outil_reel_dans_les_tests(self):
         """Chaque commande externe des tests est une fausse commande, sauf git (sur un faux depot)."""

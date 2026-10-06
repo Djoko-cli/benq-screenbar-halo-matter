@@ -27,7 +27,8 @@ Dans l'ordre :
      de signature (codesign -d -r-) est ecrite dans exigence.txt ;
   4. le .dmg (hdiutil) : l'app, un raccourci vers Applications et la licence de Sparkle. Avant hdiutil, tout le
      contenu est refuse s'il porte un chemin personnel ($HOME, /Users/, le nom du compte) ou si le controle
-     d'anonymisation y trouve une donnee reelle. Avec NOTARISER=1 seulement (desactive par defaut), le .dmg signe,
+     d'anonymisation y trouve une donnee reelle ; la liste des noms du contenu (chemins relatifs, cibles des liens),
+     ecrite dans contenu-dmg.txt, passe aussi par ce controle. Avec NOTARISER=1 seulement (desactive par defaut), le .dmg signe,
      soumis a Apple (notarytool, profil PROFIL_NOTARISATION du trousseau), agrafe (stapler) et evalue (spctl) ;
   5. la signature Ed25519 du .dmg (sign_update de Sparkle, cle du trousseau), puis le flux : le fichier CHEMIN du
      depot (appcast.xml), qui garde toutes les versions publiees, la nouvelle en tete (relu apres l'ajout) ;
@@ -35,15 +36,18 @@ Dans l'ordre :
   6. le controle d'anonymisation (prive) sur les notes, le flux, le message du commit du flux et les textes de l'app ;
   7. juste avant les gestes publics, l'etat est relu : HEAD est toujours le commit verifie, a jour avec GitHub, et
      l'arbre est propre ; l'etiquette n'existe pas sur GitHub ; gh release view repond « release not found » (toute
-     autre reponse est un refus) ; gh a une session ; git push --dry-run origin main passe. Puis la version publiee
-     (gh release create --target <commit verifie>, qui cree l'etiquette sur GitHub), avec le .dmg ; puis le flux,
-     commite sur main (git add de ce seul fichier) et pousse aussitot. Chaque geste fait est note dans gestes.txt,
-     dans le dossier des produits ;
+     autre reponse est un refus) ; gh a une session ; git push --dry-run origin HEAD:main passe. Puis la version
+     publiee (gh release create --target <commit verifie>, qui cree l'etiquette sur GitHub), avec le .dmg ; puis le
+     flux, commite (git add de ce seul fichier), et pousse aussitot par HEAD:main, ce qui est verifie (git ls-remote).
+     Chaque geste est note dans gestes.txt, dans le dossier des produits : « tentative : ... » AVANT le geste, puis,
+     APRES, sa ligne de reussite (« version publiee », « flux commite », « flux pousse sur main ») ou « echec : ... »
+     avec la reprise. Une « tentative » sans suite (coupure, Ctrl-C) est un geste ambigu : lire GitHub d'abord ;
   8. le .dmg copie sur le Bureau (sauf --sans-bureau).
 
 Rien n'est publie si une etape de 1 a 6, ou la relecture de l'etape 7, echoue. Un echec au milieu de l'etape 7
-laisse les gestes deja faits, notes dans gestes.txt : la reprise part de ce fichier et du dossier des produits
-(notes.md, appcast.xml, message-commit.txt, le .dmg).
+laisse les gestes deja faits, notes dans gestes.txt : la reprise part de ce fichier, qui dit ou reprendre, et du
+dossier des produits (notes.md, appcast.xml, message-commit.txt, le .dmg). Un echec de gh release create est ambigu
+(GitHub a pu creer la version avant que l'erreur arrive) : il est note comme tel.
 
 En repetition (--repetition DOSSIER), ni GitHub, ni etiquette, ni Bureau : la branche peut etre une autre que main,
 mais l'origine ne doit pas etre sur GitHub ; --url-base tient lieu des deux adresses de GitHub (le flux :
@@ -351,6 +355,18 @@ def chemins_personnels(dossier, motifs):
     return trouves
 
 
+def liste_du_contenu(dossier):
+    """Les noms du contenu du .dmg, un par ligne : chaque chemin relatif (dossiers, fichiers et liens) et, pour un
+    lien, sa cible. Le controle d'anonymisation ne lit que le contenu des fichiers : il lit aussi cette liste."""
+    lignes = []
+    for racine, dossiers, fichiers in os.walk(dossier):
+        dossiers.sort()
+        for nom in sorted(dossiers + fichiers):
+            p = os.path.join(racine, nom)
+            lignes.append(os.path.relpath(p, dossier) + (' -> ' + os.readlink(p) if os.path.islink(p) else ''))
+    return '\n'.join(lignes) + '\n'
+
+
 def fichiers_ordinaires(dossier):
     """Les fichiers ordinaires du dossier, sans suivre les liens, dans l'ordre."""
     liste = []
@@ -448,7 +464,7 @@ def verifier_github(a, o, etiquette, sha):
     """L'etat de la copie et de GitHub, lu avant les tests puis de nouveau juste avant les gestes publics : HEAD est
     toujours le commit verifie, a jour avec GitHub (apres fetch), et l'arbre est propre ; l'etiquette n'existe pas
     sur GitHub ; gh release view repond « release not found » (publiee, ou toute autre erreur : refus) ; gh a une
-    session ; git push --dry-run origin main passe. Leve Refus."""
+    session ; git push --dry-run origin HEAD:main passe. Leve Refus."""
     lancer([o.git, 'fetch', '-q', '--no-tags', 'origin', 'main'])
     if lancer([o.git, 'rev-parse', 'HEAD']).strip() != sha:
         raise Refus('HEAD a change depuis les verifications : rien n\'est publie')
@@ -466,8 +482,8 @@ def verifier_github(a, o, etiquette, sha):
                     % (etiquette, vue.returncode))
     if subprocess.run([o.gh, 'auth', 'status', '--hostname', 'github.com'], capture_output=True).returncode != 0:
         raise Refus("gh n'a pas de session sur github.com (gh auth status)")
-    if subprocess.run([o.git, 'push', '--dry-run', '-q', 'origin', 'main'], capture_output=True).returncode != 0:
-        raise Refus('git push --dry-run origin main en echec : le flux ne pourrait pas etre pousse')
+    if subprocess.run([o.git, 'push', '--dry-run', '-q', 'origin', 'HEAD:main'], capture_output=True).returncode != 0:
+        raise Refus('git push --dry-run origin HEAD:main en echec : le flux ne pourrait pas etre pousse')
 
 
 def verifier(a, o, racine_git, version):
@@ -598,9 +614,32 @@ def controler(o, fichiers):
 
 
 def noter_geste(sortie, texte):
-    """Un geste fait (public, ou le commit du flux), dans gestes.txt du dossier des produits : la reprise part de la."""
+    """Une ligne horodatee de gestes.txt, dans le dossier des produits : la reprise part de la."""
     with open(os.path.join(sortie, 'gestes.txt'), 'a', encoding='utf-8') as f:
         f.write('%s %s\n' % (datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'), texte))
+
+
+def geste(sortie, quoi, reprise, action):
+    """Un geste de l'etape 7, encadre dans gestes.txt : « tentative : QUOI » est note AVANT, jamais apres. Si l'action
+    reussit, elle rend la ligne de sa reussite, notee ensuite ; si elle echoue (ou est interrompue), « echec : QUOI ;
+    REPRISE » est note, et l'erreur remonte. Une « tentative » sans suite : le geste est ambigu."""
+    noter_geste(sortie, 'tentative : ' + quoi)
+    try:
+        fait = action()
+    except BaseException:
+        noter_geste(sortie, 'echec : %s ; %s' % (quoi, reprise))
+        raise
+    noter_geste(sortie, fait)
+
+
+def pousser_flux(o):
+    """Pousse HEAD (le commit du flux) sur main de GitHub, par HEAD:main (jamais par la branche : si HEAD n'etait pas
+    sur main, un push de main ne pousserait rien), puis verifie que main de GitHub est a ce commit (ls-remote)."""
+    lancer([o.git, 'push', 'origin', 'HEAD:main'])
+    tete = lancer([o.git, 'rev-parse', 'HEAD']).strip()
+    distant = lancer([o.git, 'ls-remote', 'origin', 'refs/heads/main']).split()
+    if distant[:1] != [tete]:
+        raise Refus("apres le push, main de GitHub n'est pas au commit du flux (%s)" % tete)
 
 
 def publier(a, o=None, maintenant=None):
@@ -688,7 +727,9 @@ def publier(a, o=None, maintenant=None):
         raise Refus('le contenu du .dmg porte un chemin personnel (%d) : %s ; rien n\'est publie'
                     % (len(trouves), ' ; '.join('%s (%s)' % t for t in trouves[:5])))
     dire('contenu du .dmg : aucun chemin personnel')
-    if etat.controle and not controler(o, fichiers_ordinaires(scene)):
+    liste = os.path.join(sortie, 'contenu-dmg.txt')
+    ecrire(liste, liste_du_contenu(scene))
+    if etat.controle and not controler(o, fichiers_ordinaires(scene) + [liste]):
         raise Refus("le controle d'anonymisation a trouve des donnees reelles dans le contenu du .dmg : rien n'est "
                     'publie')
     if os.path.exists(dmg):
@@ -727,23 +768,44 @@ def publier(a, o=None, maintenant=None):
             raise Refus("le controle d'anonymisation a trouve des donnees reelles : rien n'est publie")
 
     # 7. la publication : l'etat relu, puis la version publiee, avec le .dmg (l'etiquette creee par GitHub sur le
-    # commit verifie) ; puis le flux, commite et pousse. Chaque geste fait est note.
+    # commit verifie) ; puis le flux, commite et pousse. Chaque geste est note AVANT (tentative), puis APRES.
     if not a.repetition:
         verifier_github(a, o, etiquette, etat.sha)
-        lancer([o.gh, 'release', 'create', etiquette, dmg, '-R', a.depot_github, '--target', etat.sha,
-                '--title', '%s %s' % (a.nom_app, version), '--notes-file', chemin_notes])
-        noter_geste(sortie, 'version publiee : %s, etiquette creee sur %s, avec %s' % (etiquette, etat.sha, nom_dmg))
+
+        def creer_version():
+            lancer([o.gh, 'release', 'create', etiquette, dmg, '-R', a.depot_github, '--target', etat.sha,
+                    '--title', '%s %s' % (a.nom_app, version), '--notes-file', chemin_notes])
+            return 'version publiee : %s, etiquette creee sur %s, avec %s' % (etiquette, etat.sha, nom_dmg)
+
+        geste(sortie, 'gh release create %s sur %s, avec %s' % (etiquette, etat.sha, nom_dmg),
+              "GitHub a peut-etre cree la version malgre l'erreur : lire gh release view %s et git ls-remote --tags "
+              "origin ; si rien n'y est, relancer publier.sh ; sinon reprendre au commit du flux (appcast.xml et "
+              "message-commit.txt de ce dossier)" % etiquette, creer_version)
         dire('publie : https://github.com/%s/releases/tag/%s' % (a.depot_github, etiquette))
-    shutil.copyfile(chemin_flux, a.flux)
-    lancer([o.git, 'add', a.flux])
-    lancer([o.git, 'commit', '-q', '-F', chemin_message])
-    noter_geste(sortie, 'flux commite : %s (%s)' % (chemin_flux_depot, lancer([o.git, 'rev-parse', 'HEAD']).strip()))
+
+    def commiter_flux():
+        shutil.copyfile(chemin_flux, a.flux)
+        lancer([o.git, 'add', a.flux])
+        lancer([o.git, 'commit', '-q', '-F', chemin_message])
+        return 'flux commite : %s (%s)' % (chemin_flux_depot, lancer([o.git, 'rev-parse', 'HEAD']).strip())
+
+    geste(sortie, 'commit du flux %s' % chemin_flux_depot,
+          "repetition : rien n'est public, relancer" if a.repetition else
+          "la version est publiee, le flux ne l'est pas : reprendre ici (git status ; copier appcast.xml de ce "
+          "dossier dans le depot, git add, git commit -F message-commit.txt, puis git push origin HEAD:main)",
+          commiter_flux)
     if a.repetition:
         dire('repetition : flux commite dans la copie (%s), ni etiquette, ni GitHub, ni Bureau ; produits dans %s'
              % (chemin_flux_depot, sortie))
         return sortie
-    lancer([o.git, 'push', 'origin', 'main'])
-    noter_geste(sortie, 'flux pousse sur main')
+
+    def pousser():
+        pousser_flux(o)
+        return 'flux pousse sur main'
+
+    geste(sortie, 'push du flux (git push origin HEAD:main)',
+          "la version est publiee et le flux est commite en local : reprendre au push (lire d'abord git ls-remote "
+          "origin refs/heads/main, puis git push origin HEAD:main)", pousser)
     dire('flux commite et pousse sur main : https://raw.githubusercontent.com/%s/main/%s'
          % (a.depot_github, chemin_flux_depot))
 
