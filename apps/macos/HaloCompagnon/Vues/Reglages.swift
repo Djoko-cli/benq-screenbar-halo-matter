@@ -2,7 +2,7 @@ import HaloProtocole
 import ServiceManagement
 import SwiftUI
 
-/// Fenetre Reglages (⌘,) : la langue de l'interface.
+/// Fenetre Reglages (⌘,) : la langue de l'interface et Thread Route.
 /// Onglets de la fenetre Reglages ; le choix est garde, et la carte Thread
 /// du tableau de bord ouvre directement "Acces reseau Thread".
 enum OngletReglages: String {
@@ -68,7 +68,8 @@ struct Reglages: View {
 }
 
 /// Onglet General : Thread Route, le demon qui garde la route du Mac vers le reseau Thread (10.1). Son etat
-/// est relu a chaque apparition de l'onglet : une installation ou une approbation faites entre-temps s'y voient.
+/// est relu a chaque apparition de l'onglet et a chaque retour de l'app au premier plan : une installation ou
+/// une approbation (Reglages Systeme) faites entre-temps s'y voient.
 struct SectionThreadRoute: View {
     @State private var etat = EtatThreadRoute.lire()
 
@@ -87,5 +88,8 @@ struct SectionThreadRoute: View {
             }
         }
         .onAppear { etat = EtatThreadRoute.lire() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            etat = EtatThreadRoute.lire()
+        }
     }
 }

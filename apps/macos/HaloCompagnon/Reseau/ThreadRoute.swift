@@ -28,10 +28,12 @@ enum EtatThreadRoute: Equatable, Sendable {
         }
     }
 
-    /// L'etat du moment, lu aupres du systeme.
-    static func lire() -> EtatThreadRoute {
-        depuis(nouveau: SMAppService.statusForLegacyPlist(at: plist),
-               ancien: SMAppService.statusForLegacyPlist(at: plistAncien))
+    /// L'etat du moment, lu aupres du systeme. `statut` repond pour un plist : les tests y mettent une
+    /// source simulee, pour ne jamais lire l'etat reel du Mac.
+    static func lire(
+        statut: (URL) -> SMAppService.Status = { SMAppService.statusForLegacyPlist(at: $0) }
+    ) -> EtatThreadRoute {
+        depuis(nouveau: statut(plist), ancien: statut(plistAncien))
     }
 
     /// Libelle de l'etat, dans les Reglages.

@@ -107,6 +107,8 @@ final class Pont {
     /// jamais pouvoir ecraser celle d'un vrai pont ni apparaitre dans
     /// `pontsConnus` (barre laterale, source par defaut) : store separe.
     @ObservationIgnored private let trousseauDemo: any TrousseauCles
+    /// L'etat de Thread Route, lu au moment d'un echec "pas de route" (10.1) : les tests y mettent le leur.
+    @ObservationIgnored private let etatThreadRoute: () -> EtatThreadRoute
     @ObservationIgnored private let cheminReseau = NWPathMonitor()
     /// Dernier texte de cause reseau note en console (4.6) : une meme cause
     /// n'est notee qu'une fois tant qu'elle ne change pas.
@@ -121,9 +123,11 @@ final class Pont {
     static let delaisReconnexion: [Double] = [0.3, 1, 2, 5]
 
     init(trousseau: any TrousseauCles = TrousseauSysteme(), trousseauDemo: any TrousseauCles = TrousseauMemoire(),
-         preferences: UserDefaults = .standard) {
+         preferences: UserDefaults = .standard,
+         etatThreadRoute: @escaping () -> EtatThreadRoute = { EtatThreadRoute.lire() }) {
         self.trousseau = trousseau
         self.trousseauDemo = trousseauDemo
+        self.etatThreadRoute = etatThreadRoute
         self.preferences = preferences
         pontsConnus = trousseau.lister()
         if let d = preferences.data(forKey: Self.cleRepertoire),
@@ -462,7 +466,7 @@ final class Pont {
     func echecOuverture(_ erreur: any Error) {
         transport = nil
         if let e = erreur as? ErreurReseau {
-            let texte = AlerteReseau.transport(e).texte
+            let texte = AlerteReseau.transport(e).texte(etatThreadRoute: etatThreadRoute)
             // Bandeau tant que l'utilisateur doit agir (reseau local refuse,
             // pont sans cle), essais en cours ou non ; une autre cause efface
             // un bandeau perime (4.6).

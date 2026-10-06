@@ -8,9 +8,13 @@ enum AlerteReseau: Equatable, Sendable {
     /// DEFI recu, puis aucun `hello` (places de session prises, 10.4).
     case sansHello
 
-    var texte: String {
+    /// Le texte du bandeau, avec l'etat reel de Thread Route (lu seulement pour "pas de route").
+    var texte: String { texte(etatThreadRoute: { EtatThreadRoute.lire() }) }
+
+    /// Le meme texte, l'etat de Thread Route venant de `etatThreadRoute` : les tests le fixent.
+    func texte(etatThreadRoute: () -> EtatThreadRoute) -> String {
         switch self {
-        case .transport(.pasDeRoute): Self.textePasDeRoute(EtatThreadRoute.lire())
+        case .transport(.pasDeRoute): Self.textePasDeRoute(etatThreadRoute())
         case .transport(let e): e.description
         case .trousseau(let e): e.description
         case .sansHello:

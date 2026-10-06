@@ -10,6 +10,13 @@ struct PontReseauTests {
     /// Nom SRP simule par le mode demo (`SimulateurDemo.srpDemo`) : jamais 16
     /// hexa, pour ne jamais se confondre avec un vrai pont (5.2).
     static let nomDemo = "DEMO-HALO"
+    /// Le debut du message "pas de route" ; ce qui suit dit ce qu'il reste a faire, selon Thread Route.
+    static let debutPasDeRoute = "Pas de route IPv6 vers le réseau Thread (bug du noyau de macOS, section 10.1)."
+
+    /// Un pont dont Thread Route est dans l'etat donne : jamais l'etat reel du Mac.
+    static func pont(route: EtatThreadRoute) -> Pont {
+        Pont(trousseau: TrousseauMemoire(), etatThreadRoute: { route })
+    }
 
     @Test func cleAbsenteArreteSansReessayer() {
         let pont = Pont(trousseau: TrousseauMemoire())
@@ -25,7 +32,7 @@ struct PontReseauTests {
     }
 
     @Test func echecAvecRepriseAutomatiqueEffaceLAlerteEtReprogramme() {
-        let pont = Pont(trousseau: TrousseauMemoire())
+        let pont = Self.pont(route: .actif)
         pont.connecter(.reseau(nom: Self.nom))
         // Simule l'echec d'un essai reseau ulterieur : "pas de route" reprend seul.
         pont.echecOuverture(ErreurReseau.pasDeRoute)
@@ -59,7 +66,7 @@ struct PontReseauTests {
     }
 
     @Test func causeReseauNoteeUneFoisTantQuElleNeChangePas() {
-        let pont = Pont(trousseau: TrousseauMemoire())
+        let pont = Self.pont(route: .actif)
         pont.connecter(.reseau(nom: Self.nom))
         func occurrences(_ sousChaine: String) -> Int {
             pont.console.elements.filter { $0.texte.contains(sousChaine) }.count
@@ -108,16 +115,70 @@ struct PontReseauTests {
         #expect(t.lister().isEmpty)
     }
 
-    /// Sans route : ce que dit le bandeau, selon l'etat de Thread Route.
+    /// Sans route : ce que dit le bandeau, selon l'etat de Thread Route, mot pour mot.
     @Test func textePasDeRoute() {
-        let installer = "sh tools/macos/thread-route/installer.sh"
-        #expect(AlerteReseau.textePasDeRoute(.absent).contains(installer))
-        #expect(AlerteReseau.textePasDeRoute(.ancien).contains(installer), "halo-routes a remplacer")
-        #expect(!AlerteReseau.textePasDeRoute(.actif).contains("installer.sh"), "la route revient d'elle-meme")
-        #expect(AlerteReseau.textePasDeRoute(.aApprouver).contains("Réglages Système"))
+        let debut = Self.debutPasDeRoute + " "
+        #expect(AlerteReseau.textePasDeRoute(.absent)
+                == debut + "Pour l'installer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur).")
+        #expect(AlerteReseau.textePasDeRoute(.ancien)
+                == debut + "Pour le remplacer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur).",
+                "halo-routes a remplacer")
+        #expect(AlerteReseau.textePasDeRoute(.actif)
+                == debut + "Thread Route est actif : la route revient d'elle-même.", "la route revient d'elle-meme")
+        #expect(AlerteReseau.textePasDeRoute(.aApprouver)
+                == debut + "L'autoriser dans Réglages Système, Général, Ouverture et extensions.")
         #expect(!AlerteReseau.textePasDeRoute(.aApprouver).contains("installer.sh"))
-        for e in [EtatThreadRoute.absent, .aApprouver, .actif, .ancien] {
-            #expect(AlerteReseau.textePasDeRoute(e).hasPrefix(ErreurReseau.pasDeRoute.description + " "))
+        #expect(!AlerteReseau.textePasDeRoute(.actif).contains("installer.sh"))
+    }
+
+    /// Le meme message en anglais : la traduction, mot pour mot.
+    @Test(.langue(.anglais)) func textePasDeRouteEnAnglais() {
+        let debut = "No IPv6 route to the Thread network (macOS kernel bug, section 10.1). "
+        #expect(AlerteReseau.textePasDeRoute(.absent)
+                == debut + "To install it: sh tools/macos/thread-route/installer.sh (administrator password).")
+        #expect(AlerteReseau.textePasDeRoute(.actif)
+                == debut + "Thread Route is active: the route will come back by itself.")
+        #expect(AlerteReseau.textePasDeRoute(.aApprouver)
+                == debut + "Allow it in System Settings, General, Login Items & Extensions.")
+    }
+
+    /// Le bandeau lit l'etat de Thread Route qu'on lui donne : jamais celui du Mac.
+    @Test func texteDeLAlerteSuitLEtatDonne() {
+        let alerte = AlerteReseau.transport(.pasDeRoute)
+        for (etat, fin) in [
+            (EtatThreadRoute.aApprouver, "L'autoriser dans Réglages Système, Général, Ouverture et extensions."),
+            (.actif, "Thread Route est actif : la route revient d'elle-même."),
+        ] {
+            #expect(alerte.texte(etatThreadRoute: { etat }) == Self.debutPasDeRoute + " " + fin)
+        }
+        // Une autre alerte ne lit rien : l'etat n'est demande que pour "pas de route".
+        #expect(AlerteReseau.transport(.portInjoignable).texte(etatThreadRoute: {
+            Issue.record("l'etat n'est lu que pour pas de route"); return .absent
+        }) == ErreurReseau.portInjoignable.description)
+    }
+
+    /// Un echec "pas de route" du pont : le texte garde en console et dans l'etat d'attente est celui
+    /// de l'etat de Thread Route du pont, pas celui du Mac.
+    @Test func echecPasDeRouteUtiliseLEtatDuPont() {
+        for (etat, fin) in [
+            (EtatThreadRoute.absent,
+             "Pour l'installer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)."),
+            (.aApprouver, "L'autoriser dans Réglages Système, Général, Ouverture et extensions."),
+            (.actif, "Thread Route est actif : la route revient d'elle-même."),
+            (.ancien,
+             "Pour le remplacer : sh tools/macos/thread-route/installer.sh (mot de passe administrateur)."),
+        ] {
+            let pont = Self.pont(route: etat)
+            pont.connecter(.reseau(nom: Self.nom))
+            pont.echecOuverture(ErreurReseau.pasDeRoute)
+            let attendu = Self.debutPasDeRoute + " " + fin
+            #expect(pont.console.elements.contains { $0.texte == attendu }, "console, \(etat)")
+            if case .attente(_, let raison) = pont.etatTransport {
+                #expect(raison == attendu, "etat d'attente, \(etat)")
+            } else {
+                Issue.record("reprise programmee attendue : \(pont.etatTransport)")
+            }
+            pont.deconnecter()
         }
     }
 
