@@ -32,10 +32,12 @@ FIN
 # launchctl print : 0 = charge, 113 = inconnu de launchd, comme le vrai. Il compte ses appels
 # (FAUX_COMPTE) : les FAUX_PRINT_K premiers repondent FAUX_PRINT, les suivants FAUX_PRINT_APRES
 # (sans FAUX_PRINT_K, tous repondent FAUX_PRINT). Passe 100 appels, il repond 250 : une boucle sans
-# fin s'arrete d'elle-meme.
+# fin s'arrete d'elle-meme. Chaque print note ses arguments (FAUX_PRINTS), avant de repondre : les
+# tests verifient le domaine et l'etiquette interroges.
 cat > "$FAUX/launchctl" <<'FIN'
 #!/bin/sh
 if [ "$1" = "print" ]; then
+  echo "launchctl $*" >> "$FAUX_PRINTS"
   n=$(($(cat "$FAUX_COMPTE") + 1))
   echo "$n" > "$FAUX_COMPTE"
   if [ "$n" -gt 100 ]; then exit 250; fi
@@ -79,14 +81,16 @@ ESSAI=0
 # Lance une commande avec ces commandes simulees (et leurs reponses PRINT, PRINT_K, PRINT_APRES,
 # BOOTOUT et ESSAI).
 avec_faux() {
-  env PATH="$FAUX:$PATH" FAUX_JOURNAL="$J" FAUX_COMPTE="$OUT/compte" FAUX_DORMIS="$OUT/dormis" \
+  env PATH="$FAUX:$PATH" FAUX_JOURNAL="$J" FAUX_COMPTE="$OUT/compte" FAUX_DORMIS="$OUT/dormis" FAUX_PRINTS="$OUT/prints" \
     FAUX_PRINT="$PRINT" FAUX_PRINT_K="$PRINT_K" FAUX_PRINT_APRES="$PRINT_APRES" \
     FAUX_BOOTOUT="$BOOTOUT" FAUX_ESSAI="$ESSAI" "$@"
 }
-# Remet a zero le compte des launchctl print et la liste des sleep. relectures : le nombre de
-# launchctl print faits ; dormis : le nombre de sleep.
-raz() { echo 0 > "$OUT/compte"; : > "$OUT/dormis"; }
+# Remet a zero le compte des launchctl print, leurs arguments et la liste des sleep. relectures : le
+# nombre de launchctl print faits ; dormis : le nombre de sleep ; interroges : les launchctl print
+# faits, dans l'ordre, chaque suite de relectures identiques comptee une fois.
+raz() { echo 0 > "$OUT/compte"; : > "$OUT/dormis"; : > "$OUT/prints"; }
 relectures() { cat "$OUT/compte"; }
+interroges() { uniq "$OUT/prints"; }
 dormis() { grep -c . "$OUT/dormis" || true; }
 raz
 
@@ -109,6 +113,15 @@ INSTALL_D="install -d -m 1755 -o root -g wheel $PT"
 MISE_EN_SERVICE="install -m 755 -o root -g wheel <programme compile> $PT/fr.djoko.thread.route
 install -m 644 -o root -g wheel fr.djoko.thread.route.plist $LD/fr.djoko.thread.route.plist
 launchctl bootstrap system $LD/fr.djoko.thread.route.plist"
+# Les launchctl print que fait attendre_decharge : domaine system, etiquette du demon.
+PRINT_SYS_ANCIEN="launchctl print system/fr.djoko.halo.routes"
+PRINT_SYS_NEUF="launchctl print system/fr.djoko.thread.route"
+# L'installation reelle lit la vraie racine : l'ancien n'est interroge que si ses fichiers y sont.
+PRINT_SYS_INSTALLATION=$PRINT_SYS_NEUF
+if [ -e /Library/LaunchDaemons/fr.djoko.halo.routes.plist ] || [ -e /Library/PrivilegedHelperTools/fr.djoko.halo.routes ]; then
+  PRINT_SYS_INSTALLATION="$PRINT_SYS_ANCIEN
+$PRINT_SYS_NEUF"
+fi
 MIGRATION="$BOOT_ANCIEN
 $PRINT_ANCIEN
 $RM_ANCIEN"
@@ -137,6 +150,7 @@ PRINT=113
 decharge 0 "" demon
 verifier "attente : inconnu de launchd, on passe" "$(mesures)" "code 0, 1 relecture(s), 0 sleep, 0 autre(s) duree(s)"
 verifier "attente : inconnu, rien d'affiche" "$(cat "$OUT/sortie" "$OUT/erreur")" ""
+verifier "attente : launchd est interroge sur system/<etiquette>" "$(cat "$OUT/prints")" "launchctl print system/demon"
 # 0 un moment, puis 113 : on relit toutes les secondes, et on passe.
 PRINT=0
 PRINT_K=3
@@ -144,6 +158,7 @@ decharge 0 "" demon
 verifier "attente : charge puis decharge apres 3 relectures" "$(mesures)" "code 0, 4 relecture(s), 3 sleep, 0 autre(s) duree(s)"
 verifier "attente : un seul message d'attente" "$(grep -c "Attente de l'arret de demon" "$OUT/erreur")" 1
 verifier "attente : pas de message d'arret" "$(grep -c 'Arreter le demon' "$OUT/erreur")" 0
+verifier "attente : chaque relecture interroge system/<etiquette>" "$(interroges)" "launchctl print system/demon"
 # La borne : 25 relectures ; charge a la 25e, decharge a la 26e : on passe.
 PRINT_K=25
 decharge 0 "" demon
@@ -208,9 +223,12 @@ $MISE_EN_SERVICE"
 # nouveau soit pose.
 racine_neuve
 touch "$LD/fr.djoko.halo.routes.plist" "$PT/fr.djoko.halo.routes"
+raz
 verifier "migration depuis halo-routes" "$(plan)" "$MIGRATION
 $BOOT_NEUF
 $MISE_EN_SERVICE"
+verifier "migration : launchd est interroge sur l'ancien, puis sur le nouveau" "$(interroges)" "$PRINT_SYS_ANCIEN
+$PRINT_SYS_NEUF"
 rm "$LD/fr.djoko.halo.routes.plist"
 verifier "ancien programme seul" "$(plan)" "$MIGRATION
 $BOOT_NEUF
@@ -285,6 +303,7 @@ verifier "installation reelle : le programme est pose a sa place" "$(grep -c "^s
 verifier "installation reelle : fausse racine ignoree" "$(grep -cF "$R" "$J")" 0
 verifier "installation reelle : fausse racine signalee" "$(grep -c 'THREAD_ROUTE_RACINE ignoree' "$OUT/erreur")" 1
 verifier "installation reelle : launchd est interroge sur le nouveau, sans bruit" "$(grep -c 'launchctl print' "$OUT/sortie")" 0
+verifier "installation reelle : launchd est interroge sur system/<etiquette>" "$(interroges)" "$PRINT_SYS_INSTALLATION"
 # Un demon encore charge (apres 25 s d'attente) : arret, code 1, rien retire ni pose, que l'ancien
 # soit la ou non (l'installation reelle lit la vraie racine) : le nouveau, lui, est toujours verifie.
 PRINT=0
@@ -304,6 +323,7 @@ PRINT_K=
 verifier "installation reelle, decharge apres attente : code de sortie" "$CODE" 0
 verifier "installation reelle, decharge apres attente : finit par la mise en service" "$(tail -1 "$J")" "sudo launchctl bootstrap system /Library/LaunchDaemons/fr.djoko.thread.route.plist"
 verifier "installation reelle, decharge apres attente : deux sleep" "$(dormis)" 2
+verifier "installation reelle, decharge apres attente : chaque relecture interroge system/<etiquette>" "$(interroges)" "$PRINT_SYS_INSTALLATION"
 # L'essai echoue : rien n'est installe, rien n'est demande a root.
 ESSAI=1
 lancer_installateur
@@ -344,6 +364,8 @@ desinstaller
 verifier "desinstallation reelle : code de sortie" "$CODE" 0
 verifier "desinstallation reelle (sudo simule) : les actions, la fausse racine ignoree" "$(cat "$J")" "$ACTIONS"
 verifier "desinstallation reelle : launchd est interroge pour chaque demon" "$(relectures) $(dormis)" "2 0"
+verifier "desinstallation reelle : launchd est interroge sur system/<etiquette>, pour chaque demon" "$(interroges)" "$PRINT_SYS_NEUF
+$PRINT_SYS_ANCIEN"
 verifier "desinstallation : le journal de Thread Route est nomme" "$(grep -c '/Library/Logs/fr.djoko.thread.route.log' "$OUT/sortie")" 1
 verifier "desinstallation : le journal de halo-routes est nomme" "$(grep -c '/Library/Logs/fr.djoko.halo.routes.log' "$OUT/sortie")" 1
 # Un bootout qui echoue (rien n'est charge : le cas ordinaire de l'ancien) n'arrete rien.
@@ -362,6 +384,8 @@ PRINT_K=
 verifier "desinstallation reelle, decharge apres attente : code de sortie" "$CODE" 0
 verifier "desinstallation reelle, decharge apres attente : les actions" "$(cat "$J")" "$ACTIONS"
 verifier "desinstallation reelle, decharge apres attente : deux sleep" "$(dormis)" 2
+verifier "desinstallation reelle, decharge apres attente : chaque relecture interroge system/<etiquette>" "$(interroges)" "$PRINT_SYS_NEUF
+$PRINT_SYS_ANCIEN"
 # Encore charge apres 25 s : arret avant le rm, rien n'est annonce comme desinstalle.
 PRINT=0
 desinstaller
