@@ -12,6 +12,7 @@
 #include "config.h"
 #include "halo1_lamp.h"
 #include "json_mode.h"
+#include "matter_composition.h"
 #include "net_udp.h"
 #include "status_led.h"
 
@@ -1822,6 +1823,89 @@ static void printIdentity(Print &out) {
 }
 
 // ===========================================================================
+//  Composition des endpoints et ConfigurationVersion (src/matter_composition.h)
+//
+//  La bibliotheque ne cree pas l'attribut ConfigurationVersion de Basic
+//  Information (EP0) : le pont le cree apres les begin() d'endpoints, qui
+//  creent le noeud, et avant Matter.begin(). La pile peut aussi servir cet
+//  attribut par ConfigurationMgr : la meme version y est ecrite apres
+//  Matter.begin(), pour que les deux chemins de lecture disent la meme chose.
+//  Un controleur la relit a sa prochaine souscription (apres le redemarrage).
+// ===========================================================================
+
+static const char *const kNvsConfVer = "confver";  // version publiee
+static const char *const kNvsCompo = "compo";      // composition publiee
+static uint32_t sConfVer = 0;                      // version publiee ce demarrage (0 : pas encore)
+static bool sConfVerRaised = false;                // montee ce demarrage
+static bool sConfVerAttr = false;                  // attribut present sur EP0
+static int8_t sConfVerMgr = -1;                    // ecrite dans la pile : -1 pas encore, 0 non, 1 oui
+
+static void prepareComposition() {
+  const uint32_t current = MatterComposition::composition(HALO1_EXPOSE_AUTO, HALO1_SELECTORS_AS_LIGHTS);
+  bool vKnown = false, cKnown = false;
+  uint32_t v = 0, c = 0;
+  Preferences p;
+  if (p.begin(kNvsNs, true)) {
+    vKnown = p.isKey(kNvsConfVer);
+    if (vKnown) v = p.getUInt(kNvsConfVer, 0);
+    cKnown = p.isKey(kNvsCompo);
+    if (cKnown) c = p.getUInt(kNvsCompo, 0);
+    p.end();
+  }
+  const MatterComposition::Step step = MatterComposition::next(vKnown, v, cKnown, c, current);
+  sConfVer = step.version;
+  sConfVerRaised = step.storeVersion;
+
+  using namespace chip::app::Clusters;
+  constexpr uint32_t kAttr = BasicInformation::Attributes::ConfigurationVersion::Id;
+  esp_matter::node_t *node = esp_matter::node::get();
+  esp_matter::endpoint_t *ep0 = node ? esp_matter::endpoint::get(node, 0) : nullptr;
+  esp_matter::cluster_t *info = ep0 ? esp_matter::cluster::get(ep0, BasicInformation::Id) : nullptr;
+  if (info) {
+    esp_matter_attr_val_t val = esp_matter_uint32(step.version);
+    esp_matter::attribute_t *a = esp_matter::attribute::get(info, kAttr);
+    if (!a)
+      a = esp_matter::attribute::create(info, kAttr, esp_matter::ATTRIBUTE_FLAG_NONE, val);
+    else
+      esp_matter::attribute::set_val(a, &val, false);
+    sConfVerAttr = a != nullptr;
+  }
+  if (!sConfVerAttr) Serial.println("!! ConfigurationVersion : attribut absent d'EP0 (noeud ou cluster introuvable)");
+
+  if ((step.storeVersion || step.storeComposition) && p.begin(kNvsNs, false)) {
+    if (step.storeVersion) p.putUInt(kNvsConfVer, step.version);
+    if (step.storeComposition) p.putUInt(kNvsCompo, current);
+    p.end();
+  }
+}
+
+// Apres Matter.begin() : la meme version dans la pile (ConfigurationMgr).
+static void publishConfigurationVersion() {
+  bool locked = false;
+  for (uint32_t t0 = millis(); !locked && (uint32_t)(millis() - t0) < 1000;) {
+    locked = chip::DeviceLayer::PlatformMgr().TryLockChipStack();
+    if (!locked) delay(1);
+  }
+  if (!locked) {
+    sConfVerMgr = 0;
+    Serial.println("!! ConfigurationVersion : pile occupee, version non ecrite dans la pile");
+    return;
+  }
+  uint32_t inStack = 0;
+  const bool same =
+      chip::DeviceLayer::ConfigurationMgr().GetConfigurationVersion(inStack) == CHIP_NO_ERROR && inStack == sConfVer;
+  sConfVerMgr = same || chip::DeviceLayer::ConfigurationMgr().StoreConfigurationVersion(sConfVer) == CHIP_NO_ERROR;
+  chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+  if (!sConfVerMgr) Serial.println("!! ConfigurationVersion : ecriture refusee par la pile");
+}
+
+static void printComposition(Print &out) {
+  out.printf("  configuration   : version %u%s, attribut EP0 %s, pile %s\n", (unsigned)sConfVer,
+             sConfVerRaised ? " (montee ce demarrage)" : "", sConfVerAttr ? "present" : "ABSENT",
+             sConfVerMgr < 0 ? "pas encore" : sConfVerMgr ? "a jour" : "REFUSE");
+}
+
+// ===========================================================================
 //  Cycle de vie
 // ===========================================================================
 
@@ -1874,8 +1958,10 @@ void matterBridgeBegin() {
   autoButton.onIdentify([](bool on) { return onIdentify(autoButton, 3, on); });
 #endif
 
-  applyIdentity();  // avant Matter.begin(), a chaque demarrage
+  applyIdentity();       // avant Matter.begin(), a chaque demarrage
+  prepareComposition();  // apres les begin() d'endpoints (le noeud existe), avant Matter.begin()
   Matter.begin();
+  publishConfigurationVersion();
 #if MATTER_NET_THREAD
   // Matter.begin() ne rend rien : un echec d'esp_matter::start ne fait qu'un
   // log. L'instance OpenThread n'existe qu'apres esp_openthread_init, qui cree
@@ -2095,6 +2181,7 @@ void matterPrintStatus(Print &out) {
     out.printf("  QR code         : %s\n", Matter.getOnboardingQRCodeUrl().c_str());
   }
   printIdentity(out);
+  printComposition(out);
   out.printf("  endpoints       : EP%u Halo, EP%u Halo avant, EP%u Halo arriere (%s)", mainLight.getEndPointId(),
              frontLamp.getEndPointId(), backLamp.getEndPointId(), HALO1_SELECTORS_AS_LIGHTS ? "lumieres" : "prises");
 #if HALO1_EXPOSE_AUTO

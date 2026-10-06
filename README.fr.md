@@ -52,9 +52,15 @@ d'impulsion (`matter impulsion` le dit, `matter` affiche « bouton A (EP4) :
 desactive »). EP1 a EP3 gardent leurs numeros (EP4 etait cree en dernier).
 Le bouton A reste accessible a la console : `lampe auto`.
 
-Sur un noeud deja appaire, EP4 disparait de la liste des endpoints du noeud ;
-la facon dont Apple Home retire la tuile « Halo auto » reste a verifier sur le
-terrain.
+Sur un noeud deja appaire, EP4 disparait de la liste des endpoints du noeud,
+mais Apple Home gardait sa tuile « Halo auto », « Sans reponse », meme apres un
+redemarrage du pont et du concentrateur (terrain du 06/10). Depuis la 0.4.1, le
+pont publie l'attribut ConfigurationVersion de Basic Information (EP0, Matter
+1.4) et le monte quand sa liste d'endpoints change (EP4 expose ou non, EP2 et
+EP3 en lampes ou en prises), ainsi qu'au premier demarrage d'un firmware qui le
+suit : un controleur relit alors l'appareil. `matter` affiche la version
+publiee (ligne `configuration`). Ne pas « Supprimer l'accessoire » depuis la
+tuile : Apple Home retirerait tout le pont.
 
 Pour le **remettre**, ajouter `-DHALO1_EXPOSE_AUTO=1` aux `build_flags` de
 l'environnement (par exemple `[env:esp32c6thread]` dans `platformio.ini`), ou
@@ -76,7 +82,7 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
 | NodeLabel | `Halo` (reecrit a chaque demarrage : un nom pose par un controleur dans cet attribut est remplace) |
 | SerialNumber | `HALO1-` + l'adresse MAC d'usine en 12 chiffres hexa, unique par carte |
 | HardwareVersion / HardwareVersionString | `1` / `ESP32-C6 SuperMini + BM5602` |
-| SoftwareVersionString | `0.4.0-<commit>` (« Programme interne » dans Apple Home) |
+| SoftwareVersionString | `0.4.1-<commit>` (« Programme interne » dans Apple Home) |
 
 - Le VID et le PID ne changent pas (`0xFFF1` / `0x8000`, certificat de test),
   ni le discriminateur et le code d'appairage : pas de remise en service. Une
@@ -90,7 +96,7 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
 - `matter` affiche ces valeurs telles que la pile les rapporte (lignes
   `identite` et `versions`), sauf le NodeLabel (valeur demandee, non relue),
   et signale toute valeur refusee. Le demarrage affiche
-  `firmware 0.4.0-<commit>` et alerte si le descripteur lu dans l'image flashee
+  `firmware 0.4.1-<commit>` et alerte si le descripteur lu dans l'image flashee
   differe. Sans carte, la meme version (`App version`) se lit avec :
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
 

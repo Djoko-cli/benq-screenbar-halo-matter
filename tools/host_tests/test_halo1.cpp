@@ -14,6 +14,7 @@
 #include "halo1_map.h"
 #include "halo1_proto.h"
 #include "halo1_watch.h"
+#include "matter_composition.h"
 #include "matter_resume.h"
 #include "status_led.h"
 
@@ -1035,6 +1036,40 @@ static uint32_t firstDue(ResumePlanner &p, uint32_t from, uint32_t to, uint32_t 
   for (uint32_t t = from; (uint32_t)(to - t) <= (uint32_t)(to - from); t += 100)
     if (p.due(t, start)) return t;
   return 0;
+}
+
+// Composition des endpoints et ConfigurationVersion (Basic Information) : la
+// version ne monte que si la composition change, ou au premier demarrage d'un
+// firmware qui la suit (aucune composition gardee : EP4 a pu disparaitre sans
+// que le noeud le dise).
+static void testComposition() {
+  using MC = MatterComposition;
+  const uint32_t sans = MC::composition(false, true), avec = MC::composition(true, true);
+  const uint32_t prises = MC::composition(false, false);
+  CHECK(sans != avec && sans != prises && avec != prises, "compositions confondues");
+  CHECK(MC::composition(false, true) == sans, "composition non deterministe");
+  CHECK((sans >> 8) == MC::kRevision, "revision absente de la composition");
+  // Rien de garde : premier demarrage avec ce firmware.
+  MC::Step s = MC::next(false, 0, false, 0, sans);
+  CHECK(s.version == 2 && s.storeVersion && s.storeComposition, "premier demarrage : version %u", (unsigned)s.version);
+  // Version gardee, composition inconnue : on part de la version gardee.
+  s = MC::next(true, 7, false, 0, sans);
+  CHECK(s.version == 8 && s.storeVersion && s.storeComposition, "version gardee : %u", (unsigned)s.version);
+  // Meme composition : rien ne bouge.
+  s = MC::next(true, 2, true, sans, sans);
+  CHECK(s.version == 2 && !s.storeVersion && !s.storeComposition, "meme composition : %u", (unsigned)s.version);
+  // Composition changee (EP4 remis) : +1.
+  s = MC::next(true, 2, true, sans, avec);
+  CHECK(s.version == 3 && s.storeVersion && s.storeComposition, "composition changee : %u", (unsigned)s.version);
+  // Composition gardee sans version (version perdue) : on repart de 1, +1.
+  s = MC::next(false, 0, true, sans, sans);
+  CHECK(s.version == 2 && s.storeVersion && s.storeComposition, "version perdue : %u", (unsigned)s.version);
+  // Version 0 gardee (invalide) : traitee comme 1.
+  s = MC::next(true, 0, true, avec, sans);
+  CHECK(s.version == 2, "version 0 : %u", (unsigned)s.version);
+  // Butee : jamais de retour a 0.
+  s = MC::next(true, UINT32_MAX, true, avec, sans);
+  CHECK(s.version == UINT32_MAX && !s.storeVersion && s.storeComposition, "butee : %u", (unsigned)s.version);
 }
 
 static void testResumePlanner() {
@@ -2574,6 +2609,7 @@ int main() {
   testSelectionMemory();
   testBenchT2();
   testResumePlanner();
+  testComposition();
   testChipWatch();
   testStatusLed();
   testBootButton();

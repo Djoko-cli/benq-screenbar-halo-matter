@@ -55,8 +55,14 @@ desactive »). EP1 to EP3 keep their numbers (EP4 was created last). Button A
 remains available from the console: `lampe auto`.
 
 On a node that is already paired, EP4 disappears from the node's endpoint
-list; how Apple Home removes the "Halo auto" tile remains to be checked in
-the field.
+list, but Apple Home kept its "Halo auto" tile, "No Response", even after
+restarting the bridge and the home hub (field test, 06/10). Since 0.4.1 the
+bridge publishes the ConfigurationVersion attribute of Basic Information (EP0,
+Matter 1.4) and raises it when its endpoint list changes (EP4 exposed or not,
+EP2 and EP3 as lights or plugs), and on the first boot of a firmware that
+tracks it: a controller then reads the device again. `matter` prints the
+published version (`configuration` line). Do not "Remove Accessory" from the
+tile: Apple Home would remove the whole bridge.
 
 To **bring it back**, add `-DHALO1_EXPOSE_AUTO=1` to the environment's
 `build_flags` (for example `[env:esp32c6thread]` in `platformio.ini`), or
@@ -78,7 +84,7 @@ macros, overridable with `-D`):
 | NodeLabel | `Halo` (rewritten at every boot: a name written to this attribute by a controller is replaced) |
 | SerialNumber | `HALO1-` + the factory MAC address as 12 hex digits, unique per board |
 | HardwareVersion / HardwareVersionString | `1` / `ESP32-C6 SuperMini + BM5602` |
-| SoftwareVersionString | `0.4.0-<commit>` ("Firmware" in Apple Home) |
+| SoftwareVersionString | `0.4.1-<commit>` ("Firmware" in Apple Home) |
 
 - The VID and PID do not change (`0xFFF1` / `0x8000`, test certificate), nor
   do the discriminator and the pairing code: no re-commissioning. An app may
@@ -92,7 +98,7 @@ macros, overridable with `-D`):
   `lib/`.
 - `matter` shows these values as the stack reports them (`identite` and
   `versions` lines), except the NodeLabel (requested value, not read back),
-  and flags any rejected value. Boot prints `firmware 0.4.0-<commit>` and
+  and flags any rejected value. Boot prints `firmware 0.4.1-<commit>` and
   warns if the descriptor read from the flashed image differs. Without a
   board, the same version (`App version`) can be read with:
   `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32c6 image-info .pio/build/<env>/firmware.bin`.
