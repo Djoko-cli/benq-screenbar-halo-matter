@@ -81,9 +81,12 @@ flags it; remove it for the daemon to take over managing it
 
 **From halo-routes.** The installer first stops and removes the old daemon
 (`fr.djoko.halo.routes`, its program and its plist), then puts Thread Route
-in place: the two never run together. The old log
-(`/Library/Logs/fr.djoko.halo.routes.log`) is kept. `sh installer.sh --plan`
-tells, without changing anything, what the installation would do.
+in place: the two never run together. Between stopping it and removing
+its files, the installer checks with `launchctl print` that it has really
+left launchd; if not, it stops with a message, having removed and installed
+nothing. The old log (`/Library/Logs/fr.djoko.halo.routes.log`) is kept.
+`sh installer.sh --plan` tells, without changing anything, what the
+installation would do (it shows that check without making it).
 
 **Updating.** A new version of Thread Route installs the same way, by running
 `installer.sh` again: an app's automatic update doesn't touch it.
@@ -118,8 +121,11 @@ need to be root); its output shows the Thread network's prefix:
 
     sh desinstaller.sh
 
-The daemon removes its routes as it stops; the log is kept. A leftover
-`halo-routes` is removed too.
+The daemon removes its routes as it stops; the logs are kept
+(`/Library/Logs/fr.djoko.thread.route.log` and, if it exists,
+`/Library/Logs/fr.djoko.halo.routes.log`). A leftover `halo-routes` is
+removed too. `sh desinstaller.sh --plan` tells, without changing anything,
+what the uninstall would do.
 
 ## Limitations
 

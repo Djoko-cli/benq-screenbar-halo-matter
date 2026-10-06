@@ -78,9 +78,12 @@ retirer pour qu'il en prenne la garde (`sudo route -n delete -inet6
 
 **Depuis halo-routes.** L'installeur arrete et retire d'abord l'ancien demon
 (`fr.djoko.halo.routes`, son programme et son plist), puis pose Thread Route :
-les deux ne tournent jamais ensemble. L'ancien journal
-(`/Library/Logs/fr.djoko.halo.routes.log`) est garde. `sh installer.sh --plan`
-dit, sans rien changer, ce que l'installation ferait.
+les deux ne tournent jamais ensemble. Entre son arret et le retrait de ses
+fichiers, l'installeur verifie par `launchctl print` qu'il a bien quitte
+launchd ; sinon il s'arrete avec un message, sans rien retirer ni poser.
+L'ancien journal (`/Library/Logs/fr.djoko.halo.routes.log`) est garde.
+`sh installer.sh --plan` dit, sans rien changer, ce que l'installation ferait
+(il montre cette verification sans la faire).
 
 **Mise a jour.** Une nouvelle version de Thread Route s'installe de meme, en
 relancant `installer.sh` : la mise a jour automatique d'une app ne le touche
@@ -115,8 +118,11 @@ d'etre root) ; sa sortie porte le prefixe du reseau Thread :
 
     sh desinstaller.sh
 
-Le demon retire ses routes en s'arretant ; le journal est garde. Un
-`halo-routes` reste est retire aussi.
+Le demon retire ses routes en s'arretant ; les journaux sont gardes
+(`/Library/Logs/fr.djoko.thread.route.log` et, s'il existe,
+`/Library/Logs/fr.djoko.halo.routes.log`). Un `halo-routes` reste est retire
+aussi. `sh desinstaller.sh --plan` dit, sans rien changer, ce que la
+desinstallation ferait.
 
 ## Limites
 
