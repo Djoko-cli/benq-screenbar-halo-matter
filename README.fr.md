@@ -108,8 +108,11 @@ demarrage avant `Matter.begin()` (valeurs dans `src/config.h`, macros
 
 [Halo Compagnon](apps/macos/README.fr.md) supervise le pont par l'USB ou par le
 réseau Thread : consigne et état cru de la lampe, module radio, Thread et
-Matter, trames décodées en direct, graphiques, commandes et console. Captures
-en mode démo (sans matériel) :
+Matter, trames décodées en direct, graphiques, commandes et console. Elle
+s'installe depuis un `.dmg` des [versions publiées](https://github.com/Djoko-cli/benq-screenbar-halo-matter/releases)
+de Halo Compagnon (`compagnon-vX.Y.Z`), puis se met à jour seule
+([Installer](apps/macos/README.fr.md#installer)). Captures en mode démo (sans
+matériel) :
 
 <p>
   <img src="docs/images/compagnon-tableau-fr.png" alt="Halo Compagnon : tableau de bord" width="49%">
@@ -571,3 +574,7 @@ couche Halo 2 a été retirée une fois le pilote Halo 1 validé.
 L'identification du BC5602 dans le Halo 1 revient à `hertzg` et le teardown du
 PCB à `b4shful`, sur le
 [fil Home Assistant](https://community.home-assistant.io/t/benq-screenbar-support/490864).
+
+Halo Compagnon embarque [Sparkle](https://sparkle-project.org) 2.10.0 (les
+mises à jour automatiques), sous licence MIT ; le texte de la licence est livré
+dans le `.dmg`, à côté de l'app (`Sparkle-LICENSE.txt`).

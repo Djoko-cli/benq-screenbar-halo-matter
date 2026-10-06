@@ -111,8 +111,10 @@ macros, overridable with `-D`):
 
 [Halo Compagnon](apps/macos/README.md) supervises the bridge over USB or over
 the Thread network: target and raw state of the lamp, radio module, Thread
-and Matter, live decoded frames, charts, commands and console. Screenshots in
-demo mode (no hardware):
+and Matter, live decoded frames, charts, commands and console. It installs
+from a `.dmg` in the Halo Compagnon [releases](https://github.com/Djoko-cli/benq-screenbar-halo-matter/releases)
+(`compagnon-vX.Y.Z`), then updates itself ([Installing](apps/macos/README.md#installing)).
+Screenshots in demo mode (no hardware):
 
 <p>
   <img src="docs/images/compagnon-tableau-en.png" alt="Halo Compagnon: dashboard" width="49%">
@@ -573,3 +575,7 @@ Halo 2 layer was removed once the Halo 1 driver was validated.
 Identifying the BC5602 in the Halo 1 is credited to `hertzg`, and the PCB
 teardown to `b4shful`, on the
 [Home Assistant thread](https://community.home-assistant.io/t/benq-screenbar-support/490864).
+
+Halo Compagnon embeds [Sparkle](https://sparkle-project.org) 2.10.0 (automatic
+updates), under the MIT license; the text of the license is shipped in the
+`.dmg`, next to the app (`Sparkle-LICENSE.txt`).
