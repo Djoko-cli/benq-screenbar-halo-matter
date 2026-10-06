@@ -36,6 +36,18 @@ struct MisesAJourTests {
                 == ["fr.djoko.halo.compagnon-spks", "fr.djoko.halo.compagnon-spki"])
         let bac = SecTaskCopyValueForEntitlement(tache, "com.apple.security.app-sandbox" as CFString, nil) as? Bool
         #expect(bac == true)
+        // Le telechargement des mises a jour passe par le reseau de l'app, pas par un service a part.
+        let reseau = SecTaskCopyValueForEntitlement(tache, "com.apple.security.network.client" as CFString, nil) as? Bool
+        #expect(reseau == true)
+    }
+
+    /// La decision de demarrer le moteur : oui dans l'app (environnement ordinaire), non sous les tests (Xcode
+    /// pose `XCTestConfigurationFilePath`). Sans le cas « oui », une app qui ne cherche jamais passerait.
+    @Test func decisionDeDemarrer() {
+        #expect(MisesAJour.doitDemarrer(environnement: [:]))
+        #expect(MisesAJour.doitDemarrer(environnement: ["HOME": "/tmp", "PATH": "/usr/bin"]))
+        #expect(!MisesAJour.doitDemarrer(environnement: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]))
+        #expect(!MisesAJour.doitDemarrer(environnement: ["HOME": "/tmp", "XCTestConfigurationFilePath": ""]))
     }
 
     /// Celle de l'app, creee a son lancement, n'est pas demarree sous les tests : aucune recherche, aucun reseau.

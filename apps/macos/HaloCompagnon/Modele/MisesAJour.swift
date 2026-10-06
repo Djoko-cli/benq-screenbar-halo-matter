@@ -47,7 +47,13 @@ final class MisesAJour {
 
     /// Le moteur demarre au lancement de l'app, sauf sous les tests.
     static var demarrerAuLancement: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+        doitDemarrer(environnement: ProcessInfo.processInfo.environment)
+    }
+
+    /// La decision, pure : oui, sauf si l'environnement porte celui des tests (Xcode pose
+    /// `XCTestConfigurationFilePath`).
+    nonisolated static func doitDemarrer(environnement: [String: String]) -> Bool {
+        environnement["XCTestConfigurationFilePath"] == nil
     }
 
     /// « Rechercher les mises a jour… » : la fenetre de Sparkle dit ce qu'elle trouve.
