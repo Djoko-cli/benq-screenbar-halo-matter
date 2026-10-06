@@ -4,6 +4,8 @@
 # journaux sont gardes.
 #   sh desinstaller.sh
 #   sh desinstaller.sh --plan   ne desinstalle rien : dit, dans l'ordre, ce que la desinstallation ferait
+# Un demon qui reste charge apres son bootout (et jusqu'a 25 s d'attente) arrete tout : ses fichiers
+# ne sont pas retires, rien n'est annonce comme desinstalle ; relancer apres l'avoir arrete.
 set -eu
 PLAN=0
 [ "${1:-}" = "--plan" ] && PLAN=1
@@ -15,6 +17,8 @@ elif [ -n "${THREAD_ROUTE_RACINE:-}" ]; then
   echo "THREAD_ROUTE_RACINE ignoree : elle ne vaut qu'avec --plan." >&2
 fi
 
+. "$(dirname "$0")/commun.sh"
+
 # Une action d'administrateur : ecrite avec --plan, faite par sudo sinon.
 faire() {
   if [ "$PLAN" -eq 1 ]; then echo "$*"; else sudo "$@"; fi
@@ -22,6 +26,7 @@ faire() {
 
 for ETIQ in fr.djoko.thread.route fr.djoko.halo.routes; do
   faire launchctl bootout "system/$ETIQ" 2>/dev/null || true
+  attendre_decharge "$ETIQ"
   faire rm -f "$RACINE/Library/PrivilegedHelperTools/$ETIQ" "$RACINE/Library/LaunchDaemons/$ETIQ.plist"
 done
 if [ "$PLAN" -eq 0 ]; then

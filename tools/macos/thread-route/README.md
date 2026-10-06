@@ -83,10 +83,15 @@ flags it; remove it for the daemon to take over managing it
 (`fr.djoko.halo.routes`, its program and its plist), then puts Thread Route
 in place: the two never run together. Between stopping it and removing
 its files, the installer checks with `launchctl print` that it has really
-left launchd; if not, it stops with a message, having removed and installed
-nothing. The old log (`/Library/Logs/fr.djoko.halo.routes.log`) is kept.
-`sh installer.sh --plan` tells, without changing anything, what the
-installation would do (it shows that check without making it).
+left launchd (stopping a daemon takes a moment: it first removes its routes).
+Unknown to launchd: it goes on at once. Still loaded: it reads the state again
+every second for up to 25 s, then stops with a message, having removed and
+installed nothing; any other answer stops it at once. Run it again once the
+daemon is stopped (`sudo launchctl bootout system/<label>`). The same check
+applies to Thread Route itself before an update replaces it. The old log
+(`/Library/Logs/fr.djoko.halo.routes.log`) is kept. `sh installer.sh --plan`
+tells, without changing anything, what the installation would do (it shows
+that check without making it or waiting).
 
 **Updating.** A new version of Thread Route installs the same way, by running
 `installer.sh` again: an app's automatic update doesn't touch it.
@@ -124,8 +129,11 @@ need to be root); its output shows the Thread network's prefix:
 The daemon removes its routes as it stops; the logs are kept
 (`/Library/Logs/fr.djoko.thread.route.log` and, if it exists,
 `/Library/Logs/fr.djoko.halo.routes.log`). A leftover `halo-routes` is
-removed too. `sh desinstaller.sh --plan` tells, without changing anything,
-what the uninstall would do.
+removed too. Each daemon goes through the same check as in the installer,
+before its files are removed: if one is still loaded after 25 s, the
+uninstaller stops with a message, removes nothing more and doesn't say
+"Desinstalle"; run it again once the daemon is stopped. `sh desinstaller.sh
+--plan` tells, without changing anything, what the uninstall would do.
 
 ## Limitations
 

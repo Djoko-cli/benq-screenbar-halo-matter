@@ -6,16 +6,19 @@
 #   sh installer.sh --plan   n'installe rien : dit, dans l'ordre, ce que l'installation ferait
 # L'ancien demon, halo-routes (fr.djoko.halo.routes), est arrete et retire avant que Thread Route
 # soit pose : les deux ne tournent jamais ensemble (il doit avoir quitte launchd avant que ses
-# fichiers soient retires, sinon l'installation s'arrete, rien n'etant retire ni pose). Son journal
-# est garde.
+# fichiers soient retires : attendre_decharge (commun.sh) attend jusqu'a 25 s, sinon l'installation
+# s'arrete, rien n'etant retire ni pose). Il en va de meme du nouveau avant son remplacement. Le
+# journal de l'ancien est garde.
 set -eu
 cd "$(dirname "$0")"
+. ./commun.sh
 ETIQ=fr.djoko.thread.route
 ANCIEN=fr.djoko.halo.routes
 PLAN=0
 [ "${1:-}" = "--plan" ] && PLAN=1
 # Pour les tests (tests.sh) : une fausse racine, avec --plan seulement. Une installation reelle vise
-# toujours la vraie racine.
+# toujours la vraie racine. Hors de tests.sh, un --plan sur une fausse racine interrogerait le vrai
+# launchd (attendre_decharge) : cette variable n'est pas faite pour servir.
 RACINE=
 if [ "$PLAN" -eq 1 ]; then
   RACINE=${THREAD_ROUTE_RACINE:-}
@@ -31,34 +34,15 @@ faire() {
   if [ "$PLAN" -eq 1 ]; then echo "$*"; else sudo "$@"; fi
 }
 
-# L'ancien demon a-t-il bien quitte launchd ? Sinon, il resterait en marche, sans ses fichiers, a
-# cote du nouveau : on s'arrete ici. launchctl print (lecture seule) : 0 = encore charge, 113 =
-# inconnu de launchd ; tout autre code : on ne sait pas, on s'arrete aussi.
-# Avec --plan, launchd n'a rien arrete : la reponse ne dirait rien, sauf sur une fausse racine, ou
-# launchctl est simule (tests.sh) ; ailleurs le plan montre la ligne sans la verifier.
-verifier_decharge() {
-  [ "$PLAN" -eq 0 ] || echo "launchctl print system/$1 [doit repondre introuvable, sinon arret]"
-  if [ "$PLAN" -eq 1 ] && [ -z "$RACINE" ]; then return 0; fi
-  code=0
-  launchctl print "system/$1" >/dev/null 2>&1 || code=$?
-  if [ "$code" -eq 113 ]; then return 0; fi
-  if [ "$code" -eq 0 ]; then
-    echo "$1 est encore charge par launchd : ses fichiers ne sont pas retires et Thread Route n'est pas pose." >&2
-  else
-    echo "launchctl print system/$1 a repondu avec le code $code : impossible de savoir si $1 est arrete ; ses fichiers ne sont pas retires et Thread Route n'est pas pose." >&2
-  fi
-  echo "Arreter le demon (sudo launchctl bootout system/$1), puis relancer l'installateur." >&2
-  exit 1
-}
-
 # L'installation, dans l'ordre. $1 : le programme compile.
 installer() {
   if [ -e "$RACINE/Library/LaunchDaemons/$ANCIEN.plist" ] || [ -e "$RACINE/Library/PrivilegedHelperTools/$ANCIEN" ]; then
     faire launchctl bootout "system/$ANCIEN" 2>/dev/null || true
-    verifier_decharge "$ANCIEN"
+    attendre_decharge "$ANCIEN"
     faire rm -f "$RACINE/Library/PrivilegedHelperTools/$ANCIEN" "$RACINE/Library/LaunchDaemons/$ANCIEN.plist"
   fi
   faire launchctl bootout "system/$ETIQ" 2>/dev/null || true
+  attendre_decharge "$ETIQ"
   [ -d "$RACINE/Library/PrivilegedHelperTools" ] ||
     faire install -d -m 1755 -o root -g wheel "$RACINE/Library/PrivilegedHelperTools"
   faire install -m 755 -o root -g wheel "$1" "$BIN"

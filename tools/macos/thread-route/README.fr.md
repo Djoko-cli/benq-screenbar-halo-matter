@@ -80,10 +80,15 @@ retirer pour qu'il en prenne la garde (`sudo route -n delete -inet6
 (`fr.djoko.halo.routes`, son programme et son plist), puis pose Thread Route :
 les deux ne tournent jamais ensemble. Entre son arret et le retrait de ses
 fichiers, l'installeur verifie par `launchctl print` qu'il a bien quitte
-launchd ; sinon il s'arrete avec un message, sans rien retirer ni poser.
+launchd (l'arret d'un demon prend un moment : il retire d'abord ses routes).
+Inconnu de launchd : il continue aussitot. Encore charge : il relit l'etat
+toutes les secondes jusqu'a 25 s, puis s'arrete avec un message, sans rien
+retirer ni poser ; toute autre reponse l'arrete aussitot. Le relancer une fois
+le demon arrete (`sudo launchctl bootout system/<etiquette>`). Meme
+verification pour Thread Route lui-meme avant qu'une mise a jour le remplace.
 L'ancien journal (`/Library/Logs/fr.djoko.halo.routes.log`) est garde.
 `sh installer.sh --plan` dit, sans rien changer, ce que l'installation ferait
-(il montre cette verification sans la faire).
+(il montre cette verification sans la faire ni attendre).
 
 **Mise a jour.** Une nouvelle version de Thread Route s'installe de meme, en
 relancant `installer.sh` : la mise a jour automatique d'une app ne le touche
@@ -121,8 +126,11 @@ d'etre root) ; sa sortie porte le prefixe du reseau Thread :
 Le demon retire ses routes en s'arretant ; les journaux sont gardes
 (`/Library/Logs/fr.djoko.thread.route.log` et, s'il existe,
 `/Library/Logs/fr.djoko.halo.routes.log`). Un `halo-routes` reste est retire
-aussi. `sh desinstaller.sh --plan` dit, sans rien changer, ce que la
-desinstallation ferait.
+aussi. Chaque demon passe par la meme verification que dans l'installeur,
+avant que ses fichiers soient retires : si l'un est encore charge apres 25 s,
+le desinstalleur s'arrete avec un message, ne retire plus rien et ne dit pas
+« Desinstalle » ; le relancer une fois le demon arrete. `sh desinstaller.sh
+--plan` dit, sans rien changer, ce que la desinstallation ferait.
 
 ## Limites
 
