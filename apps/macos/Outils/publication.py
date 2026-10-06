@@ -447,17 +447,28 @@ def certificat_du_trousseau(sortie, empreinte):
     raise Refus("le certificat de l'identite de signature est introuvable dans le trousseau")
 
 
+def sujet_conforme(sujet, nom):
+    """Le sujet d'un certificat, en RFC 2253 : CN=<nom>, et au plus un code pays de deux lettres (C=FR, que
+    Trousseaux d'acces pose de lui-meme ; decision de Djoko du 06/10). Ni adresse, ni organisation, ni autre champ."""
+    parts = sujet.split(',')
+    if parts == ['CN=' + nom]:
+        return True
+    return (len(parts) == 2 and parts.count('CN=' + nom) == 1
+            and any(re.fullmatch(r'C=[A-Z]{2}', x) for x in parts))
+
+
 def verifier_certificat(o, nom, empreinte, pem=None, der=None, quoi='le certificat de signature'):
-    """Le certificat est public (il est dans chaque signature) : son sujet doit etre CN=<nom> et rien d'autre (ni
-    adresse, ni organisation), sans autre nom (subjectAltName) ni « @ » ; son empreinte, celle de l'identite.
+    """Le certificat est public (il est dans chaque signature) : son sujet doit etre CN=<nom>, avec au plus un code
+    pays (sujet_conforme ; ni adresse, ni organisation), sans autre nom (subjectAltName) ni « @ » ; son empreinte, celle de l'identite.
     Le certificat est donne en PEM (pem) ou dans un fichier DER (der). Leve Refus, sans recopier le sujet."""
     base = [o.openssl, 'x509'] + (['-inform', 'DER', '-in', der] if der else []) + ['-noout']
     tete = lancer(base + ['-subject', '-nameopt', 'RFC2253', '-fingerprint', '-sha1'], input=pem)
     texte = lancer(base + ['-text'], input=pem)
     sujet = re.search(r'^subject=\s*(.*?)\s*$', tete, re.M)
     lue = re.search(r'Fingerprint=([0-9A-Fa-f:]+)', tete)
-    if not sujet or sujet.group(1) != 'CN=' + nom:
-        raise Refus('%s : son sujet doit etre seulement CN=%s (ni adresse, ni organisation)' % (quoi, nom))
+    if not sujet or not sujet_conforme(sujet.group(1), nom):
+        raise Refus('%s : son sujet doit etre seulement CN=%s, et au plus un pays (ni adresse, ni organisation)'
+                    % (quoi, nom))
     if '@' in tete + texte or 'Subject Alternative Name' in texte:
         raise Refus('%s porte une adresse ou un autre nom (subjectAltName) : rien n\'est publie' % quoi)
     if not lue or lue.group(1).replace(':', '').upper() != empreinte:

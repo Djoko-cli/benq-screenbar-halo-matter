@@ -971,11 +971,22 @@ class PublicationTests(unittest.TestCase):
             EMPREINTE, IDENTITE, EMPREINTE, IDENTITE, AUTRE_EMPREINTE, IDENTITE)
         self.assertEqual(P.empreinte_identite(sortie, IDENTITE), EMPREINTE, 'le nom exact, pas un nom plus long')
 
+    def test_sujet_conforme(self):
+        """Seulement CN=<nom>, et au plus un code pays de deux lettres, dans un ordre ou l'autre."""
+        n = IDENTITE
+        for bon in ('CN=' + n, 'C=FR,CN=' + n, 'CN=%s,C=FR' % n):
+            self.assertTrue(P.sujet_conforme(bon, n), bon)
+        for mauvais in ('C=FR,O=Exemple,CN=' + n, 'C=France,CN=' + n, 'C=fr,CN=' + n, 'C=FR,C=DE,CN=' + n,
+                        'C=FR,CN=Autre', 'C=FR', 'CN=%s,emailAddress=x@exemple.invalid' % n, 'O=X,CN=' + n,
+                        'CN=%s,CN=%s' % (n, n), ''):
+            self.assertFalse(P.sujet_conforme(mauvais, n), mauvais)
+
     def test_refus_sujet_du_certificat(self):
         """Le certificat est public : seulement CN=<nom>, sans adresse, organisation ni autre nom ; et le bon."""
         cas = [({'FAUX_SUJET': 'CN=%s,emailAddress=x@exemple.invalid' % IDENTITE}, 'sujet'),
                ({'FAUX_SUJET': 'O=Exemple,CN=%s' % IDENTITE}, 'sujet'),
                ({'FAUX_SUJET': 'CN=Autre'}, 'sujet'),
+               ({'FAUX_SUJET': 'C=FR,O=Exemple,CN=%s' % IDENTITE}, 'sujet'),
                ({'FAUX_SAN': '1'}, 'subjectAltName'),
                ({'FAUX_EMETTEUR': '1'}, 'une adresse'),
                ({'FAUX_CERTIFICAT_ABSENT': '1'}, 'introuvable')]
