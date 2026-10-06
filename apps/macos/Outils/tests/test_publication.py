@@ -131,7 +131,7 @@ FAUX = {
     'openssl': textwrap.dedent('''\
         a = sys.argv[1:]
         feuille = "-in" in a
-        sujet = os.environ.get("FAUX_SUJET_FEUILLE" if feuille else "FAUX_SUJET", "CN=%(identite)s")
+        sujet = os.environ.get("FAUX_SUJET_FEUILLE" if feuille else "FAUX_SUJET", "C=FR,CN=%(identite)s")
         empreinte = os.environ.get("FAUSSE_EMPREINTE_FEUILLE", "%(empreinte)s") if feuille else "%(empreinte)s"
         if "-text" in a:
             print("Certificate:\\n    Data:\\n        Subject: " + sujet.replace(",", ", "))
@@ -978,7 +978,7 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(P.sujet_conforme(bon, n), bon)
         for mauvais in ('C=FR,O=Exemple,CN=' + n, 'C=France,CN=' + n, 'C=fr,CN=' + n, 'C=FR,C=DE,CN=' + n,
                         'C=FR,CN=Autre', 'C=FR', 'CN=%s,emailAddress=x@exemple.invalid' % n, 'O=X,CN=' + n,
-                        'CN=%s,CN=%s' % (n, n), ''):
+                        'CN=%s,CN=%s' % (n, n), 'C=FRA,CN=' + n, 'C=FRANCE,CN=' + n, 'XC=FR,CN=' + n, ''):
             self.assertFalse(P.sujet_conforme(mauvais, n), mauvais)
 
     def test_refus_sujet_du_certificat(self):
