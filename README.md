@@ -60,9 +60,13 @@ restarting the bridge and the home hub (field test, 06/10). Since 0.4.1 the
 bridge publishes the ConfigurationVersion attribute of Basic Information (EP0,
 Matter 1.4) and raises it when its endpoint list changes (EP4 exposed or not,
 EP2 and EP3 as lights or plugs), and on the first boot of a firmware that
-tracks it: a controller then reads the device again. `matter` prints the
-published version (`configuration` line). Do not "Remove Accessory" from the
-tile: Apple Home would remove the whole bridge.
+tracks it: a controller that follows it then reads the device again.
+`matter` prints the published version (`configuration` line). In the field
+(06/10), the ESP32 layer of the stack refuses to store it (`pile REFUSE`): a
+controller may still read 1, and the effect on Apple Home is not established.
+What removed the tile: removing the bridge from Apple Home, `decommission` (or
+8 s on BOOT), then pairing it again; "Halo auto" did not come back. "Remove
+Accessory" from the tile removes the whole bridge: only do it for that.
 
 To **bring it back**, add `-DHALO1_EXPOSE_AUTO=1` to the environment's
 `build_flags` (for example `[env:esp32c6thread]` in `platformio.ini`), or

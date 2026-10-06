@@ -58,9 +58,13 @@ redemarrage du pont et du concentrateur (terrain du 06/10). Depuis la 0.4.1, le
 pont publie l'attribut ConfigurationVersion de Basic Information (EP0, Matter
 1.4) et le monte quand sa liste d'endpoints change (EP4 expose ou non, EP2 et
 EP3 en lampes ou en prises), ainsi qu'au premier demarrage d'un firmware qui le
-suit : un controleur relit alors l'appareil. `matter` affiche la version
-publiee (ligne `configuration`). Ne pas « Supprimer l'accessoire » depuis la
-tuile : Apple Home retirerait tout le pont.
+suit : un controleur qui la suit relit alors l'appareil. `matter` affiche la
+version publiee (ligne `configuration`). Sur le terrain (06/10), la couche
+ESP32 de la pile refuse de l'enregistrer (`pile REFUSE`) : un controleur peut
+donc encore lire 1, et l'effet sur Apple Home n'est pas etabli. Ce qui a retire
+la tuile : retirer le pont d'Apple Home, `decommission` (ou 8 s sur BOOT), puis
+l'appairer de nouveau ; « Halo auto » n'est pas revenu. « Supprimer
+l'accessoire » depuis la tuile retire tout le pont : a ne faire que pour cela.
 
 Pour le **remettre**, ajouter `-DHALO1_EXPOSE_AUTO=1` aux `build_flags` de
 l'environnement (par exemple `[env:esp32c6thread]` dans `platformio.ini`), ou
